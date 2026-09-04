@@ -78,10 +78,17 @@ public final class LrcParser {
                 continue;
             }
 
-            BodyParse body = parseBody(line.substring(index));
-            String text = body.text.trim();
-            for (long time : timestamps) {
-                lines.add(new LyricsLine(Math.max(0, time + fileOffsetMs), text, body.words));
+            final long lineStartMs = Math.max(0, timestamps.get(0) + fileOffsetMs);
+            final BodyParse body = parseBody(line.substring(index), lineStartMs);
+            final String text = body.text.trim();
+            if (!body.words.isEmpty()) {
+                for (long time : timestamps) {
+                    lines.add(new LyricsLine(Math.max(0, time + fileOffsetMs), text, body.words));
+                }
+            } else if (!text.isEmpty()) {
+                for (long time : timestamps) {
+                    lines.add(new LyricsLine(Math.max(0, time + fileOffsetMs), text));
+                }
             }
         }
 
@@ -103,51 +110,81 @@ public final class LrcParser {
         }
     }
 
-    private static BodyParse parseBody(String body) {
-        if (body.indexOf('<') < 0) {
+    private static BodyParse parseBody(String body, long lineStartMs) {
+        if (body.indexOf('<') < 0 && body.indexOf('[') < 0) {
+            // No word-level tags, so this is a plain line.
             return new BodyParse(body, List.of());
         }
 
-        List<Word> words = new ArrayList<>();
-        StringBuilder full = new StringBuilder();
-        long pendingStart = LyricsLine.NO_TIME;
-        StringBuilder pending = new StringBuilder();
-        int index = 0;
+        final List<Word> words = new ArrayList<>();
+        final StringBuilder full = new StringBuilder();
 
-        while (index < body.length()) {
-            char character = body.charAt(index);
-            if (character == '<') {
-                int end = body.indexOf('>', index);
+        long pendingStart = LyricsLine.NO_TIME;
+        final StringBuilder pending = new StringBuilder();
+        String prefix = "";
+        boolean hasToken = false;
+
+        int index = 0;
+        final int length = body.length();
+        while (index < length) {
+            final char c = body.charAt(index);
+            if (c == '<' || c == '[') {
+                final char close = (c == '<') ? '>' : ']';
+                final int end = body.indexOf(close, index);
                 if (end < 0) {
-                    pending.append(body.substring(index));
+                    // Unterminated tag: keep the remainder as literal text.
+                    full.append(body, index, length);
+                    pending.append(body, index, length);
                     break;
                 }
-
-                long time = parseTimestamp(body.substring(index + 1, end));
-                if (pendingStart != LyricsLine.NO_TIME) {
-                    String word = pending.toString();
-                    words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
-                    full.append(word);
-                }
+                final long time = parseTimestamp(body.substring(index + 1, end));
                 if (time != LyricsLine.NO_TIME) {
-                    pendingStart = time;
+                    if (pendingStart == LyricsLine.NO_TIME) {
+                        // First word tag: text accumulated so far precedes any timed word.
+                        prefix = pending.toString();
+                        pendingStart = time;
+                    } else {
+                        final String word = pending.toString();
+                        if (!word.trim().isEmpty()) {
+                            words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
+                        }
+                        pendingStart = time;
+                    }
+                    hasToken = true;
+                    pending.setLength(0);
+                } else {
+                    // Not a timestamp (e.g. [chorus]): keep as literal text.
+                    full.append(body, index, end + 1);
+                    pending.append(body, index, end + 1);
                 }
-                pending.setLength(0);
                 index = end + 1;
             } else {
-                pending.append(character);
+                full.append(c);
+                pending.append(c);
                 index++;
             }
         }
 
-        if (pendingStart == LyricsLine.NO_TIME) {
-            // No valid tag was found; treat the whole body as a plain line.
+        if (!hasToken) {
+            // No valid word tag was found; treat the whole body as a plain line.
             return new BodyParse(body, List.of());
         }
 
-        String word = pending.toString();
-        words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
-        full.append(word);
+        if (pendingStart != LyricsLine.NO_TIME) {
+            final String word = pending.toString();
+            if (!word.trim().isEmpty()) {
+                words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
+            }
+        }
+
+        if (!prefix.trim().isEmpty()) {
+            words.add(0, new Word(lineStartMs, LyricsLine.NO_TIME, prefix.trim()));
+        }
+
+        if (words.isEmpty()) {
+            return new BodyParse(full.toString().trim(), List.of());
+        }
+
         inferWordEnds(words);
         return new BodyParse(full.toString().trim(), words);
     }

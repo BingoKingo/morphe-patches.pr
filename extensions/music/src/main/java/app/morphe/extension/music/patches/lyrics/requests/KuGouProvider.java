@@ -26,8 +26,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.InflaterInputStream;
@@ -35,6 +37,7 @@ import java.util.zip.InflaterInputStream;
 import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.shared.Logger;
@@ -70,6 +73,11 @@ public final class KuGouProvider implements LyricsProvider {
     @Override
     public String name() {
         return "KuGou";
+    }
+
+    @Override
+    public boolean hasCandidates() {
+        return true;
     }
 
     @Nullable
@@ -119,21 +127,116 @@ public final class KuGouProvider implements LyricsProvider {
         }
 
         byte[] raw = Base64.decode(content, Base64.DEFAULT);
-        List<LyricsLine> lines;
+        KrcResult krcResult;
         if (raw.length > 4 && raw[0] == 'k' && raw[1] == 'r' && raw[2] == 'c' && raw[3] == '1') {
-            lines = removeCreditLines(parseKrc(decryptKrc(raw)));
+            krcResult = parseKrc(decryptKrc(raw));
         } else {
             // Some tracks only expose plain LRC even when KRC is requested.
             String lrc = new String(raw, StandardCharsets.UTF_8);
-            lines = removeCreditLines(LrcParser.parseSynced(lrc));
+            krcResult = new KrcResult(LrcParser.parseSynced(lrc), null, null);
         }
+        List<LyricsLine> lines = removeCreditLines(krcResult.lines);
         if (lines.isEmpty()) {
             return null;
         }
 
+        List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, krcResult.romanization);
+        List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, krcResult.translation);
+        Map<String, List<LyricsLine>> translations =
+                LyricsMerge.singleLanguageTranslations(translation, "zh");
+
+        final List<LyricsLine> attachedRomanization =
+                isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
+
         Logger.printDebug(() -> "KuGou returned " + lines.size()
-                + " lines (wordSynced=" + hasWordTimings(lines) + ") for " + track);
-        return new Lyrics(lines, name(), true);
+                + " lines (wordSynced=" + hasWordTimings(lines)
+                + " romanized=" + (attachedRomanization != null)
+                + " translated=" + (translations != null) + ") for " + track);
+        return new Lyrics(lines, name(), true, attachedRomanization, translations);
+    }
+
+    @Override
+    public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
+        String hash = resolveHash(track);
+        if (hash == null || hash.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        String searchUrl = SEARCH_URL + encode(hash);
+        HttpURLConnection searchConnection = LyricsRequests.openConnection(searchUrl);
+        if (searchConnection.getResponseCode() != 200) {
+            return new ArrayList<>();
+        }
+
+        JSONObject searchResponse = Requester.parseJSONObject(searchConnection);
+        JSONArray candidates = searchResponse.optJSONArray("candidates");
+        if (candidates == null || candidates.length() == 0) {
+            return new ArrayList<>();
+        }
+
+        List<Lyrics> results = new ArrayList<>();
+        for (int i = 0; i < candidates.length(); i++) {
+            if (results.size() >= 5) {
+                break;
+            }
+            JSONObject candidate = candidates.optJSONObject(i);
+            if (candidate == null) {
+                continue;
+            }
+            try {
+                Lyrics lyrics = fetchFromCandidate(candidate, track);
+                if (lyrics != null) {
+                    results.add(lyrics);
+                }
+            } catch (Exception ex) {
+                Logger.printDebug(() -> "KuGou candidate failed: " + ex.getMessage());
+            }
+        }
+        return results;
+    }
+
+    @Nullable
+    private Lyrics fetchFromCandidate(JSONObject candidate, TrackInfo track) throws Exception {
+        String id = candidate.optString("id", "");
+        String accessKey = candidate.optString("accesskey", "");
+        if (id.isEmpty() || accessKey.isEmpty()) {
+            return null;
+        }
+
+        String downloadUrl = DOWNLOAD_URL + "&id=" + encode(id) + "&accesskey=" + encode(accessKey);
+        HttpURLConnection downloadConnection = LyricsRequests.openConnection(downloadUrl);
+        if (downloadConnection.getResponseCode() != 200) {
+            return null;
+        }
+
+        JSONObject downloadResponse = Requester.parseJSONObject(downloadConnection);
+        String content = downloadResponse.optString("content", "");
+        if (content.isEmpty()) {
+            return null;
+        }
+
+        byte[] raw = Base64.decode(content, Base64.DEFAULT);
+        KrcResult krcResult;
+        if (raw.length > 4 && raw[0] == 'k' && raw[1] == 'r' && raw[2] == 'c' && raw[3] == '1') {
+            krcResult = parseKrc(decryptKrc(raw));
+        } else {
+            String lrc = new String(raw, StandardCharsets.UTF_8);
+            krcResult = new KrcResult(LrcParser.parseSynced(lrc), null, null);
+        }
+        List<LyricsLine> lines = removeCreditLines(krcResult.lines);
+        if (lines.isEmpty()) {
+            return null;
+        }
+
+        List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, krcResult.romanization);
+        List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, krcResult.translation);
+        Map<String, List<LyricsLine>> translations =
+                LyricsMerge.singleLanguageTranslations(translation, "zh");
+
+        final List<LyricsLine> attachedRomanization =
+                isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
+
+        return new Lyrics(lines, name(), true, attachedRomanization, translations);
     }
 
     private static boolean hasWordTimings(List<LyricsLine> lines) {
@@ -143,6 +246,10 @@ public final class KuGouProvider implements LyricsProvider {
             }
         }
         return false;
+    }
+
+    private static boolean isChineseLanguage() {
+        return "zh".equals(Locale.getDefault().getLanguage());
     }
 
     @Nullable
@@ -217,13 +324,42 @@ public final class KuGouProvider implements LyricsProvider {
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    private static List<LyricsLine> parseKrc(String krc) {
+    private static final class KrcResult {
+        final List<LyricsLine> lines;
+        @Nullable
+        final List<LyricsLine> romanization;
+        @Nullable
+        final List<LyricsLine> translation;
+
+        KrcResult(List<LyricsLine> lines, @Nullable List<LyricsLine> romanization,
+                  @Nullable List<LyricsLine> translation) {
+            this.lines = lines;
+            this.romanization = romanization;
+            this.translation = translation;
+        }
+    }
+
+    /** Romanization (type 0) and translation (type 1) extracted from a KRC {@code [language]} tag. */
+    private static final class KrcAuxiliary {
+        @Nullable
+        final List<LyricsLine> romanization;
+        @Nullable
+        final List<LyricsLine> translation;
+
+        KrcAuxiliary(@Nullable List<LyricsLine> romanization, @Nullable List<LyricsLine> translation) {
+            this.romanization = romanization;
+            this.translation = translation;
+        }
+    }
+
+    private static KrcResult parseKrc(String krc) {
         List<LyricsLine> lines = new ArrayList<>();
         if (krc == null || krc.isEmpty()) {
-            return lines;
+            return new KrcResult(lines, null, null);
         }
 
         long fileOffsetMs = 0;
+        String languageTag = null;
         for (String rawLine : krc.split("\\r?\\n")) {
             String line = rawLine.trim();
             if (line.isEmpty() || line.charAt(0) != '[') {
@@ -238,6 +374,8 @@ public final class KuGouProvider implements LyricsProvider {
                         fileOffsetMs = -Long.parseLong(meta.group(2).trim());
                     } catch (NumberFormatException ignored) {
                     }
+                } else if (name.equals("language")) {
+                    languageTag = meta.group(2);
                 }
                 continue;
             }
@@ -282,7 +420,115 @@ public final class KuGouProvider implements LyricsProvider {
         }
 
         lines.sort(Comparator.comparingLong(LyricsLine::startTimeMs));
-        return lines;
+        KrcAuxiliary auxiliary = languageTag == null ? null : parseKrcLanguageTag(languageTag, lines);
+        return new KrcResult(lines,
+                auxiliary == null ? null : auxiliary.romanization,
+                auxiliary == null ? null : auxiliary.translation);
+    }
+
+    @Nullable
+    private static KrcAuxiliary parseKrcLanguageTag(String tag, List<LyricsLine> original) {
+        if (tag.isEmpty()) {
+            return null;
+        }
+        try {
+            String decoded = new String(Base64.decode(tag, Base64.DEFAULT), StandardCharsets.UTF_8);
+            JSONObject root = new JSONObject(decoded);
+            JSONArray content = root.optJSONArray("content");
+            if (content == null) {
+                return null;
+            }
+
+            JSONArray romaContent = null;
+            JSONArray transContent = null;
+            for (int i = 0; i < content.length(); i++) {
+                JSONObject item = content.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                int type = item.optInt("type", -1);
+                if (type == 0) {
+                    romaContent = item.optJSONArray("lyricContent");
+                } else if (type == 1) {
+                    transContent = item.optJSONArray("lyricContent");
+                }
+            }
+
+            List<LyricsLine> romaLines = null;
+            if (romaContent != null) {
+                romaLines = new ArrayList<>();
+                int skippedEmpty = 0;
+                for (int li = 0; li < original.size(); li++) {
+                    LyricsLine line = original.get(li);
+                    if (!lineHasText(line)) {
+                        skippedEmpty++;
+                        continue;
+                    }
+                    int contentIndex = li - skippedEmpty;
+                    if (contentIndex >= 0 && contentIndex < romaContent.length()) {
+                        String text = joinKrcRomaEntry(romaContent.optJSONArray(contentIndex));
+                        if (!text.isEmpty()) {
+                            romaLines.add(new LyricsLine(line.startTimeMs(), text));
+                        }
+                    }
+                }
+                if (romaLines.isEmpty()) {
+                    romaLines = null;
+                }
+            }
+
+            List<LyricsLine> transLines = null;
+            if (transContent != null) {
+                transLines = new ArrayList<>();
+                for (int li = 0; li < original.size(); li++) {
+                    LyricsLine line = original.get(li);
+                    if (li < transContent.length()) {
+                        JSONArray entry = transContent.optJSONArray(li);
+                        String text = (entry != null && entry.length() > 0) ? entry.optString(0, "") : "";
+                        if (text != null && !text.isEmpty()) {
+                            transLines.add(new LyricsLine(line.startTimeMs(), text));
+                        }
+                    }
+                }
+                if (transLines.isEmpty()) {
+                    transLines = null;
+                }
+            }
+
+            if (romaLines == null && transLines == null) {
+                return null;
+            }
+            return new KrcAuxiliary(romaLines, transLines);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "KuGou could not parse [language] tag", ex);
+            return null;
+        }
+    }
+
+    private static boolean lineHasText(LyricsLine line) {
+        for (Word word : line.words()) {
+            if (word.text() != null && !word.text().trim().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String joinKrcRomaEntry(@Nullable JSONArray entry) {
+        if (entry == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < entry.length(); i++) {
+            String part = entry.optString(i, "").trim();
+            if (!part.isEmpty()) {
+                if (builder.length() > 0) {
+                    builder.append(' ');
+                }
+                builder.append(part);
+            }
+        }
+        return builder.toString();
     }
 
     /**

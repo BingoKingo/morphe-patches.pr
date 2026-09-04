@@ -7,11 +7,21 @@
 
 package app.morphe.extension.music.patches.lyrics.requests;
 
+import androidx.annotation.Nullable;
+
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
+
+import org.json.JSONObject;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
@@ -22,8 +32,8 @@ import app.morphe.extension.shared.requests.Requester;
  */
 final class LyricsRequests {
 
-    private static final int CONNECT_TIMEOUT_MILLISECONDS = 10 * 1000;
-    private static final int READ_TIMEOUT_MILLISECONDS = 10 * 1000;
+    private static final int CONNECT_TIMEOUT_MILLISECONDS = 5 * 1000;
+    private static final int READ_TIMEOUT_MILLISECONDS = 5 * 1000;
 
     private LyricsRequests() {
     }
@@ -102,5 +112,42 @@ final class LyricsRequests {
         } finally {
             connection.disconnect();
         }
+    }
+
+    /**
+     * The Charset overload of encode() needs API 33, so the charset is named instead.
+     */
+    @SuppressWarnings("CharsetObjectCanBeUsed")
+    static String encode(String value) throws UnsupportedEncodingException {
+        return URLEncoder.encode(value, "UTF-8");
+    }
+
+    @Nullable
+    static String optString(JSONObject object, String key) {
+        if (object.isNull(key)) {
+            return null;
+        }
+        final String value = object.optString(key, "");
+        return value.isBlank() ? null : value;
+    }
+
+    static String parseGzipString(HttpURLConnection connection) throws IOException {
+        final InputStream raw = connection.getInputStream();
+        final InputStream stream = "gzip".equalsIgnoreCase(connection.getContentEncoding())
+                ? new GZIPInputStream(raw) : raw;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            final StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            return sb.toString();
+        }
+    }
+
+    static JSONObject parseGzipJsonObject(HttpURLConnection connection)
+            throws org.json.JSONException, IOException {
+        return new JSONObject(parseGzipString(connection));
     }
 }

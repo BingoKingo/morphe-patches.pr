@@ -14,7 +14,6 @@ import app.morphe.extension.music.patches.ChangeHeaderPatch.HeaderLogo;
 import app.morphe.extension.music.patches.ChangeStartPagePatch.StartPage;
 import app.morphe.extension.music.patches.CrossfadeManager.CrossFadeDuration;
 import app.morphe.extension.music.patches.CrossfadeManager.FadeCurve;
-import app.morphe.extension.music.patches.lyrics.LyricsSource;
 import app.morphe.extension.music.sponsorblock.MusicSponsorBlockConfig;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.settings.BooleanSetting;
@@ -170,17 +169,37 @@ public class Settings extends SharedYouTubeSettings {
     public static final BooleanSetting SCROBBLING_PARSE_TITLE = new BooleanSetting("morphe_music_scrobbling_parse_title", FALSE, true, parentsAny(LISTENBRAINZ_SCROBBLING, LASTFM_SCROBBLING));
 
     // Lyrics
-    public static final BooleanSetting LYRICS_ENABLED = new BooleanSetting("morphe_music_lyrics_enabled", FALSE, true);
-    public static final EnumSetting<LyricsSource> LYRICS_SOURCE = new EnumSetting<>("morphe_music_lyrics_source", LyricsSource.LRCLIB_THEN_KUGOU, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_ENABLED = new BooleanSetting("morphe_music_lyrics_enabled", TRUE, true);
+    public static final String DEFAULT_LYRICS_ORDER =
+            "LRCLIB,QQ,NetEase,KuGou,bLyrics,BiniLyrics,Unison,AMLL,AppleMusic,Musixmatch,Spotify";
+    public static final StringSetting LYRICS_SOURCE = new StringSetting("morphe_music_lyrics_source", DEFAULT_LYRICS_ORDER, true, parent(LYRICS_ENABLED));
+    public static final StringSetting APPLE_MUSIC_TOKEN = new StringSetting("morphe_music_apple_music_token", "", true, parent(LYRICS_ENABLED));
+    public static final StringSetting MUSIXMATCH_TOKEN = new StringSetting("morphe_music_musixmatch_token", "", true, parent(LYRICS_ENABLED));
+    public static final StringSetting SPOTIFY_TOKEN = new StringSetting("morphe_music_spotify_token", "", true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_TRANSLATE = new BooleanSetting("morphe_music_lyrics_translate", FALSE, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_TAP_TO_SEEK = new BooleanSetting("morphe_music_lyrics_tap_to_seek", TRUE, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_SHOW_COPY_BUTTON = new BooleanSetting("morphe_music_lyrics_show_copy_button", TRUE, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_SHOW_TRANSLATE_BUTTON = new BooleanSetting("morphe_music_lyrics_show_translate_button", TRUE, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_SHOW_ROMANIZE_BUTTON = new BooleanSetting("morphe_music_lyrics_show_romanize_button", FALSE, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_SHOW_REFRESH_BUTTON = new BooleanSetting("morphe_music_lyrics_show_refresh_button", FALSE, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_ROMANIZE = new BooleanSetting("morphe_music_lyrics_romanize", FALSE, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_WORD_SYNC = new BooleanSetting("morphe_music_lyrics_word_sync", TRUE, true, parent(LYRICS_ENABLED));
     public static final IntegerSetting LYRICS_TEXT_SIZE = new IntegerSetting("morphe_music_lyrics_text_size", 24, true, parent(LYRICS_ENABLED));
     public static final IntegerSetting LYRICS_OFFSET_MS = new IntegerSetting("morphe_music_lyrics_offset_ms", 0, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_MEDIASESSION = new BooleanSetting("morphe_music_lyrics_mediasession", FALSE, true, parent(LYRICS_ENABLED));
     public static final BooleanSetting LYRICS_MINIPLAYER = new BooleanSetting("morphe_music_lyrics_miniplayer", FALSE, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_DISPLAY_ARTIST_FIRST = new BooleanSetting("morphe_music_lyrics_display_artist_first", TRUE, true, parent(LYRICS_ENABLED));
+    public static final BooleanSetting LYRICS_USE_EMBEDDED = new BooleanSetting("morphe_music_lyrics_use_embedded", TRUE, true, parent(LYRICS_ENABLED));
+    public static final StringSetting LYRICS_CAPTION_COOKIES = new StringSetting("morphe_music_lyrics_caption_cookies", "", true, parent(LYRICS_ENABLED));
+    public static final String DEFAULT_LYRICS_REGEX =
+            "(?i)\\s*[（(\\[]((official\\s+)?(video|audio|music\\s+video|lyrics?\\s+video|visualizer|mv))[）)\\]]"
+            + "|(?i)\\s*[（(\\[]((\\d{4}\\s+)?remaster(ed)?(\\s+\\d{4})?)[）)\\]]"
+            + "|(?i)\\s*[（(\\[](mono|stereo|hq|hd|4k|8k)[）)\\]]"
+            + "|[（(][^）)]*(?:主题曲|片尾曲|插曲|片头曲|广告曲|推广曲)[^）)]*[）)]"
+            + "|[（(][^）)]*[\\uff1a:][^）)]*[）)]"
+            + "|(?i)\\s*-\\s*topic$";
+    public static final StringSetting LYRICS_CUSTOM_REGEX = new StringSetting("morphe_music_lyrics_custom_regex", DEFAULT_LYRICS_REGEX, true, parent(LYRICS_ENABLED));
+    public static final StringSetting LYRICS_TEXT_FILTER = new StringSetting("morphe_music_lyrics_text_filter", "", true, parent(LYRICS_ENABLED));
 
     // SponsorBlock
     public static final BooleanSetting SB_ENABLED = new BooleanSetting("morphe_sb_enabled", TRUE);

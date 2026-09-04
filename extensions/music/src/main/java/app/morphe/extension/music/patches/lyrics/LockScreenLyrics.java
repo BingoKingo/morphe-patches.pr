@@ -9,8 +9,6 @@ package app.morphe.extension.music.patches.lyrics;
 
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
-import android.os.Handler;
-import android.os.Looper;
 
 import androidx.annotation.Nullable;
 
@@ -36,9 +34,6 @@ import java.util.Objects;
  */
 public final class LockScreenLyrics {
 
-    /** How often to check whether the current lyric line changed. */
-    private static final long TICK_INTERVAL_MS = 300;
-
     @Nullable
     private static volatile WeakReference<MediaSession> sessionRef;
     @Nullable
@@ -55,8 +50,8 @@ public final class LockScreenLyrics {
     /** Set when the app pushes fresh metadata, forcing a repush on the next tick. */
     private static volatile boolean needsRepush;
 
-    private static final Handler handler = new Handler(Looper.getMainLooper());
-    private static final Runnable ticker = LockScreenLyrics::tick;
+    /** Drives the periodic check that mirrors the current line into the MediaSession. */
+    private static final LyricsTicker ticker = new LyricsTicker(LockScreenLyrics::tick);
 
     private LockScreenLyrics() {
     }
@@ -76,30 +71,26 @@ public final class LockScreenLyrics {
         realArtist = original.getString(MediaMetadata.METADATA_KEY_ARTIST);
 
         if (!Settings.LYRICS_ENABLED.get() || !Settings.LYRICS_MEDIASESSION.get()) {
-            stopTicker();
+            ticker.stop();
             lastPushedTitle = null;
             return;
         }
 
-        LyricsManager.getInstance().onDisplayedTrackChanged(realTitle, realArtist);
+        android.net.Uri mediaUri = null;
+        final String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
+        if (uriString != null) {
+            mediaUri = android.net.Uri.parse(uriString);
+        }
+        LyricsManager.getInstance().onDisplayedTrackChanged(realTitle, realArtist, mediaUri);
         lastPushedTitle = null;
         needsRepush = true;
-        scheduleTick();
-    }
-
-    private static void scheduleTick() {
-        handler.removeCallbacks(ticker);
-        handler.postDelayed(ticker, TICK_INTERVAL_MS);
-    }
-
-    private static void stopTicker() {
-        handler.removeCallbacks(ticker);
+        ticker.schedule();
     }
 
     private static void tick() {
         if (!Settings.LYRICS_ENABLED.get() || !Settings.LYRICS_MEDIASESSION.get()
                 || sessionRef == null || originalMetadata == null) {
-            stopTicker();
+            ticker.stop();
             lastPushedTitle = null;
             return;
         }
@@ -107,14 +98,14 @@ public final class LockScreenLyrics {
         final MediaSession session = sessionRef.get();
         if (session == null) {
             // The session was released; wait for the next metadata update.
-            stopTicker();
+            ticker.stop();
             lastPushedTitle = null;
             return;
         }
 
         final String newTitle = getCurrentLine();
         if (!needsRepush && newTitle.equals(lastPushedTitle)) {
-            scheduleTick();
+            ticker.schedule();
             return;
         }
 
@@ -122,7 +113,7 @@ public final class LockScreenLyrics {
         needsRepush = false;
         session.setMetadata(buildMetadata(originalMetadata, newTitle));
 
-        scheduleTick();
+        ticker.schedule();
     }
 
     private static boolean lyricsMatch() {
@@ -156,7 +147,13 @@ public final class LockScreenLyrics {
         }
         final String artist = realArtist == null ? "" : realArtist;
         if (lyricsMatch() && realTitle != null && !realTitle.isEmpty()) {
-            builder.putString(MediaMetadata.METADATA_KEY_ARTIST, artist + " - " + realTitle);
+            final String display;
+            if (Settings.LYRICS_DISPLAY_ARTIST_FIRST.get()) {
+                display = artist + " - " + realTitle;
+            } else {
+                display = realTitle + " - " + artist;
+            }
+            builder.putString(MediaMetadata.METADATA_KEY_ARTIST, display);
         } else {
             builder.putString(MediaMetadata.METADATA_KEY_ARTIST, artist);
         }

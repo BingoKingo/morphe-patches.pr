@@ -17,6 +17,8 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import app.morphe.extension.music.patches.lyrics.LrcParser;
@@ -41,6 +43,11 @@ public final class LrcLibProvider implements LyricsProvider {
         return "LRCLIB";
     }
 
+    @Override
+    public boolean hasCandidates() {
+        return true;
+    }
+
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
@@ -51,6 +58,55 @@ public final class LrcLibProvider implements LyricsProvider {
             return exact;
         }
         return fetchSearch(track);
+    }
+
+    @Override
+    public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
+        List<Lyrics> results = new ArrayList<>();
+
+        // Exact match first
+        Lyrics exact = fetchExact(track);
+        if (exact != null) {
+            results.add(exact);
+        }
+
+        // Then search results, sorted by duration delta
+        String url = BASE_URL + "search?track_name=" + encode(track.title())
+                + "&artist_name=" + encode(track.artist());
+        HttpURLConnection connection = LyricsRequests.openConnection(url);
+        if (connection.getResponseCode() != 200) {
+            return results;
+        }
+
+        JSONArray searchResults = Requester.parseJSONArray(connection);
+        if (searchResults.length() == 0) {
+            return results;
+        }
+
+        List<JSONObject> candidates = new ArrayList<>();
+        for (int i = 0; i < searchResults.length(); i++) {
+            JSONObject candidate = searchResults.optJSONObject(i);
+            if (candidate != null) {
+                candidates.add(candidate);
+            }
+        }
+
+        candidates.sort((a, b) -> {
+            int deltaA = Math.abs(a.optInt("duration", 0) - track.durationSeconds());
+            int deltaB = Math.abs(b.optInt("duration", 0) - track.durationSeconds());
+            return deltaA - deltaB;
+        });
+
+        for (JSONObject candidate : candidates) {
+            if (results.size() >= 5) {
+                break;
+            }
+            Lyrics lyrics = toLyrics(candidate);
+            if (lyrics != null && !lyrics.isEmpty()) {
+                results.add(lyrics);
+            }
+        }
+        return results;
     }
 
     @Nullable
