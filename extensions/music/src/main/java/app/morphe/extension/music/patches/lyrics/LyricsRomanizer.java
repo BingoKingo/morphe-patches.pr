@@ -11,6 +11,8 @@ import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -52,6 +54,13 @@ public final class LyricsRomanizer {
         Utils.verifyOnMainThread();
 
         List<LyricsLine> embedded = lyrics.romanization();
+        if (embedded == null || embedded.isEmpty()) {
+            Map<String, List<LyricsLine>> romanizations = lyrics.romanizations();
+            if (romanizations != null && !romanizations.isEmpty()) {
+                embedded = collectMatchingRomanizations(romanizations, lyrics.lines());
+            }
+        }
+
         final boolean perWord = LyricsMerge.anyWordHasRomaji(lyrics.lines());
         if (LyricsMerge.hasText(embedded) || perWord) {
             // The source already ships an aligned (line-level or per-word) romanization: no network needed.
@@ -79,6 +88,83 @@ public final class LyricsRomanizer {
             final List<LyricsLine> result = romanized;
             Utils.runOnMainThread(() -> callback.onRomanized(result, true, false));
         });
+    }
+
+    private static List<LyricsLine> collectMatchingRomanizations(
+            Map<String, List<LyricsLine>> romanizations, List<LyricsLine> allLines) {
+        final String langTag = Locale.getDefault().toLanguageTag();
+        final String langCode = langTag.contains("-")
+                ? langTag.substring(0, langTag.indexOf("-")) : langTag;
+
+        final List<String> matchedKeys = new ArrayList<>();
+        for (String key : romanizations.keySet()) {
+            if (key.startsWith("bg:")) continue;
+            if (key.equals(langTag) || key.equals(langCode)
+                    || key.startsWith(langCode + "-") || key.startsWith(langCode + "_")) {
+                matchedKeys.add(key);
+            }
+        }
+
+        if (matchedKeys.isEmpty()) {
+            for (String key : romanizations.keySet()) {
+                if (!key.startsWith("bg:")) {
+                    matchedKeys.add(key);
+                }
+            }
+        }
+
+        if (matchedKeys.isEmpty()) {
+            return null;
+        }
+
+        // Find the line count from the first matching language
+        final int lineCount;
+        {
+            List<LyricsLine> first = romanizations.get(matchedKeys.get(0));
+            lineCount = (first != null) ? first.size() : 0;
+        }
+        if (lineCount == 0) {
+            return null;
+        }
+
+        // Merge multi-language romanizations line by line
+        final List<LyricsLine> result = new ArrayList<>(lineCount);
+        for (int i = 0; i < lineCount; i++) {
+            final StringBuilder merged = new StringBuilder();
+            for (String key : matchedKeys) {
+                List<LyricsLine> langLines = romanizations.get(key);
+                if (langLines == null || i >= langLines.size()) continue;
+                String text = langLines.get(i).text();
+                if (text != null) text = text.trim();
+                if (!text.isEmpty()) {
+                    if (merged.length() > 0) merged.append('\n');
+                    merged.append(text);
+                }
+            }
+            result.add(new LyricsLine(LyricsLine.NO_TIME, merged.toString()));
+        }
+
+        // Fill BG lines with their parent's romanization
+        if (allLines != null) {
+            for (int i = 0; i < result.size() && i < allLines.size(); i++) {
+                if (allLines.get(i).isBG()) {
+                    final String bgRoma = result.get(i).text();
+                    if (bgRoma == null || bgRoma.isEmpty()) {
+                        for (int j = i - 1; j >= 0; j--) {
+                            if (!allLines.get(j).isBG() && j < result.size()) {
+                                final String parentRoma = result.get(j).text();
+                                if (parentRoma != null && !parentRoma.isEmpty()) {
+                                    result.set(i, new LyricsLine(LyricsLine.NO_TIME, parentRoma));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
     }
 
     private static List<LyricsLine> toLines(List<String> texts) {

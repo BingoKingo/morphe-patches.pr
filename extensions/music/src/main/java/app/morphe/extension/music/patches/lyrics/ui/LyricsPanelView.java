@@ -269,7 +269,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                 // so the wanted state is reapplied on every tick rather than on changes.
                 syncOverlay();
             } catch (Exception ex) {
-                Logger.printException(() -> "Lyrics tick failure", ex);
+                Logger.printException(() -> "TICKER CRASH: " + ex.getClass().getSimpleName()
+                        + " highlighted=" + highlightedIndex
+                        + " lines=" + (lyrics != null ? lyrics.lines().size() : -1)
+                        + " views=" + lineViews.size(), ex);
             }
             handler.postDelayed(this, TICK_INTERVAL_MILLISECONDS);
         }
@@ -599,6 +602,12 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             LinearLayout lineRow = new LinearLayout(context);
             lineRow.setOrientation(LinearLayout.VERTICAL);
 
+            if (line.isDuet()) {
+                lineView.setGravity(Gravity.END);
+            } else {
+                lineView.setGravity(Gravity.START);
+            }
+
             lineRow.addView(lineView, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -759,7 +768,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
-        if (!timings.isEmpty() && Settings.LYRICS_WORD_SYNC.get()) {
+        if (Settings.LYRICS_WORD_SYNC.get()) {
             int sung = lineTextColor();
             int unsung = unsungWordColor();
             if (!allSung) {
@@ -1022,7 +1031,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         }
 
         LyricsManager manager = LyricsManager.getInstance();
-        final int index = current.indexForPosition(manager.getPositionMs(), highlightedIndex);
+        final long pos = manager.getPositionMs();
+        final int index = current.indexForPosition(pos, highlightedIndex);
         if (index == highlightedIndex) {
             return;
         }
@@ -1036,15 +1046,14 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             return;
         }
 
-        TextView activeView = lineViews.get(index);
-        fadeTo(activeView, 1f);
+        fadeTo(lineViews.get(index), 1f);
 
         if (SystemClock.uptimeMillis() < userScrollUntilUptimeMs) {
             return;
         }
 
         // Keep the active line in the upper third, which is where the eye expects it.
-        final int target = lineRows.get(index).getTop() + activeView.getTop()
+        final int target = lineRows.get(index).getTop() + lineViews.get(index).getTop()
                 - scrollView.getHeight() / 3;
         scrollView.smoothScrollTo(0, Math.max(0, target));
     }
@@ -1086,7 +1095,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             if (lastWordLineIndex >= 0) {
                 applyWordColors(lastWordLineIndex, Long.MIN_VALUE, false);
             }
-            lastWordLineIndex = -1;
+            applyWordColors(active, 0, true);
+            lastWordLineIndex = active;
             return;
         }
 
@@ -1102,19 +1112,23 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
 
     private void applyWordColors(int index, long positionMs, boolean allSung) {
         if (index < 0 || index >= lineWordSpans.size() || index >= lineViews.size()) {
+            Logger.printDebug(() -> "applyWordColors OOB: index=" + index
+                    + " spans=" + lineWordSpans.size() + " views=" + lineViews.size());
             return;
         }
 
         List<WordTiming> timings = lineWordSpans.get(index);
-        if (timings.isEmpty()) {
-            return;
-        }
 
         // Rebuild the line text into a fresh SpannableString so that setText performs a
         // full re-layout and repaint; mutating an existing Spannable in place is not
         // reliably redrawn by this TextView, which left the highlight invisible.
-        lineViews.get(index).setText(
-                buildLineText(lyrics.lines().get(index), timings, index, positionMs, allSung));
+        try {
+            lineViews.get(index).setText(
+                    buildLineText(lyrics.lines().get(index), timings, index, positionMs, allSung));
+        } catch (Exception ex) {
+            Logger.printException(() -> "applyWordColors CRASH: index=" + index
+                    + " lyricsLines=" + lyrics.lines().size(), ex);
+        }
     }
 
     /** Eases the highlight between lines the way the built-in panel does. */

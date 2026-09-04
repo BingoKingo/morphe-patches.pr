@@ -10,6 +10,8 @@ package app.morphe.extension.music.patches.lyrics;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -23,13 +25,19 @@ import java.util.Map;
  *                     {@code en}, {@code zh-Hans}). A translation entry is a line-level list
  *                     aligned 1:1 with {@link #lines()}; an empty string marks a line with no
  *                     translation. {@code null} when the source ships none.
+ * @param romanization Legacy single-language romanization, kept for backward compatibility.
+ * @param romanizations Multi-language romanizations keyed by BCP-47 language tag.
+ * @param songwriters Songwriter/credits names extracted from TTML metadata.
  */
 public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                      @Nullable List<LyricsLine> romanization,
-                     @Nullable Map<String, List<LyricsLine>> translations) {
+                     @Nullable Map<String, List<LyricsLine>> translations,
+                     @Nullable Map<String, List<LyricsLine>> romanizations,
+                     @Nullable List<String> songwriters) {
 
     /** Marker for a track that was looked up successfully but has no lyrics anywhere. */
-    public static final Lyrics NOT_FOUND = new Lyrics(Collections.emptyList(), "", false, null, null);
+    public static final Lyrics NOT_FOUND = new Lyrics(Collections.emptyList(), "", false,
+            null, null, null, null);
 
     public static final String CAPTIONS_PROVIDER = "Captions";
 
@@ -37,15 +45,29 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
         lines = Collections.unmodifiableList(lines);
         romanization = (romanization == null) ? null : Collections.unmodifiableList(romanization);
         translations = (translations == null) ? null : unmodifiableTranslations(translations);
+        romanizations = (romanizations == null) ? null : unmodifiableTranslations(romanizations);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization,
+                  @Nullable Map<String, List<LyricsLine>> translations) {
+        this(lines, providerName, synced, romanization, translations, null, null);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization,
+                  @Nullable Map<String, List<LyricsLine>> translations,
+                  @Nullable Map<String, List<LyricsLine>> romanizations) {
+        this(lines, providerName, synced, romanization, translations, romanizations, null);
     }
 
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced) {
-        this(lines, providerName, synced, null, null);
+        this(lines, providerName, synced, null, null, null, null);
     }
 
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                   @Nullable List<LyricsLine> romanization) {
-        this(lines, providerName, synced, romanization, null);
+        this(lines, providerName, synced, romanization, null, null, null);
     }
 
     private static Map<String, List<LyricsLine>> unmodifiableTranslations(
@@ -90,7 +112,8 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
                 if (next >= size || positionMs < lines.get(next).startTimeMs()) {
                     return hintIndex;
                 }
-                if (next + 1 >= size || positionMs < lines.get(next + 1).startTimeMs()) {
+                final int nextNext = next + 1;
+                if (nextNext >= size || positionMs < lines.get(nextNext).startTimeMs()) {
                     return next;
                 }
             }

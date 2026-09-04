@@ -48,12 +48,12 @@ public final class OrderedListPreference extends Preference {
     /** Canonical provider ids, in the default priority order, shown in the list. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "LRCLIB", "QQ", "NetEase", "KuGou", "bLyrics", "BiniLyrics", "Unison", "AMLL",
-            "AppleMusic", "Musixmatch", "Spotify");
+            "Apple", "Musixmatch", "Spotify");
 
     /** Friendlier labels for display; ids not present here are shown verbatim. */
     private static final Map<String, String> PROVIDER_LABELS = new HashMap<>();
     static {
-        PROVIDER_LABELS.put("AppleMusic", "Apple Music");
+        PROVIDER_LABELS.put("Apple", "Apple Music");
         PROVIDER_LABELS.put("bLyrics", "BetterLyrics (bLyrics)");
         PROVIDER_LABELS.put("Musixmatch", "Musixmatch");
     }
@@ -186,7 +186,7 @@ public final class OrderedListPreference extends Preference {
     }
 
     private static boolean isTokenRequired(String id) {
-        return (id.equals("AppleMusic") && Settings.APPLE_MUSIC_TOKEN.get().isBlank())
+        return (id.equals("Apple") && Settings.APPLE_MUSIC_TOKEN.get().isBlank())
                 || (id.equals("Musixmatch") && Settings.MUSIXMATCH_TOKEN.get().isBlank())
                 || (id.equals("Spotify") && Settings.SPOTIFY_TOKEN.get().isBlank());
     }

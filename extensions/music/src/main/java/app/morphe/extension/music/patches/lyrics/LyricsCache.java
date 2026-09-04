@@ -32,7 +32,7 @@ import app.morphe.extension.music.patches.lyrics.LyricsMerge;
  */
 final class LyricsCache {
 
-    private static final int MEMORY_ENTRIES = 100;
+    private static final int MEMORY_ENTRIES = 200;
 
     /** Maximum number of files kept on disk. Older files are deleted first. */
     private static final int DISK_ENTRIES = 250;

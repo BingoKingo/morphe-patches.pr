@@ -63,6 +63,7 @@ import app.morphe.extension.shared.Utils;
  */
 public final class LyricsManager {
 
+
     public enum State {
         IDLE,
         LOADING,
@@ -125,6 +126,8 @@ public final class LyricsManager {
     private long lastVideoTimeSample = -1;
     private float playbackSpeed = 1f;
     private boolean playing;
+
+    private long smoothedPosition = -1;
 
     private LyricsManager() {
     }
@@ -216,7 +219,24 @@ public final class LyricsManager {
             final long elapsed = SystemClock.uptimeMillis() - positionUpdatedAtUptimeMs;
             position += (long) (elapsed * playbackSpeed);
         }
-        return position - Settings.LYRICS_OFFSET_MS.get();
+        long result = position - Settings.LYRICS_OFFSET_MS.get();
+
+        // Position smoothing: reject implausible forward jumps.
+        // Normal 120ms tick advances ~120ms at 1x speed.
+        // Backward jumps are real seeks — accept immediately.
+        // Reject forward jumps > 60s (likely garbage, real seeks ≤ 60s).
+        if (result > 0 && smoothedPosition >= 0) {
+            final long delta = result - smoothedPosition;
+            if (delta < 0) {
+                smoothedPosition = result;
+            } else if (delta > 60_000) {
+                return smoothedPosition;
+            }
+        }
+        if (result > 0) {
+            smoothedPosition = result;
+        }
+        return smoothedPosition >= 0 ? smoothedPosition : result;
     }
 
     /**
@@ -254,6 +274,10 @@ public final class LyricsManager {
         currentMediaUri = parseMediaUri(metadata);
 
         if (track.equals(currentTrack)) {
+            positionMs = 0;
+            positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
+            lastVideoTimeSample = -1;
+            smoothedPosition = -1;
             return;
         }
 
@@ -262,6 +286,7 @@ public final class LyricsManager {
         positionMs = 0;
         positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
         lastVideoTimeSample = -1;
+        smoothedPosition = -1;
 
         load(track);
     }
@@ -276,7 +301,17 @@ public final class LyricsManager {
         }
 
         playing = playbackState.getState() == PlaybackState.STATE_PLAYING;
-        positionMs = playbackState.getPosition();
+        final long newPosition = playbackState.getPosition();
+
+        if (smoothedPosition >= 0 && positionMs != newPosition) {
+            final long expected = positionMs
+                    + (long) ((SystemClock.uptimeMillis() - positionUpdatedAtUptimeMs) * playbackSpeed);
+            if (Math.abs(newPosition - expected) > 2000) {
+                smoothedPosition = -1;
+            }
+        }
+
+        positionMs = newPosition;
         positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
 
         final float speed = playbackState.getPlaybackSpeed();
@@ -320,6 +355,7 @@ public final class LyricsManager {
         positionMs = 0;
         positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
         lastVideoTimeSample = -1;
+        smoothedPosition = -1;
         load(currentTrack);
     }
 
@@ -393,7 +429,8 @@ public final class LyricsManager {
                     final Map<String, List<LyricsLine>> translations = new HashMap<>();
                     translations.put(langTag, outcome.translationLyrics.lines());
                     result = new Lyrics(result.lines(), result.providerName(), result.synced(),
-                            result.romanization(), translations);
+                            result.romanization(), translations,
+                            result.romanizations(), result.songwriters());
                     Logger.printDebug(() -> "Lyrics: embedded YouTube translation lang=" + langTag
                             + " lines=" + outcome.translationLyrics.lines().size());
                 }
@@ -838,9 +875,11 @@ public final class LyricsManager {
 
         List<LyricsLine> original = lyrics.lines();
         List<LyricsLine> filtered = new ArrayList<>(original.size());
+        boolean anyDropped = false;
         for (LyricsLine line : original) {
             String text = MetadataCleaner.applyRegex(line.text(), filter);
             if (text.isEmpty()) {
+                anyDropped = true;
                 continue;
             }
             if (line.hasWords()) {
@@ -857,8 +896,12 @@ public final class LyricsManager {
                 filtered.add(new LyricsLine(line.startTimeMs(), text));
             }
         }
-        return new Lyrics(filtered, lyrics.providerName(), lyrics.synced(),
-                lyrics.romanization(), lyrics.translations());
+
+        if (!anyDropped) {
+            return lyrics;
+        }
+
+        return new Lyrics(filtered, lyrics.providerName(), lyrics.synced());
     }
 
     private void setState(State newState, @Nullable Lyrics lyrics) {
@@ -909,7 +952,7 @@ public final class LyricsManager {
     /** Canonical provider ids, in the default priority order. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "LRCLIB", "QQ", "NetEase", "KuGou", "bLyrics", "BiniLyrics", "Unison", "AMLL",
-            "AppleMusic", "Musixmatch", "Spotify");
+            "Apple", "Musixmatch", "Spotify");
 
     @NonNull
     private static List<String> enabledProviderIds(String order) {
@@ -963,7 +1006,7 @@ public final class LyricsManager {
             case "Musixmatch": return new MusixmatchProvider();
             case "Unison": return new UnisonProvider();
             case "AMLL": return new AmllProvider();
-            case "AppleMusic": return new AppleMusicProvider();
+            case "Apple": return new AppleMusicProvider();
             default: return null;
         }
     }

@@ -96,7 +96,8 @@ public final class AmllProvider implements LyricsProvider {
             if (result == null || result.lines.isEmpty()) {
                 return null;
             }
-            return new Lyrics(result.lines, name(), true, result.romanization, result.translations);
+            return new Lyrics(result.lines, name(), true, result.romanization, result.translations,
+                    result.romanizations, result.songwriters);
         } finally {
             if (getConnection != null) {
                 getConnection.disconnect();

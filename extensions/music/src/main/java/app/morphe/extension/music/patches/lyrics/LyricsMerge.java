@@ -136,6 +136,12 @@ public final class LyricsMerge {
 
         for (int i = 0; i < original.size(); i++) {
             LyricsLine orig = original.get(i);
+
+            if (orig.isBG()) {
+                result.add(new LyricsLine(orig.startTimeMs(), ""));
+                continue;
+            }
+
             long winStart = orig.startTimeMs();
             long winEnd = (i < original.size() - 1)
                     ? original.get(i + 1).startTimeMs()

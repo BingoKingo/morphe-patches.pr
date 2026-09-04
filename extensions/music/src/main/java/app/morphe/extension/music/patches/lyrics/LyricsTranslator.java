@@ -62,6 +62,21 @@ public final class LyricsTranslator {
                 final String text = line.text();
                 out.add(text == null ? "" : text);
             }
+            // Fill BG lines with their parent's translation
+            final List<LyricsLine> allLines = lyrics.lines();
+            for (int i = 0; i < out.size() && i < allLines.size(); i++) {
+                if (allLines.get(i).isBG()) {
+                    for (int j = i - 1; j >= 0; j--) {
+                        if (!allLines.get(j).isBG() && j < out.size()) {
+                            final String parentTrans = out.get(j);
+                            if (parentTrans != null && !parentTrans.isEmpty()) {
+                                out.set(i, parentTrans);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
             return out;
         }
         return null;

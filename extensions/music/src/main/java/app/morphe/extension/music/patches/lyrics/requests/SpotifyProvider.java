@@ -7,6 +7,8 @@
 
 package app.morphe.extension.music.patches.lyrics.requests;
 
+import android.util.Log;
+
 import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
@@ -33,10 +35,11 @@ import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.music.settings.Settings;
-import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.requests.Requester;
 
 public final class SpotifyProvider implements LyricsProvider {
+
+    private static final String TAG = "Spotify";
 
     private static final String SECRETS_URL =
             "https://raw.githubusercontent.com/xyloflake/spot-secrets-go/refs/heads/main/secrets/secretDict.json";
@@ -66,29 +69,36 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
+        Log.d(TAG, "Spotify: fetch '" + track.title() + "' by '" + track.artist() + "'");
         final String spDc = Settings.SPOTIFY_TOKEN.get();
         if (spDc == null || spDc.isBlank()) {
-            Logger.printDebug(() -> "Spotify: no sp_dc token configured");
+            Log.d(TAG, "Spotify: no sp_dc token configured");
             return null;
         }
 
         final String trackId = searchTrack(spDc, track.title(), track.artist());
         if (trackId == null) {
-            Logger.printDebug(() -> "Spotify: no track found for '" + track.title() + "' by '" + track.artist() + "'");
+            Log.d(TAG, "Spotify: no track found for '" + track.title() + "' by '" + track.artist() + "'");
             return null;
         }
 
         final JSONObject lyricsResponse = fetchLyrics(spDc, trackId);
         if (lyricsResponse == null) {
+            Log.d(TAG, "Spotify: no lyrics returned for trackId=" + trackId);
             return null;
         }
 
-        return parseLyrics(lyricsResponse);
+        final Lyrics lyrics = parseLyrics(lyricsResponse);
+        if (lyrics != null) {
+            Log.d(TAG, "Spotify: got lyrics, synced=" + lyrics.synced() + " lines=" + lyrics.lines().size());
+        }
+        return lyrics;
     }
 
 
     @Nullable
     private String searchTrack(String spDc, String title, String artist) throws Exception {
+        Log.d(TAG, "Spotify: searching for '" + title + "' by '" + artist + "'");
         final String accessToken = getAccessToken(spDc);
         if (accessToken == null) {
             return null;
@@ -105,6 +115,7 @@ public final class SpotifyProvider implements LyricsProvider {
         connection.setRequestProperty("User-Agent", USER_AGENT);
 
         final int code = connection.getResponseCode();
+        Log.d(TAG, "Spotify: search HTTP " + code);
         if (code != 200) {
             LyricsRequests.logFailure(name(), connection);
             return null;
@@ -114,24 +125,26 @@ public final class SpotifyProvider implements LyricsProvider {
         final JSONObject root = new JSONObject(json);
         final JSONObject tracks = root.optJSONObject("tracks");
         if (tracks == null) {
+            Log.d(TAG, "Spotify: search returned no tracks object");
             return null;
         }
 
         final JSONArray items = tracks.optJSONArray("items");
         if (items == null || items.length() == 0) {
+            Log.d(TAG, "Spotify: search returned no items");
             return null;
         }
 
-        // Pick the first result — Spotify's search is already relevance-ranked.
         final JSONObject best = items.getJSONObject(0);
         final String id = best.optString("id", null);
-        Logger.printDebug(() -> "Spotify: matched track '" + best.optString("name") + "' (id=" + id + ")");
+        Log.d(TAG, "Spotify: matched track '" + best.optString("name") + "' (id=" + id + ")");
         return id;
     }
 
 
     @Nullable
     private JSONObject fetchLyrics(String spDc, String trackId) throws Exception {
+        Log.d(TAG, "Spotify: fetching lyrics for trackId=" + trackId);
         final String accessToken = getAccessToken(spDc);
         if (accessToken == null) {
             return null;
@@ -146,6 +159,7 @@ public final class SpotifyProvider implements LyricsProvider {
         connection.setRequestProperty("User-Agent", SPOTIFY_UA);
 
         final int code = connection.getResponseCode();
+        Log.d(TAG, "Spotify: lyrics HTTP " + code);
         if (code != 200) {
             LyricsRequests.logFailure(name(), connection);
             return null;
@@ -209,6 +223,7 @@ public final class SpotifyProvider implements LyricsProvider {
         if (lines.isEmpty()) {
             return null;
         }
+        Log.d(TAG, "Spotify: parsed " + lines.size() + " synced lines");
         return new Lyrics(lines, name(), true);
     }
 
@@ -250,14 +265,15 @@ public final class SpotifyProvider implements LyricsProvider {
         if (lines.isEmpty()) {
             return null;
         }
+        Log.d(TAG, "Spotify: parsed " + lines.size() + " plain lines");
         return new Lyrics(lines, name(), false);
     }
 
 
     @Nullable
     private synchronized String getAccessToken(String spDc) {
-        // Return cached token if still valid.
         if (cachedAccessToken != null) {
+            Log.d(TAG, "Spotify: using cached access token");
             return cachedAccessToken;
         }
 
@@ -276,6 +292,7 @@ public final class SpotifyProvider implements LyricsProvider {
                     + "&totpVer=" + cachedTotpVersion
                     + "&totpServer=" + totpServer;
 
+            Log.d(TAG, "Spotify: requesting access token");
             final HttpURLConnection connection = (HttpURLConnection)
                     new java.net.URL(url).openConnection();
             connection.setRequestMethod("GET");
@@ -287,8 +304,9 @@ public final class SpotifyProvider implements LyricsProvider {
             connection.setRequestProperty("Cookie", "sp_dc=" + spDc);
 
             final int code = connection.getResponseCode();
+            Log.d(TAG, "Spotify: token HTTP " + code);
             if (code != 200) {
-                Logger.printDebug(() -> "Spotify: token request failed: " + code);
+                Log.d(TAG, "Spotify: token request failed: " + code);
                 return null;
             }
 
@@ -296,15 +314,15 @@ public final class SpotifyProvider implements LyricsProvider {
             final JSONObject json = new JSONObject(body);
             final String token = json.optString("accessToken", "");
             if (token.isBlank()) {
-                Logger.printDebug(() -> "Spotify: no accessToken in response");
+                Log.d(TAG, "Spotify: no accessToken in response");
                 return null;
             }
             cachedAccessToken = token;
 
-            Logger.printDebug(() -> "Spotify: access token obtained successfully");
+            Log.d(TAG, "Spotify: access token obtained successfully");
             return cachedAccessToken;
         } catch (Exception ex) {
-            Logger.printException(() -> "Spotify: auth failed", ex);
+            Log.e(TAG, "Spotify: auth failed", ex);
             return null;
         }
     }
@@ -321,7 +339,9 @@ public final class SpotifyProvider implements LyricsProvider {
             connection.setRequestProperty("Referer", "https://open.spotify.com/");
             connection.setRequestProperty("Cookie", "sp_dc=" + spDc);
 
-            if (connection.getResponseCode() == 200) {
+            final int code = connection.getResponseCode();
+            Log.d(TAG, "Spotify: serverTime HTTP " + code);
+            if (code == 200) {
                 final String body = parseBody(connection);
                 final JSONObject json = new JSONObject(body);
                 final long serverTime = json.optLong("serverTime", 0);
@@ -330,7 +350,7 @@ public final class SpotifyProvider implements LyricsProvider {
                 }
             }
         } catch (Exception ex) {
-            Logger.printDebug(() -> "Spotify: server time fetch failed, using local time");
+            Log.d(TAG, "Spotify: server time fetch failed, using local time");
         }
         return System.currentTimeMillis();
     }
@@ -394,7 +414,7 @@ public final class SpotifyProvider implements LyricsProvider {
         }
         cachedTotpSecrets = new String[]{ decimalString.toString() };
 
-        Logger.printDebug(() -> "Spotify: TOTP secrets loaded, version=" + cachedTotpVersion);
+        Log.d(TAG, "Spotify: TOTP secrets loaded, version=" + cachedTotpVersion);
     }
 
     private String generateTotp(long timestampMs) throws NoSuchAlgorithmException, InvalidKeyException {

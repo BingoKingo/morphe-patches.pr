@@ -29,7 +29,7 @@ import app.morphe.extension.music.settings.Settings;
 
 public final class AppleMusicProvider implements LyricsProvider {
 
-    private static final String TAG = "AppleMusic";
+    private static final String TAG = "Apple";
 
     private static final String BROWSE_URL = "https://music.apple.com";
     private static final String API_BASE = "https://amp-api.music.apple.com/v1/catalog/";
@@ -53,7 +53,7 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Override
     public String name() {
-        return "AppleMusic";
+        return "Apple";
     }
 
     @Override
@@ -459,10 +459,16 @@ public final class AppleMusicProvider implements LyricsProvider {
         if (lyrics == null) {
             return 0;
         }
+        int totalWords = 0;
+        int linesWithWords = 0;
         for (LyricsLine line : lyrics.lines()) {
             if (line.hasWords()) {
-                return 2; // word-level
+                linesWithWords++;
+                totalWords += line.words().size();
             }
+        }
+        if (totalWords > linesWithWords) {
+            return 2;
         }
         return lyrics.synced() ? 1 : 0;
     }
@@ -526,7 +532,8 @@ public final class AppleMusicProvider implements LyricsProvider {
             }
             Log.d(TAG, "AppleMusic: dedicated got " + result.lines.size() + " lines");
             return new Lyrics(result.lines, name(), true,
-                    result.romanization, result.translations);
+                    result.romanization, result.translations,
+                    result.romanizations, result.songwriters);
         } catch (Exception ex) {
             Log.d(TAG, "AppleMusic: dedicated lyrics fetch failed", ex);
             return null;
@@ -611,7 +618,8 @@ public final class AppleMusicProvider implements LyricsProvider {
             }
             Log.d(TAG, "AppleMusic: include got " + result.lines.size() + " lines");
             return new Lyrics(result.lines, name(), true,
-                    result.romanization, result.translations);
+                    result.romanization, result.translations,
+                    result.romanizations, result.songwriters);
         } catch (Exception ex) {
             Log.d(TAG, "AppleMusic: include lyrics fetch failed", ex);
             return null;
