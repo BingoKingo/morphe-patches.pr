@@ -8,6 +8,7 @@
 package app.morphe.extension.music.patches.lyrics;
 
 import android.content.Context;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 
@@ -21,7 +22,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
@@ -32,6 +32,8 @@ import app.morphe.extension.music.patches.lyrics.LyricsMerge;
  */
 final class LyricsCache {
 
+    private static final String TAG = "MorpheLyrics";
+
     private static final int MEMORY_ENTRIES = 200;
 
     /** Maximum number of files kept on disk. Older files are deleted first. */
@@ -40,6 +42,7 @@ final class LyricsCache {
     private static final String DIRECTORY_NAME = "morphe_lyrics";
     private static final String HEADER_PROVIDER = "#provider=";
     private static final String HEADER_SYNCED = "#synced=";
+    private static final String HEADER_SOURCE_URL = "#sourceUrl=";
     private static final String NOT_FOUND_MARKER = "#notfound";
 
     private static final Map<String, Lyrics> memoryCache =
@@ -53,18 +56,25 @@ final class LyricsCache {
         String key = key(track, source);
         Lyrics cached = memoryCache.get(key);
         if (cached != null) {
+            Log.v(TAG, "get: memory hit for '" + key + "'");
             return cached;
         }
 
         Lyrics fromDisk = readFromDisk(key);
         if (fromDisk != null) {
+            Log.v(TAG, "get: disk hit for '" + key + "'");
             memoryCache.put(key, fromDisk);
+        } else {
+            Log.v(TAG, "get: miss for '" + key + "'");
         }
         return fromDisk;
     }
 
     static synchronized void put(TrackInfo track, String source, Lyrics lyrics) {
         String key = key(track, source);
+        Log.v(TAG, "put: '" + key + "' " +
+                (lyrics == Lyrics.NOT_FOUND ? "NOT_FOUND" :
+                lyrics.isEmpty() ? "EMPTY" : lyrics.lines().size() + " lines"));
         memoryCache.put(key, lyrics);
         writeToDisk(key, lyrics);
         writeEmbeddedRomanization(key, lyrics.romanization());
@@ -90,7 +100,7 @@ final class LyricsCache {
             // case the stored translation no longer lines up and has to be discarded.
             return lines.size() == expectedLineCount ? lines : null;
         } catch (Exception ex) {
-            Logger.printDebug(() -> "Could not read cached translation: " + file, ex);
+            Log.e(TAG, "Could not read cached translation: " + file, ex);
             return null;
         }
     }
@@ -108,7 +118,7 @@ final class LyricsCache {
             Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
             trimDiskCache();
         } catch (IOException ex) {
-            Logger.printDebug(() -> "Could not cache translation: " + file, ex);
+            Log.e(TAG, "Could not cache translation: " + file, ex);
         }
     }
 
@@ -138,7 +148,7 @@ final class LyricsCache {
             }
             return result;
         } catch (Exception ex) {
-            Logger.printDebug(() -> "Could not read cached romanization: " + file, ex);
+            Log.e(TAG, "Could not read cached romanization: " + file, ex);
             return null;
         }
     }
@@ -159,7 +169,7 @@ final class LyricsCache {
             Files.write(file.toPath(), fileLines, StandardCharsets.UTF_8);
             trimDiskCache();
         } catch (IOException ex) {
-            Logger.printDebug(() -> "Could not cache romanization: " + file, ex);
+            Log.e(TAG, "Could not cache romanization: " + file, ex);
         }
     }
 
@@ -210,7 +220,7 @@ final class LyricsCache {
             }
             return result;
         } catch (Exception ex) {
-            Logger.printDebug(() -> "Could not read cached embedded romanization: " + file, ex);
+            Log.e(TAG, "Could not read cached embedded romanization: " + file, ex);
             return null;
         }
     }
@@ -229,7 +239,7 @@ final class LyricsCache {
             Files.write(file.toPath(), fileLines, StandardCharsets.UTF_8);
             trimDiskCache();
         } catch (IOException ex) {
-            Logger.printDebug(() -> "Could not cache embedded romanization: " + file, ex);
+            Log.e(TAG, "Could not cache embedded romanization: " + file, ex);
         }
     }
 
@@ -246,17 +256,20 @@ final class LyricsCache {
     private static Lyrics readFromDisk(String key) {
         File file = cacheFile(key);
         if (file == null || !file.exists()) {
+            Log.v(TAG, "readFromDisk: file not found for '" + key + "'");
             return null;
         }
 
         try {
             List<String> lines = Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
             if (lines.isEmpty()) {
+                Log.v(TAG, "readFromDisk: file empty for '" + key + "'");
                 return null;
             }
 
             String provider = "";
             boolean synced = false;
+            String sourceUrl = null;
             int contentStart = 0;
 
             for (String line : lines) {
@@ -267,6 +280,11 @@ final class LyricsCache {
                     provider = line.substring(HEADER_PROVIDER.length());
                 } else if (line.startsWith(HEADER_SYNCED)) {
                     synced = Boolean.parseBoolean(line.substring(HEADER_SYNCED.length()));
+                } else if (line.startsWith(HEADER_SOURCE_URL)) {
+                    sourceUrl = line.substring(HEADER_SOURCE_URL.length());
+                    if (sourceUrl.isEmpty()) {
+                        sourceUrl = null;
+                    }
                 } else {
                     break;
                 }
@@ -280,9 +298,10 @@ final class LyricsCache {
             if (parsed.isEmpty()) {
                 return null;
             }
-            return new Lyrics(parsed, provider, synced, readEmbeddedRomanization(key));
+            return new Lyrics(parsed, provider, synced, readEmbeddedRomanization(key),
+                    null, null, null, null, null, null);
         } catch (Exception ex) {
-            Logger.printDebug(() -> "Could not read cached lyrics: " + file, ex);
+            Log.e(TAG, "Could not read cached lyrics: " + file, ex);
             return null;
         }
     }
@@ -300,6 +319,9 @@ final class LyricsCache {
             } else {
                 fileLines.add(HEADER_PROVIDER + lyrics.providerName());
                 fileLines.add(HEADER_SYNCED + lyrics.synced());
+                if (lyrics.sourceUrl() != null) {
+                    fileLines.add(HEADER_SOURCE_URL + lyrics.sourceUrl());
+                }
                 for (LyricsLine line : lyrics.lines()) {
                     fileLines.add(lyrics.synced()
                             ? LrcParser.formatLine(line)
@@ -310,7 +332,7 @@ final class LyricsCache {
             Files.write(file.toPath(), fileLines, StandardCharsets.UTF_8);
             trimDiskCache();
         } catch (IOException ex) {
-            Logger.printDebug(() -> "Could not cache lyrics: " + file, ex);
+            Log.e(TAG, "Could not cache lyrics: " + file, ex);
         }
     }
 
@@ -335,7 +357,7 @@ final class LyricsCache {
         for (int i = 0; i < deleteCount; i++) {
             File file = sorted.get(i);
             if (!file.delete()) {
-                Logger.printDebug(() -> "Could not delete " + file);
+                Log.w(TAG, "Could not delete " + file);
             }
         }
     }
@@ -363,7 +385,7 @@ final class LyricsCache {
             }
             return directory;
         } catch (Exception ex) {
-            Logger.printException(() -> "Could not open lyrics cache directory", ex);
+            Log.e(TAG, "Could not open lyrics cache directory", ex);
             return null;
         }
     }

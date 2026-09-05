@@ -25,13 +25,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.util.Log;
+
 import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
-import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
 public final class LocalLyricsFetcher {
+    private static final String TAG = "MorpheLyrics";
+
     private LocalLyricsFetcher() {
     }
 
@@ -49,40 +52,79 @@ public final class LocalLyricsFetcher {
     @Nullable
     public static Lyrics fetch(@Nullable Uri mediaUri) {
         if (mediaUri == null) {
+            Log.w(TAG, "fetch: mediaUri is null, aborting");
             return null;
         }
 
         final Context context = Utils.getContext();
         if (context == null) {
+            Log.w(TAG, "fetch: context is null, aborting");
             return null;
         }
 
-        final byte[] data = readBytes(context, mediaUri, MAX_TAG_BYTES);
+        Log.d(TAG, "fetch: start reading bytes from " + mediaUri);
+        final byte[] header = readBytes(context, mediaUri, 10);
+        byte[] data;
+        if (header != null && header.length >= 10
+                && header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
+            final int tagSize = syncsafe(header[6], header[7], header[8], header[9]);
+            final int totalRead = 10 + tagSize;
+            Log.d(TAG, "fetch: ID3v2 detected, tagSize=" + tagSize
+                    + " (" + totalRead + " bytes total)");
+            data = readBytes(context, mediaUri,
+                    Math.min(totalRead, MAX_TAG_BYTES));
+        } else {
+            // Not ID3v2 — read default limit for FLAC/OGG/M4A tail detection.
+            data = readBytes(context, mediaUri, MAX_TAG_BYTES);
+        }
+
         if (data != null) {
+            Log.d(TAG, "fetch: read " + data.length + " bytes, detecting format...");
+
+            // Log magic bytes for format detection
+            if (data.length >= 8) {
+                String magic = String.format("magic=[%02x %02x %02x %02x %02x %02x %02x %02x]",
+                        data[0] & 0xFF, data[1] & 0xFF, data[2] & 0xFF, data[3] & 0xFF,
+                        data[4] & 0xFF, data[5] & 0xFF, data[6] & 0xFF, data[7] & 0xFF);
+                Log.d(TAG, "fetch: " + magic);
+            }
+
             final String raw = extractLyrics(data);
+            Log.d(TAG, "fetch: extractLyrics from head returned " +
+                    (raw != null ? raw.length() + " chars, preview=" + raw.substring(0, Math.min(100, raw.length())).replace("\n", "\\n") : "null"));
             final Lyrics parsed = parse(raw);
             if (parsed != null) {
-                Logger.printInfo(() -> "LocalLyricsFetcher: embedded lyrics found for " + mediaUri
-                        + " (" + parsed.lines().size() + " lines)");
+                Log.i(TAG, "fetch: embedded lyrics found for " + mediaUri
+                        + " (" + parsed.lines().size() + " lines, synced=" + parsed.synced() + ")");
                 return parsed;
             }
             if (isLikelyM4a(data)) {
+                Log.d(TAG, "fetch: M4A/MP4 detected, trying tail read (" + M4A_TAIL_BYTES + " bytes)");
                 final byte[] tail = readBytesTail(context, mediaUri, M4A_TAIL_BYTES);
                 if (tail != null) {
+                    Log.d(TAG, "fetch: tail read returned " + tail.length + " bytes");
                     final String tailRaw = extractLyrics(tail);
+                    Log.d(TAG, "fetch: extractLyrics from tail returned " +
+                            (tailRaw != null ? tailRaw.length() + " chars, preview=" + tailRaw.substring(0, Math.min(100, tailRaw.length())).replace("\n", "\\n") : "null"));
                     final Lyrics tailParsed = parse(tailRaw);
                     if (tailParsed != null) {
-                        Logger.printInfo(() -> "LocalLyricsFetcher: embedded lyrics from M4A tail for "
+                        Log.i(TAG, "fetch: embedded lyrics from M4A tail for "
                                 + mediaUri + " (" + tailParsed.lines().size() + " lines)");
                         return tailParsed;
                     }
                 }
             }
+        } else {
+            Log.w(TAG, "fetch: readBytes returned null for " + mediaUri);
         }
 
+        Log.d(TAG, "fetch: trying MediaMetadataRetriever fallback");
         final Lyrics fallback = fallbackViaMediaMetadataRetriever(context, mediaUri);
-        Logger.printInfo(() -> "LocalLyricsFetcher: embedded lyrics for " + mediaUri + " = "
-                + (fallback != null ? fallback.lines().size() + " lines" : "none"));
+        if (fallback != null) {
+            Log.i(TAG, "fetch: MediaMetadataRetriever fallback found " + fallback.lines().size() + " lines for " + mediaUri);
+        } else {
+            Log.w(TAG, "fetch: all methods failed, no lyrics for " + mediaUri);
+        }
         return fallback;
     }
 
@@ -97,16 +139,22 @@ public final class LocalLyricsFetcher {
         final String primaryTitle = (title != null && !title.isBlank()) ? title : rawTitle;
         final String primaryArtist = (artist != null && !artist.isBlank()) ? artist : rawArtist;
         if (primaryTitle == null || primaryTitle.isBlank()) {
+            Log.w(TAG, "resolveMediaStoreUri: title is blank, aborting");
             return null;
         }
         final Context context = Utils.getContext();
         if (context == null) {
+            Log.w(TAG, "resolveMediaStoreUri: context is null");
             return null;
         }
         final ContentResolver resolver = context.getContentResolver();
         if (resolver == null) {
+            Log.w(TAG, "resolveMediaStoreUri: resolver is null");
             return null;
         }
+
+        Log.d(TAG, "resolveMediaStoreUri: title='" + primaryTitle + "' artist='" + primaryArtist
+                + "' duration=" + durationSeconds + "s rawTitle='" + rawTitle + "' rawArtist='" + rawArtist + "'");
 
         final Uri base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
         final String[] projection = {
@@ -130,6 +178,8 @@ public final class LocalLyricsFetcher {
 
         Uri best = null;
         long bestScore = Long.MAX_VALUE;
+        int totalCandidatesChecked = 0;
+        int totalRowsScanned = 0;
         try {
             for (String[] pair : candidates) {
                 final String t = pair[0];
@@ -137,13 +187,18 @@ public final class LocalLyricsFetcher {
                 if (t == null || t.isBlank()) {
                     continue;
                 }
+                totalCandidatesChecked++;
                 final String selection = MediaStore.Audio.Media.TITLE + " LIKE ? ESCAPE '\\'";
                 Cursor cursor = resolver.query(base, projection, selection,
                         new String[]{ likeEscape(t) }, null);
+                Log.d(TAG, "resolveMediaStoreUri: query exact '" + t + "' -> " +
+                        (cursor != null ? cursor.getCount() + " rows" : "null cursor"));
                 if (cursor != null && cursor.getCount() == 0) {
                     cursor.close();
                     cursor = resolver.query(base, projection, selection,
                             new String[]{ "%" + likeEscape(t) + "%" }, null);
+                    Log.d(TAG, "resolveMediaStoreUri: query wildcard '%" + t + "%' -> " +
+                            (cursor != null ? cursor.getCount() + " rows" : "null cursor"));
                 }
                 if (cursor == null) {
                     continue;
@@ -153,9 +208,11 @@ public final class LocalLyricsFetcher {
                     final int artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST);
                     final int durCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION);
                     if (idCol < 0) {
+                        Log.w(TAG, "resolveMediaStoreUri: _ID column not found");
                         continue;
                     }
                     while (cursor.moveToNext()) {
+                        totalRowsScanned++;
                         final long id = cursor.getLong(idCol);
                         final String storedArtist = artistCol >= 0 ? cursor.getString(artistCol) : null;
                         final long durMs = (durCol >= 0) ? cursor.getLong(durCol) : 0;
@@ -174,6 +231,8 @@ public final class LocalLyricsFetcher {
                         if (durationSeconds > 0 && durMs > 0) {
                             score += Math.abs(durMs - (long) durationSeconds * 1000L);
                         }
+                        Log.v(TAG, "resolveMediaStoreUri: candidate id=" + id
+                                + " artist='" + storedArtist + "' dur=" + durMs + "ms score=" + score);
                         if (score < bestScore) {
                             bestScore = score;
                             best = ContentUris.withAppendedId(base, id);
@@ -184,9 +243,12 @@ public final class LocalLyricsFetcher {
                 }
             }
         } catch (Exception ex) {
-            Logger.printException(() -> "LocalLyricsFetcher: MediaStore lookup failed", ex);
+            Log.e(TAG, "resolveMediaStoreUri: MediaStore lookup failed", ex);
             return null;
         }
+        Log.d(TAG, "resolveMediaStoreUri: done, candidatesChecked=" + totalCandidatesChecked
+                + " rowsScanned=" + totalRowsScanned
+                + " best=" + best + " bestScore=" + bestScore);
         return best;
     }
 
@@ -194,10 +256,12 @@ public final class LocalLyricsFetcher {
     private static byte[] readBytes(Context context, Uri uri, int limit) {
         final ContentResolver resolver = context.getContentResolver();
         if (resolver == null) {
+            Log.w(TAG, "readBytes: resolver is null");
             return null;
         }
         try (InputStream in = resolver.openInputStream(uri)) {
             if (in == null) {
+                Log.w(TAG, "readBytes: openInputStream returned null for " + uri);
                 return null;
             }
             final ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(limit, 1 << 16));
@@ -209,15 +273,17 @@ public final class LocalLyricsFetcher {
                     final int remaining = limit - total;
                     if (remaining > 0) {
                         out.write(buf, 0, remaining);
+                        total += remaining;
                     }
                     break;
                 }
                 out.write(buf, 0, n);
                 total += n;
             }
+            Log.d(TAG, "readBytes: read " + total + " bytes from " + uri);
             return out.toByteArray();
         } catch (IOException | SecurityException | NullPointerException ex) {
-            Logger.printDebug(() -> "LocalLyricsFetcher: cannot open " + uri, ex);
+            Log.e(TAG, "readBytes: cannot open " + uri, ex);
             return null;
         }
     }
@@ -226,10 +292,12 @@ public final class LocalLyricsFetcher {
     private static byte[] readBytesTail(Context context, Uri uri, int tailBytes) {
         final ContentResolver resolver = context.getContentResolver();
         if (resolver == null) {
+            Log.w(TAG, "readBytesTail: resolver is null");
             return null;
         }
         try (InputStream in = resolver.openInputStream(uri)) {
             if (in == null) {
+                Log.w(TAG, "readBytesTail: openInputStream returned null for " + uri);
                 return null;
             }
             final byte[] ring = new byte[tailBytes];
@@ -259,6 +327,7 @@ public final class LocalLyricsFetcher {
                     }
                 }
             }
+            Log.d(TAG, "readBytesTail: ringLen=" + ringLen + " ringPos=" + ringPos);
             if (ringLen == 0) {
                 return null;
             }
@@ -272,7 +341,7 @@ public final class LocalLyricsFetcher {
             System.arraycopy(ring, 0, result, tailBytes - ringPos, ringPos);
             return result;
         } catch (IOException | SecurityException | NullPointerException ex) {
-            Logger.printDebug(() -> "LocalLyricsFetcher: cannot tail " + uri, ex);
+            Log.e(TAG, "readBytesTail: cannot tail " + uri, ex);
             return null;
         }
     }
@@ -285,43 +354,59 @@ public final class LocalLyricsFetcher {
     @Nullable
     private static String extractLyrics(byte[] d) {
         if (d.length >= 3 && d[0] == 'I' && d[1] == 'D' && d[2] == '3') {
+            Log.d(TAG, "extractLyrics: detected ID3v2 (MP3)");
             final String s = parseId3v2(d);
             if (s != null) {
+                Log.d(TAG, "extractLyrics: ID3v2 returned " + s.length() + " chars");
                 return s;
             }
+            Log.d(TAG, "extractLyrics: ID3v2 returned null");
         }
         if (d.length >= 4 && d[0] == 'f' && d[1] == 'L' && d[2] == 'a' && d[3] == 'C') {
+            Log.d(TAG, "extractLyrics: detected FLAC");
             final String s = parseFlac(d);
             if (s != null) {
+                Log.d(TAG, "extractLyrics: FLAC returned " + s.length() + " chars");
                 return s;
             }
+            Log.d(TAG, "extractLyrics: FLAC returned null");
         }
         if (d.length >= 4 && d[0] == 'O' && d[1] == 'g' && d[2] == 'g' && d[3] == 'S') {
+            Log.d(TAG, "extractLyrics: detected OGG");
             final String s = parseOgg(d);
             if (s != null) {
+                Log.d(TAG, "extractLyrics: OGG returned " + s.length() + " chars");
                 return s;
             }
+            Log.d(TAG, "extractLyrics: OGG returned null");
         }
         if (d.length >= 8 && d[4] == 'f' && d[5] == 't' && d[6] == 'y' && d[7] == 'p') {
+            Log.d(TAG, "extractLyrics: detected M4A/MP4");
             final String s = parseM4a(d);
             if (s != null) {
+                Log.d(TAG, "extractLyrics: M4A returned " + s.length() + " chars");
                 return s;
             }
+            Log.d(TAG, "extractLyrics: M4A returned null");
         }
+        Log.d(TAG, "extractLyrics: no known format matched or no lyrics found");
         return null;
     }
 
     @Nullable
     private static String parseId3v2(byte[] d) {
         if (d.length < 10) {
+            Log.w(TAG, "parseId3v2: data too short (" + d.length + " bytes)");
             return null;
         }
         final int major = d[3] & 0xFF;
         final int tagSize = syncsafe(d[6], d[7], d[8], d[9]);
+        Log.d(TAG, "parseId3v2: ID3v2." + major + " tagSize=" + tagSize + " dataSize=" + d.length);
         int pos = 10;
         if ((major == 3 || major == 4) && (d[5] & 0x40) != 0) {
             final int extSize = readInt32BE(d, 10);
             pos = 10 + extSize;
+            Log.d(TAG, "parseId3v2: extended header detected, extSize=" + extSize + " pos=" + pos);
         }
         final int end = Math.min(pos + tagSize, d.length);
         final int idLen;
@@ -336,6 +421,8 @@ public final class LocalLyricsFetcher {
             headerLen = 10;
             syncsafeSize = (major == 4);
         }
+        int framesScanned = 0;
+        final StringBuilder frameLog = new StringBuilder();
         while (pos + headerLen <= end) {
             final String id = new String(d, pos, idLen, StandardCharsets.ISO_8859_1);
             final int size = (headerLen == 6)
@@ -344,22 +431,131 @@ public final class LocalLyricsFetcher {
                                     : readInt32BE(d, pos + 4));
             final int bodyOff = pos + headerLen;
             if (size < 0 || bodyOff + size > d.length) {
+                Log.w(TAG, "parseId3v2: frame '" + id + "' invalid size=" + size + " at pos=" + pos + ", breaking");
                 break;
             }
+            if (framesScanned < 300) {
+                if (frameLog.length() > 0) frameLog.append(" | ");
+                frameLog.append(framesScanned).append(':').append(id).append('=').append(size);
+            }
             if (id.equals("USLT") || id.equals("ULT")) {
+                Log.d(TAG, "parseId3v2: found lyrics frame '" + id + "' at pos=" + pos + " size=" + size);
                 final String s = parseTextFrame(d, bodyOff, size);
                 if (s != null && !s.isBlank()) {
+                    Log.d(TAG, "parseId3v2: USLT parsed successfully, length=" + s.length());
                     return s;
                 }
+                Log.d(TAG, "parseId3v2: USLT parsed to empty/null");
             } else if (id.equals("SYLT") || id.equals("SLT")) {
+                Log.d(TAG, "parseId3v2: found synced lyrics frame '" + id + "' at pos=" + pos + " size=" + size);
                 final String s = parseSylt(d, bodyOff, size);
                 if (s != null && !s.isBlank()) {
+                    Log.d(TAG, "parseId3v2: SYLT parsed successfully, length=" + s.length());
                     return s;
                 }
+                Log.d(TAG, "parseId3v2: SYLT parsed to empty/null");
+            } else if (id.equals("TXXX")) {
+                final String desc = parseTxxxDescription(d, bodyOff, size);
+                Log.d(TAG, "parseId3v2: TXXX desc='" + desc + "' size=" + size + " at pos=" + pos);
+                if (desc != null && desc.length() >= 5
+                        && (desc.regionMatches(true, 0, "LYRICS", 0, 6)
+                         || desc.regionMatches(true, 0, "LYRIC", 0, 5))) {
+                    Log.d(TAG, "parseId3v2: found TXXX lyrics frame desc='" + desc
+                            + "' at pos=" + pos + " size=" + size);
+                    final String s = parseTxxxValue(d, bodyOff, size);
+                    if (s != null && !s.isBlank()) {
+                        Log.d(TAG, "parseId3v2: TXXX lyrics parsed, length=" + s.length());
+                        return s;
+                    }
+                    Log.d(TAG, "parseId3v2: TXXX lyrics parsed to empty/null");
+                }
+            } else if (id.equals("COMM")) {
+                final String desc = parseCommDescription(d, bodyOff, size);
+                final String lang = (size > 4) ? new String(d, bodyOff + 1, 3, StandardCharsets.ISO_8859_1) : "";
+                Log.d(TAG, "parseId3v2: COMM desc='" + desc + "' lang='" + lang + "' size=" + size + " at pos=" + pos);
+                if (desc != null && desc.length() >= 5
+                        && (desc.regionMatches(true, 0, "LYRICS", 0, 6)
+                         || desc.regionMatches(true, 0, "LYRIC", 0, 5))) {
+                    Log.d(TAG, "parseId3v2: found COMM lyrics frame desc='" + desc
+                            + "' at pos=" + pos + " size=" + size);
+                    final String s = parseCommBody(d, bodyOff, size);
+                    if (s != null && !s.isBlank()) {
+                        Log.d(TAG, "parseId3v2: COMM lyrics parsed, length=" + s.length());
+                        return s;
+                    }
+                    Log.d(TAG, "parseId3v2: COMM lyrics parsed to empty/null");
+                }
             }
+            // Null padding detection: all bytes of frame ID are 0 -> padding reached.
+            boolean allNull = true;
+            for (int k = 0; k < idLen; k++) {
+                if (d[pos + k] != 0) {
+                    allNull = false;
+                    break;
+                }
+            }
+            if (allNull) {
+                Log.d(TAG, "parseId3v2: null padding at pos=" + pos + ", stopping");
+                break;
+            }
+            framesScanned++;
             pos = bodyOff + size;
         }
+        Log.d(TAG, "parseId3v2: scanned " + framesScanned + " frames, no lyrics found");
+        if (frameLog.length() > 0) {
+            Log.d(TAG, "parseId3v2: frames: " + frameLog);
+        }
         return null;
+    }
+
+    @Nullable
+    private static String parseTxxxDescription(byte[] d, int off, int len) {
+        if (len <= 1) return null;
+        final int enc = d[off] & 0xFF;
+        final int frameEnd = off + len;
+        final int descEnd = indexOfNullTerm(d, off + 1, frameEnd, enc);
+        if (descEnd < 0 || descEnd >= frameEnd) return null;
+        return decodeAutoDetect(copy(d, off + 1, descEnd - off - 1), enc).trim();
+    }
+
+    @Nullable
+    private static String parseTxxxValue(byte[] d, int off, int len) {
+        if (len <= 1) return null;
+        final int enc = d[off] & 0xFF;
+        final int frameEnd = off + len;
+        final int descEnd = indexOfNullTerm(d, off + 1, frameEnd, enc);
+        if (descEnd < 0 || descEnd >= frameEnd) return null;
+        final int valEnd = indexOfNullTerm(d, descEnd, frameEnd, enc);
+        final int actualEnd = (valEnd < 0) ? frameEnd : valEnd;
+        final int textLen = actualEnd - descEnd;
+        if (textLen <= 0) return null;
+        return decodeAutoDetect(copy(d, descEnd, textLen), enc).trim();
+    }
+
+    @Nullable
+    private static String parseCommDescription(byte[] d, int off, int len) {
+        if (len <= 4) return null;
+        final int enc = d[off] & 0xFF;
+        final int frameEnd = off + len;
+        final int descStart = off + 1 + 3;
+        final int descEnd = indexOfNullTerm(d, descStart, frameEnd, enc);
+        if (descEnd < 0 || descEnd >= frameEnd) return null;
+        return decodeAutoDetect(copy(d, descStart, descEnd - descStart), enc).trim();
+    }
+
+    @Nullable
+    private static String parseCommBody(byte[] d, int off, int len) {
+        if (len <= 4) return null;
+        final int enc = d[off] & 0xFF;
+        final int frameEnd = off + len;
+        final int descStart = off + 1 + 3;
+        final int descEnd = indexOfNullTerm(d, descStart, frameEnd, enc);
+        if (descEnd < 0 || descEnd >= frameEnd) return null;
+        final int bodyEnd = indexOfNullTerm(d, descEnd, frameEnd, enc);
+        final int actualEnd = (bodyEnd < 0) ? frameEnd : bodyEnd;
+        final int bodyLen = actualEnd - descEnd;
+        if (bodyLen <= 0) return null;
+        return decodeAutoDetect(copy(d, descEnd, bodyLen), enc).trim();
     }
 
     @Nullable
@@ -390,7 +586,7 @@ public final class LocalLyricsFetcher {
         if (textLen <= 0) {
             return null;
         }
-        return decode(copy(d, lyricsStart, textLen), enc).trim();
+        return decodeAutoDetect(copy(d, lyricsStart, textLen), enc).trim();
     }
 
     @Nullable
@@ -420,7 +616,7 @@ public final class LocalLyricsFetcher {
             if (segLen <= 0) {
                 break;
             }
-            final String seg = decode(copy(d, q, segLen), enc).trim();
+            final String seg = decodeAutoDetect(copy(d, q, segLen), enc).trim();
             long tsMs = -1;
             if (tEnd >= 0 && tEnd + tsBytes <= frameEnd) {
                 tsMs = (tsBytes == 4)
@@ -448,29 +644,38 @@ public final class LocalLyricsFetcher {
     @Nullable
     private static String parseFlac(byte[] d) {
         if (d.length < 4 || !(d[0] == 'f' && d[1] == 'L' && d[2] == 'a' && d[3] == 'C')) {
+            Log.w(TAG, "parseFlac: invalid FLAC header");
             return null;
         }
         int pos = 4;
+        int blocksScanned = 0;
         while (pos + 4 <= d.length) {
             final int header = d[pos] & 0xFF;
             final boolean last = (header & 0x80) != 0;
             final int type = header & 0x7F;
             final int size = readU24BE(d, pos + 1);
             final int body = pos + 4;
+            Log.v(TAG, "parseFlac: block type=" + type + " size=" + size + " last=" + last);
             if (body + size > d.length) {
+                Log.w(TAG, "parseFlac: block overflows data, breaking");
                 break;
             }
             if (type == 4) {
+                Log.d(TAG, "parseFlac: found Vorbis Comment block (type=4), size=" + size);
                 final String s = parseVorbisComment(d, body, size);
                 if (s != null) {
+                    Log.d(TAG, "parseFlac: Vorbis Comment returned lyrics, length=" + s.length());
                     return s;
                 }
+                Log.d(TAG, "parseFlac: Vorbis Comment returned null");
             }
+            blocksScanned++;
             pos = body + size;
             if (last) {
                 break;
             }
         }
+        Log.d(TAG, "parseFlac: scanned " + blocksScanned + " blocks, no lyrics found");
         return null;
     }
 
@@ -479,33 +684,44 @@ public final class LocalLyricsFetcher {
         final int end = start + size;
         int p = start;
         if (p + 4 > end) {
+            Log.w(TAG, "parseVorbisComment: data too short for vendor length");
             return null;
         }
         final int vendorLen = readInt32LE(d, p);
         p += 4 + vendorLen;
         if (p + 4 > end) {
+            Log.w(TAG, "parseVorbisComment: data too short for comment count");
             return null;
         }
         final int count = readInt32LE(d, p);
         p += 4;
+        Log.d(TAG, "parseVorbisComment: vendorLen=" + vendorLen + " commentCount=" + count);
         for (int i = 0; i < count && p + 4 <= end; i++) {
             final int len = readInt32LE(d, p);
             p += 4;
             if (p + len > end) {
+                Log.w(TAG, "parseVorbisComment: comment #" + i + " overflows, breaking");
                 break;
             }
             final String comment = new String(d, p, len, StandardCharsets.UTF_8);
             p += len;
+            final String key = comment.contains("=") ? comment.substring(0, comment.indexOf('=')) : comment;
+            Log.v(TAG, "parseVorbisComment: tag #" + i + " key='" + key + "' len=" + len);
             if (comment.regionMatches(true, 0, "LYRICS=", 0, 7)) {
+                Log.d(TAG, "parseVorbisComment: found LYRICS tag, length=" + (comment.length() - 7));
                 return comment.substring(7);
             } else if (comment.regionMatches(true, 0, "LYRIC=", 0, 6)) {
+                Log.d(TAG, "parseVorbisComment: found LYRIC tag, length=" + (comment.length() - 6));
                 return comment.substring(6);
             } else if (comment.regionMatches(true, 0, "SYNCEDLYRICS=", 0, 13)) {
+                Log.d(TAG, "parseVorbisComment: found SYNCEDLYRICS tag, length=" + (comment.length() - 13));
                 return comment.substring(13);
             } else if (comment.regionMatches(true, 0, "UNSYNCEDLYRICS=", 0, 15)) {
+                Log.d(TAG, "parseVorbisComment: found UNSYNCEDLYRICS tag, length=" + (comment.length() - 15));
                 return comment.substring(15);
             }
         }
+        Log.d(TAG, "parseVorbisComment: no lyrics tag found among " + count + " comments");
         return null;
     }
 
@@ -514,19 +730,23 @@ public final class LocalLyricsFetcher {
         int pos = 0;
         final StringBuilder packet = new StringBuilder();
         int segmentsLeft = 0;
+        int pagesParsed = 0;
         while (pos + 27 <= d.length) {
             if (d[pos] != 'O' || d[pos + 1] != 'g' || d[pos + 2] != 'g' || d[pos + 3] != 'S') {
+                Log.d(TAG, "parseOgg: OggS magic not found at pos=" + pos + ", stopping");
                 break;
             }
             final int numSegments = d[pos + 26] & 0xFF;
             final int tableEnd = pos + 27 + numSegments;
             if (tableEnd > d.length) {
+                Log.w(TAG, "parseOgg: segment table overflows at page " + pagesParsed);
                 break;
             }
             int dataPos = tableEnd;
             for (int i = 0; i < numSegments; i++) {
                 final int segLen = d[pos + 27 + i] & 0xFF;
                 if (dataPos + segLen > d.length) {
+                    Log.w(TAG, "parseOgg: segment data overflows");
                     return null;
                 }
                 packet.append(new String(d, dataPos, segLen, StandardCharsets.ISO_8859_1));
@@ -541,16 +761,22 @@ public final class LocalLyricsFetcher {
                     final String payload = packet.toString();
                     final int marker = payload.indexOf("\003vorbis");
                     if (marker >= 0) {
+                        Log.d(TAG, "parseOgg: found Vorbis Comment in page " + pagesParsed
+                                + " at marker=" + marker + " payloadLen=" + payload.length());
                         final String s = parseVorbisCommentFromPacket(payload, marker + 7);
                         if (s != null) {
+                            Log.d(TAG, "parseOgg: Vorbis Comment returned lyrics, length=" + s.length());
                             return s;
                         }
+                        Log.d(TAG, "parseOgg: Vorbis Comment returned null");
                     }
                     packet.setLength(0);
                 }
             }
+            pagesParsed++;
             pos = dataPos;
         }
+        Log.d(TAG, "parseOgg: parsed " + pagesParsed + " pages, no lyrics found");
         return null;
     }
 
@@ -558,6 +784,7 @@ public final class LocalLyricsFetcher {
     private static String parseVorbisCommentFromPacket(String payload, int off) {
         final int len = payload.length();
         if (off + 4 > len) {
+            Log.w(TAG, "parseVorbisCommentFromPacket: payload too short for vendor length");
             return null;
         }
         int p = off;
@@ -567,6 +794,7 @@ public final class LocalLyricsFetcher {
                 | ((payload.charAt(p + 3) & 0xFF) << 24);
         p += 4 + vendorLen;
         if (p + 4 > len) {
+            Log.w(TAG, "parseVorbisCommentFromPacket: payload too short for comment count");
             return null;
         }
         final int count = ((payload.charAt(p) & 0xFF))
@@ -574,6 +802,7 @@ public final class LocalLyricsFetcher {
                 | ((payload.charAt(p + 2) & 0xFF) << 16)
                 | ((payload.charAt(p + 3) & 0xFF) << 24);
         p += 4;
+        Log.d(TAG, "parseVorbisCommentFromPacket: vendorLen=" + vendorLen + " commentCount=" + count);
         for (int i = 0; i < count && p + 4 <= len; i++) {
             final int entryLen = ((payload.charAt(p) & 0xFF))
                     | ((payload.charAt(p + 1) & 0xFF) << 8)
@@ -581,20 +810,28 @@ public final class LocalLyricsFetcher {
                     | ((payload.charAt(p + 3) & 0xFF) << 24);
             p += 4;
             if (p + entryLen > len) {
+                Log.w(TAG, "parseVorbisCommentFromPacket: comment #" + i + " overflows, breaking");
                 break;
             }
             final String comment = payload.substring(p, p + entryLen);
             p += entryLen;
+            final String key = comment.contains("=") ? comment.substring(0, comment.indexOf('=')) : comment;
+            Log.v(TAG, "parseVorbisCommentFromPacket: tag #" + i + " key='" + key + "' len=" + entryLen);
             if (comment.regionMatches(true, 0, "LYRICS=", 0, 7)) {
-                return comment.substring(7);
+                Log.d(TAG, "parseVorbisCommentFromPacket: found LYRICS tag");
+                return decodeAutoDetect(comment.substring(7).getBytes(StandardCharsets.ISO_8859_1), 3);
             } else if (comment.regionMatches(true, 0, "LYRIC=", 0, 6)) {
-                return comment.substring(6);
+                Log.d(TAG, "parseVorbisCommentFromPacket: found LYRIC tag");
+                return decodeAutoDetect(comment.substring(6).getBytes(StandardCharsets.ISO_8859_1), 3);
             } else if (comment.regionMatches(true, 0, "SYNCEDLYRICS=", 0, 13)) {
-                return comment.substring(13);
+                Log.d(TAG, "parseVorbisCommentFromPacket: found SYNCEDLYRICS tag");
+                return decodeAutoDetect(comment.substring(13).getBytes(StandardCharsets.ISO_8859_1), 3);
             } else if (comment.regionMatches(true, 0, "UNSYNCEDLYRICS=", 0, 15)) {
-                return comment.substring(15);
+                Log.d(TAG, "parseVorbisCommentFromPacket: found UNSYNCEDLYRICS tag");
+                return decodeAutoDetect(comment.substring(15).getBytes(StandardCharsets.ISO_8859_1), 3);
             }
         }
+        Log.d(TAG, "parseVorbisCommentFromPacket: no lyrics tag found among " + count + " comments");
         return null;
     }
 
@@ -609,6 +846,7 @@ public final class LocalLyricsFetcher {
         while (pos + 8 <= end) {
             final int size = readInt32BE(d, pos);
             if (size < 8 || pos + size > end) {
+                Log.w(TAG, "walkM4a: atom at pos=" + pos + " size=" + size + " overflows, breaking");
                 break;
             }
             final int c0 = d[pos + 4] & 0xFF;
@@ -619,15 +857,20 @@ public final class LocalLyricsFetcher {
                     || (c0 == 'l' && c1 == 'y' && c2 == 'r' && c3 == ' ')
                     || (c0 == 'L' && c1 == 'Y' && c2 == 'R' && c3 == ' ');
             if (isLyrics) {
+                Log.d(TAG, "walkM4a: found lyrics atom at pos=" + pos + " size=" + size
+                        + " type=[" + (char) c0 + (char) c1 + (char) c2 + (char) c3 + "]");
                 final String s = readM4aData(d, pos + 8, pos + size);
                 if (s != null && !s.isBlank()) {
+                    Log.d(TAG, "walkM4a: lyrics atom content length=" + s.length());
                     return s;
                 }
+                Log.d(TAG, "walkM4a: lyrics atom content is empty/null");
             } else {
                 final String type = new String(d, pos + 4, 4, StandardCharsets.ISO_8859_1);
                 if (type.equals("meta") || type.equals("ilst") || type.equals("udta")
                         || type.equals("moov") || type.equals("trak") || type.equals("mdia")
                         || type.equals("minf") || type.equals("stbl")) {
+                    Log.v(TAG, "walkM4a: descending into container atom '" + type + "' at pos=" + pos);
                     int child = pos + 8;
                     if (type.equals("meta")) {
                         child = pos + 12;
@@ -636,6 +879,8 @@ public final class LocalLyricsFetcher {
                     if (s != null) {
                         return s;
                     }
+                } else {
+                    Log.v(TAG, "walkM4a: skipping atom '" + type + "' at pos=" + pos + " size=" + size);
                 }
             }
             pos += size;
@@ -649,32 +894,28 @@ public final class LocalLyricsFetcher {
         while (p + 8 <= end) {
             final int size = readInt32BE(d, p);
             if (size < 8 || p + size > end) {
+                Log.w(TAG, "readM4aData: atom at pos=" + p + " size=" + size + " overflows");
                 break;
             }
             final int c0 = d[p + 4] & 0xFF;
             final int c1 = d[p + 5] & 0xFF;
             final int c2 = d[p + 6] & 0xFF;
             final int c3 = d[p + 7] & 0xFF;
+            Log.v(TAG, "readM4aData: atom [" + (char) c0 + (char) c1 + (char) c2 + (char) c3 + "] at pos=" + p + " size=" + size);
             if (c0 == 'd' && c1 == 'a' && c2 == 't' && c3 == 'a') {
                 final int contentStart = p + 16;
                 final int contentEnd = p + size;
                 if (contentEnd <= contentStart) {
+                    Log.w(TAG, "readM4aData: data atom has no content (contentEnd=" + contentEnd + " <= contentStart=" + contentStart + ")");
                     return null;
                 }
                 final byte[] content = copy(d, contentStart, contentEnd - contentStart);
                 final int dataType = readInt32BE(d, p + 12);
-                final boolean hasBom = content.length >= 2
-                        && ((content[0] == (byte) 0xFE && content[1] == (byte) 0xFF)
-                            || (content[0] == (byte) 0xFF && content[1] == (byte) 0xFE));
-                final String s;
-                if (hasBom) {
-                    s = new String(content, StandardCharsets.UTF_16);
-                } else if (dataType == 2 || (dataType & 0xFFFF) == 2 || (dataType >>> 16) == 2) {
-                    s = new String(content, StandardCharsets.UTF_16BE);
-                } else {
-                    s = new String(content, StandardCharsets.UTF_8);
-                }
+                Log.d(TAG, "readM4aData: data atom dataType=" + dataType + " contentLen=" + content.length);
+                final String s = decodeAutoDetect(content, 3);
                 final String trimmed = s.replace("\uFEFF", "").replace("\0", " ").trim();
+                Log.d(TAG, "readM4aData: decoded length=" + trimmed.length() + " preview='" +
+                        trimmed.substring(0, Math.min(80, trimmed.length())).replace("\n", "\\n") + "'");
                 return trimmed.isEmpty() ? null : trimmed;
             }
             p += size;
@@ -685,17 +926,22 @@ public final class LocalLyricsFetcher {
     @Nullable
     private static Lyrics fallbackViaMediaMetadataRetriever(Context context, Uri uri) {
         if (Build.VERSION.SDK_INT < 30) {
+            Log.d(TAG, "fallbackViaMediaMetadataRetriever: API " + Build.VERSION.SDK_INT + " < 30, skipping");
             return null;
         }
         final MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
+            Log.d(TAG, "fallbackViaMediaMetadataRetriever: setting data source for " + uri);
             retriever.setDataSource(context, uri);
             final String raw = retriever.extractMetadata(METADATA_KEY_LYRICS);
+            Log.d(TAG, "fallbackViaMediaMetadataRetriever: METADATA_KEY_LYRICS=" +
+                    (raw != null ? raw.length() + " chars" : "null"));
             if (raw == null || raw.isBlank()) {
                 return null;
             }
             return parse(raw);
         } catch (Exception ex) {
+            Log.e(TAG, "fallbackViaMediaMetadataRetriever: failed", ex);
             return null;
         } finally {
             try {
@@ -708,9 +954,12 @@ public final class LocalLyricsFetcher {
     @Nullable
     private static Lyrics parse(@Nullable String raw) {
         if (raw == null || raw.isBlank()) {
+            Log.d(TAG, "parse: raw is null or blank");
             return null;
         }
 
+        Log.d(TAG, "parse: trying LRC sync parse, raw length=" + raw.length()
+                + " preview='" + raw.substring(0, Math.min(80, raw.length())).replace("\n", "\\n") + "'");
         final List<LyricsLine> lines = LrcParser.parseSynced(raw);
         if (lines != null && !lines.isEmpty()) {
             boolean synced = false;
@@ -720,14 +969,18 @@ public final class LocalLyricsFetcher {
                     break;
                 }
             }
-            return new Lyrics(lines, "Local", synced);
+            Log.d(TAG, "parse: LRC sync parse returned " + lines.size() + " lines, synced=" + synced);
+            return new Lyrics(lines, "Local", synced, null, null, null, null, raw, "lrc", null);
         }
+        Log.d(TAG, "parse: LRC sync parse returned empty, trying plain text");
 
         final List<LyricsLine> plain = LrcParser.parsePlain(raw);
         if (plain != null && !plain.isEmpty()) {
-            return new Lyrics(plain, "Local", false);
+            Log.d(TAG, "parse: plain text parse returned " + plain.size() + " lines");
+            return new Lyrics(plain, "Local", false, null, null, null, null, raw, "lrc", null);
         }
 
+        Log.d(TAG, "parse: all parse methods returned empty");
         return null;
     }
 
@@ -784,6 +1037,196 @@ public final class LocalLyricsFetcher {
             default:
                 return new String(b, StandardCharsets.ISO_8859_1);
         }
+    }
+
+    private static String decodeAutoDetect(byte[] b, int declaredEnc) {
+        if (b == null || b.length == 0) {
+            return "";
+        }
+        if (b.length >= 2) {
+            if ((b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xFE) {
+                Log.d(TAG, "decodeAutoDetect: BOM UTF-16 LE detected");
+                return new String(b, StandardCharsets.UTF_16);
+            }
+            if ((b[0] & 0xFF) == 0xFE && (b[1] & 0xFF) == 0xFF) {
+                Log.d(TAG, "decodeAutoDetect: BOM UTF-16 BE detected");
+                return new String(b, StandardCharsets.UTF_16BE);
+            }
+        }
+        if (isValidUtf8(b)) {
+            Log.d(TAG, "decodeAutoDetect: valid UTF-8 detected (len=" + b.length + ")");
+            return new String(b, StandardCharsets.UTF_8);
+        }
+        if (isLikelyGbk(b)) {
+            try {
+                Log.d(TAG, "decodeAutoDetect: GBK detected (len=" + b.length + ")");
+                return new String(b, "GBK");
+            } catch (Exception ignored) { }
+        }
+        if (isLikelyBig5(b)) {
+            try {
+                Log.d(TAG, "decodeAutoDetect: Big5 detected (len=" + b.length + ")");
+                return new String(b, "Big5");
+            } catch (Exception ignored) { }
+        }
+        if (isLikelyShiftJis(b)) {
+            try {
+                Log.d(TAG, "decodeAutoDetect: Shift_JIS detected (len=" + b.length + ")");
+                return new String(b, "Shift_JIS");
+            } catch (Exception ignored) { }
+        }
+        if (isLikelyEucKr(b)) {
+            try {
+                Log.d(TAG, "decodeAutoDetect: EUC-KR detected (len=" + b.length + ")");
+                return new String(b, "EUC-KR");
+            } catch (Exception ignored) { }
+        }
+        if (isLikelyWindows1252(b)) {
+            try {
+                Log.d(TAG, "decodeAutoDetect: Windows-1252 detected (len=" + b.length + ")");
+                return new String(b, "Windows-1252");
+            } catch (Exception ignored) { }
+        }
+        switch (declaredEnc) {
+            case 1:
+                Log.d(TAG, "decodeAutoDetect: fallback to UTF-16 (enc=1)");
+                return new String(b, StandardCharsets.UTF_16);
+            case 2:
+                Log.d(TAG, "decodeAutoDetect: fallback to UTF-16BE (enc=2)");
+                return new String(b, StandardCharsets.UTF_16BE);
+            case 3:
+                Log.d(TAG, "decodeAutoDetect: fallback to UTF-8 (enc=3)");
+                return new String(b, StandardCharsets.UTF_8);
+            default:
+                Log.d(TAG, "decodeAutoDetect: fallback to ISO-8859-1 (enc=" + declaredEnc + ")");
+                return new String(b, StandardCharsets.ISO_8859_1);
+        }
+    }
+
+    private static boolean isValidUtf8(byte[] b) {
+        int i = 0;
+        while (i < b.length) {
+            int b0 = b[i] & 0xFF;
+            int expectedCont;
+            if (b0 <= 0x7F) {
+                i++;
+                continue;
+            } else if (b0 >= 0xC2 && b0 <= 0xDF) {
+                expectedCont = 1;
+            } else if (b0 >= 0xE0 && b0 <= 0xEF) {
+                expectedCont = 2;
+            } else if (b0 >= 0xF0 && b0 <= 0xF4) {
+                expectedCont = 3;
+            } else {
+                return false; // Illegal start byte (0x80-0xBF, 0xC0-0xC1, 0xF5-0xFF)
+            }
+            i++;
+            for (int j = 0; j < expectedCont; j++) {
+                if (i >= b.length || (b[i] & 0xC0) != 0x80) {
+                    return false;
+                }
+                i++;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isLikelyGbk(byte[] b) {
+        int i = 0;
+        int pairs = 0;
+        while (i < b.length) {
+            int b0 = b[i] & 0xFF;
+            if (b0 <= 0x7F) {
+                i++;
+                continue;
+            }
+            if (b0 >= 0x81 && b0 <= 0xFE && i + 1 < b.length) {
+                int b1 = b[i + 1] & 0xFF;
+                if (b1 >= 0x40 && b1 <= 0xFE && b1 != 0x7F) {
+                    pairs++;
+                    i += 2;
+                    continue;
+                }
+            }
+            return false;
+        }
+        return pairs > 0;
+    }
+
+    private static boolean isLikelyBig5(byte[] b) {
+        int i = 0;
+        int pairs = 0;
+        while (i < b.length) {
+            int b0 = b[i] & 0xFF;
+            if (b0 <= 0x7F) {
+                i++;
+                continue;
+            }
+            if (b0 >= 0x81 && b0 <= 0xFE && i + 1 < b.length) {
+                int b1 = b[i + 1] & 0xFF;
+                if ((b1 >= 0x40 && b1 <= 0x7E) || (b1 >= 0xA1 && b1 <= 0xFE)) {
+                    pairs++;
+                    i += 2;
+                    continue;
+                }
+            }
+            return false;
+        }
+        return pairs > 0;
+    }
+
+    private static boolean isLikelyShiftJis(byte[] b) {
+        int i = 0;
+        int pairs = 0;
+        while (i < b.length) {
+            int b0 = b[i] & 0xFF;
+            if (b0 <= 0x7F) {
+                i++;
+                continue;
+            }
+            if (((b0 >= 0x81 && b0 <= 0x9F) || (b0 >= 0xE0 && b0 <= 0xEF)) && i + 1 < b.length) {
+                int b1 = b[i + 1] & 0xFF;
+                if ((b1 >= 0x40 && b1 <= 0x7E) || (b1 >= 0x80 && b1 <= 0xFC)) {
+                    pairs++;
+                    i += 2;
+                    continue;
+                }
+            }
+            return false;
+        }
+        return pairs > 0;
+    }
+
+    private static boolean isLikelyEucKr(byte[] b) {
+        int i = 0;
+        int pairs = 0;
+        while (i < b.length) {
+            int b0 = b[i] & 0xFF;
+            if (b0 <= 0x7F) {
+                i++;
+                continue;
+            }
+            if (b0 >= 0x81 && b0 <= 0xFE && i + 1 < b.length) {
+                int b1 = b[i + 1] & 0xFF;
+                if (b1 >= 0x41 && b1 <= 0xFE) {
+                    pairs++;
+                    i += 2;
+                    continue;
+                }
+            }
+            return false;
+        }
+        return pairs > 0;
+    }
+
+    private static boolean isLikelyWindows1252(byte[] b) {
+        for (byte value : b) {
+            int b0 = value & 0xFF;
+            if (b0 >= 0x80 && b0 <= 0x9F) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static byte[] copy(byte[] src, int off, int len) {

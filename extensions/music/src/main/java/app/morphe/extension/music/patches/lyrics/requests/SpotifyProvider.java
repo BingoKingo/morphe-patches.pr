@@ -82,13 +82,15 @@ public final class SpotifyProvider implements LyricsProvider {
             return null;
         }
 
+        final String sourceUrl = "https://open.spotify.com/track/" + trackId;
         final JSONObject lyricsResponse = fetchLyrics(spDc, trackId);
         if (lyricsResponse == null) {
             Log.d(TAG, "Spotify: no lyrics returned for trackId=" + trackId);
             return null;
         }
 
-        final Lyrics lyrics = parseLyrics(lyricsResponse);
+        final String rawJson = lyricsResponse.toString();
+        final Lyrics lyrics = parseLyrics(lyricsResponse, rawJson, sourceUrl);
         if (lyrics != null) {
             Log.d(TAG, "Spotify: got lyrics, synced=" + lyrics.synced() + " lines=" + lyrics.lines().size());
         }
@@ -172,6 +174,11 @@ public final class SpotifyProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics parseLyrics(JSONObject response) {
+        return parseLyrics(response, response.toString(), null);
+    }
+
+    @Nullable
+    private Lyrics parseLyrics(JSONObject response, String rawJson, @Nullable String sourceUrl) {
         final JSONObject lyricsObj = response.optJSONObject("lyrics");
         if (lyricsObj == null) {
             return null;
@@ -186,14 +193,14 @@ public final class SpotifyProvider implements LyricsProvider {
         final boolean isSynced = !"UNSYNCED".equals(syncType);
 
         if (isSynced) {
-            return parseSyncedLines(linesArr);
+            return parseSyncedLines(linesArr, rawJson, sourceUrl);
         } else {
-            return parsePlainLines(linesArr);
+            return parsePlainLines(linesArr, rawJson, sourceUrl);
         }
     }
 
     @Nullable
-    private Lyrics parseSyncedLines(JSONArray linesArr) {
+    private Lyrics parseSyncedLines(JSONArray linesArr, String rawJson, @Nullable String sourceUrl) {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
@@ -224,7 +231,7 @@ public final class SpotifyProvider implements LyricsProvider {
             return null;
         }
         Log.d(TAG, "Spotify: parsed " + lines.size() + " synced lines");
-        return new Lyrics(lines, name(), true);
+        return new Lyrics(lines, name(), true, null, null, null, null, rawJson, "sp.json", sourceUrl);
     }
 
     private static List<Word> distributeWords(String[] tokens, long startMs, long durationMs) {
@@ -246,7 +253,7 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     @Nullable
-    private Lyrics parsePlainLines(JSONArray linesArr) {
+    private Lyrics parsePlainLines(JSONArray linesArr, String rawJson, @Nullable String sourceUrl) {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
@@ -266,7 +273,7 @@ public final class SpotifyProvider implements LyricsProvider {
             return null;
         }
         Log.d(TAG, "Spotify: parsed " + lines.size() + " plain lines");
-        return new Lyrics(lines, name(), false);
+        return new Lyrics(lines, name(), false, null, null, null, null, rawJson, "sp.json", sourceUrl);
     }
 
 

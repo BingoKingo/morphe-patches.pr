@@ -339,13 +339,14 @@ YouTube Music 8.x —— 交叉淡入仅在 9.x 及更高版本上运行"</strin
   <string name="morphe_music_lyrics_tap_to_seek_title">点击歌词行以跳转</string>
   <string name="morphe_music_lyrics_tap_to_seek_summary">点击一行将跳到歌曲的该时刻</string>
   <string name="morphe_music_lyrics_show_copy_button_title">显示复制按钮</string>
-  <string name="morphe_music_lyrics_show_copy_button_summary">将原始歌词复制为纯文本到剪贴板</string>
+  <string name="morphe_music_lyrics_show_copy_button_summary">点击复制原始歌词到剪贴板；长按保存歌词源文件到下载文件夹</string>
   <string name="morphe_music_lyrics_show_translate_button_title">显示翻译按钮</string>
   <string name="morphe_music_lyrics_show_translate_button_summary">使用提供者翻译或 Google 翻译歌词</string>
   <string name="morphe_music_lyrics_show_romanize_button_title">显示音译按钮</string>
   <string name="morphe_music_lyrics_show_romanize_button_summary">使用提供者音译或 Google 音译歌词</string>
   <string name="morphe_music_lyrics_show_refresh_button_title">显示刷新按钮</string>
-  <string name="morphe_music_lyrics_show_refresh_button_summary">切换到下一个匹配的歌词候选项</string>
+  <string name="morphe_music_lyrics_show_refresh_button_summary">点击切换到下一歌词源；长按临时禁用第三方歌词显示原生歌词</string>
+  <string name="morphe_music_lyrics_saved">已保存</string>
   <string name="morphe_music_lyrics_word_sync_title">逐词同步高亮</string>
   <string name="morphe_music_lyrics_word_sync_summary">当歌词包含逐词时间信息时，随音乐高亮每一个词或音节</string>
   <string name="morphe_music_lyrics_mediasession_title">在媒体通知卡片中显示歌词</string>

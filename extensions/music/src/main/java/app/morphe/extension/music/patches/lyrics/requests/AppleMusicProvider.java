@@ -434,12 +434,13 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     private Lyrics fetchLyrics(String userToken, String storefront, String language, String songId) {
         Log.d(TAG, "AppleMusic: trying dedicated lyrics for songId=" + songId);
-        final Lyrics dedicatedResult = fetchLyricsDedicated(userToken, storefront, language, songId);
+        final String sourceUrl = "https://music.apple.com/song/" + songId;
+        final Lyrics dedicatedResult = fetchLyricsDedicated(userToken, storefront, language, songId, sourceUrl);
         final int dedicatedRank = rankOfLyrics(dedicatedResult);
         Log.d(TAG, "AppleMusic: dedicated rank=" + dedicatedRank);
 
         Log.d(TAG, "AppleMusic: trying include lyrics for songId=" + songId);
-        final Lyrics includeResult = fetchLyricsInclude(userToken, storefront, language, songId);
+        final Lyrics includeResult = fetchLyricsInclude(userToken, storefront, language, songId, sourceUrl);
         final int includeRank = rankOfLyrics(includeResult);
         Log.d(TAG, "AppleMusic: include rank=" + includeRank);
 
@@ -475,7 +476,7 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics fetchLyricsDedicated(String userToken, String storefront, String language,
-                                         String songId) {
+                                         String songId, String sourceUrl) {
         HttpURLConnection connection = null;
         try {
             final String url = API_BASE + storefront + "/songs/" + songId
@@ -533,7 +534,7 @@ public final class AppleMusicProvider implements LyricsProvider {
             Log.d(TAG, "AppleMusic: dedicated got " + result.lines.size() + " lines");
             return new Lyrics(result.lines, name(), true,
                     result.romanization, result.translations,
-                    result.romanizations, result.songwriters);
+                    result.romanizations, result.songwriters, ttml, "ttml", sourceUrl);
         } catch (Exception ex) {
             Log.d(TAG, "AppleMusic: dedicated lyrics fetch failed", ex);
             return null;
@@ -546,7 +547,7 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics fetchLyricsInclude(String userToken, String storefront, String language,
-                                       String songId) {
+                                       String songId, String sourceUrl) {
         HttpURLConnection connection = null;
         try {
             final String url = API_BASE + storefront + "/songs/" + songId
@@ -619,7 +620,7 @@ public final class AppleMusicProvider implements LyricsProvider {
             Log.d(TAG, "AppleMusic: include got " + result.lines.size() + " lines");
             return new Lyrics(result.lines, name(), true,
                     result.romanization, result.translations,
-                    result.romanizations, result.songwriters);
+                    result.romanizations, result.songwriters, ttml, "ttml", sourceUrl);
         } catch (Exception ex) {
             Log.d(TAG, "AppleMusic: include lyrics fetch failed", ex);
             return null;

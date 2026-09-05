@@ -192,7 +192,7 @@ public final class LrcLibProvider implements LyricsProvider {
         if (enhanced != null) {
             List<LyricsLine> lines = LrcParser.parseSynced(enhanced);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), true);
+                return new Lyrics(lines, name(), true, null, null, null, null, enhanced, "lrc", null);
             }
         }
 
@@ -200,7 +200,7 @@ public final class LrcLibProvider implements LyricsProvider {
         if (synced != null) {
             List<LyricsLine> lines = LrcParser.parseSynced(synced);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), true);
+                return new Lyrics(lines, name(), true, null, null, null, null, synced, "lrc", null);
             }
         }
 
@@ -208,7 +208,7 @@ public final class LrcLibProvider implements LyricsProvider {
         if (plain != null) {
             List<LyricsLine> lines = LrcParser.parsePlain(plain);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), false);
+                return new Lyrics(lines, name(), false, null, null, null, null, plain, "lrc", null);
             }
         }
 

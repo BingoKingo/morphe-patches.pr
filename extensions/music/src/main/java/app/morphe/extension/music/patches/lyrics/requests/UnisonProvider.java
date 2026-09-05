@@ -184,19 +184,19 @@ public final class UnisonProvider implements LyricsProvider {
                     return null;
                 }
                 return new Lyrics(result.lines, name(), true, result.romanization, result.translations,
-                        result.romanizations, result.songwriters);
+                        result.romanizations, result.songwriters, lyrics, "ttml", null);
             case "lrc":
                 final List<LyricsLine> synced = LrcParser.parseSynced(lyrics);
                 if (synced.isEmpty()) {
                     return null;
                 }
-                return new Lyrics(synced, name(), true);
+                return new Lyrics(synced, name(), true, null, null, null, null, lyrics, "lrc", null);
             case "plain":
                 final List<LyricsLine> plain = LrcParser.parsePlain(lyrics);
                 if (plain.isEmpty()) {
                     return null;
                 }
-                return new Lyrics(plain, name(), false);
+                return new Lyrics(plain, name(), false, null, null, null, null, lyrics, "plain", null);
             default:
                 return null;
         }

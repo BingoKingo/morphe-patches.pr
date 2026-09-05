@@ -54,7 +54,7 @@ public final class BinimumProvider implements LyricsProvider {
                 return null;
             }
             return new Lyrics(result.lines, name(), true, result.romanization, result.translations,
-                    result.romanizations, result.songwriters);
+                    result.romanizations, result.songwriters, ttml, "ttml", null);
         } finally {
             if (connection != null) {
                 connection.disconnect();

@@ -85,6 +85,9 @@ public final class QQProvider implements LyricsProvider {
             return null;
         }
 
+        final long songId = song.optLong("id");
+        final String sourceUrl = "https://y.qq.com/n/ryqq/songDetail/" + songId;
+
         JSONObject data = fetchLyricData(song);
         if (data == null) {
             return null;
@@ -122,7 +125,7 @@ public final class QQProvider implements LyricsProvider {
                 + " lines (wordSynced=" + hasWordTimings(finalLines)
                 + " romanized=" + LyricsMerge.hasText(romanization)
                 + " translated=" + (translations != null) + ") for " + finalTrack);
-        return new Lyrics(lines, name(), true, romanization, translations);
+        return new Lyrics(lines, name(), true, romanization, translations, null, null, original, "qrc", sourceUrl);
     }
 
     @Override
@@ -156,6 +159,9 @@ public final class QQProvider implements LyricsProvider {
             return null;
         }
 
+        final long songId = song.optLong("id");
+        final String sourceUrl = "https://y.qq.com/n/ryqq/songDetail/" + songId;
+
         String original = decodeQqLyricPayload(data.optString("lyric", ""));
         List<LyricsLine> lines = parseQrcFormat(original);
         if (lines.isEmpty()) {
@@ -181,7 +187,7 @@ public final class QQProvider implements LyricsProvider {
         Map<String, List<LyricsLine>> translations =
                 LyricsMerge.singleLanguageTranslations(translation, "zh");
 
-        return new Lyrics(lines, name(), true, romanization, translations);
+        return new Lyrics(lines, name(), true, romanization, translations, null, null, original, "qrc", sourceUrl);
     }
 
     private static boolean hasWordTimings(List<LyricsLine> lines) {

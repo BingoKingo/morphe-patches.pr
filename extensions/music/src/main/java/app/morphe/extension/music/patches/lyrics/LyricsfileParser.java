@@ -65,20 +65,20 @@ public final class LyricsfileParser {
         }
 
         if (instrumental) {
-            return parsedLines.isEmpty() ? Lyrics.NOT_FOUND : new Lyrics(parsedLines, providerName, true);
+            return parsedLines.isEmpty() ? Lyrics.NOT_FOUND : new Lyrics(parsedLines, providerName, true, null, null, null, null, yaml, "lyricsfile.yaml", null);
         }
 
         boolean synced = parsedLines.stream()
                 .anyMatch(line -> line.startTimeMs() != LyricsLine.NO_TIME);
         if (synced) {
-            return new Lyrics(parsedLines, providerName, true);
+            return new Lyrics(parsedLines, providerName, true, null, null, null, null, yaml, "lyricsfile.yaml", null);
         }
 
         Object plainObject = top.get("plain");
         if (plainObject instanceof String) {
             List<LyricsLine> plain = LrcParser.parsePlain((String) plainObject);
             if (!plain.isEmpty()) {
-                return new Lyrics(plain, providerName, false);
+                return new Lyrics(plain, providerName, false, null, null, null, null, yaml, "lyricsfile.yaml", null);
             }
         }
         return Lyrics.NOT_FOUND;

@@ -154,7 +154,7 @@ public final class SubtitlesFetcher {
             final String json = fetchCaptionUrl(buildCaptionUrl(track.url, poToken));
             final List<LyricsLine> lines = parseJson3(json);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true);
+                return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true, null, null, null, null, json, "json3", null);
             }
         } catch (Exception ex) {
             Logger.printDebug(() -> "Subtitles: caption url fetch failed for " + track, ex);
@@ -482,7 +482,7 @@ public final class SubtitlesFetcher {
                 if (!lines.isEmpty()) {
                     Logger.printDebug(() -> "Subtitles: timedtext fallback got " + lines.size()
                             + " lines (lang=" + lang + ")");
-                    return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true);
+                    return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true, null, null, null, null, json, "json3", null);
                 }
             } catch (Exception ex) {
                 // Wrong language or unavailable; try the next candidate.

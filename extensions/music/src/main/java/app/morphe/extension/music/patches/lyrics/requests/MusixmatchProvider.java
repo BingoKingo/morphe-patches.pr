@@ -396,7 +396,7 @@ public final class MusixmatchProvider implements LyricsProvider {
             return null;
         }
         Log.d(TAG, "Musixmatch: parsed " + result.size() + " richsync lines");
-        return new Lyrics(result, name(), true);
+        return new Lyrics(result, name(), true, null, null, null, null, body, "mxm.json", null);
     }
 
     private HttpURLConnection openDesktopApi(String url) throws IOException {

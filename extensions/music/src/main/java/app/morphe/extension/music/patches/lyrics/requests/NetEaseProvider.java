@@ -117,6 +117,9 @@ public final class NetEaseProvider implements LyricsProvider {
             return null;
         }
 
+        String rawFormat = !yrc.isEmpty() ? yrc : lrc;
+        String formatType = !yrc.isEmpty() ? "yrc" : "lrc";
+
         List<LyricsLine> romaLines = romalrc.isEmpty() ? null : LrcParser.parseSynced(romalrc);
         List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, romaLines);
 
@@ -129,7 +132,9 @@ public final class NetEaseProvider implements LyricsProvider {
                 + " lines (wordSynced=" + hasWordTimings(lines)
                 + " romanized=" + LyricsMerge.hasText(romanization)
                 + " translated=" + (translations != null) + ") for " + track);
-        return new Lyrics(lines, name(), true, romanization, translations);
+        long songId = song.getLong("id");
+        String sourceUrl = "https://music.163.com/song?id=" + songId;
+        return new Lyrics(lines, name(), true, romanization, translations, null, null, rawFormat, formatType, sourceUrl);
     }
 
     @Override
@@ -183,7 +188,11 @@ public final class NetEaseProvider implements LyricsProvider {
         Map<String, List<LyricsLine>> translations =
                 LyricsMerge.singleLanguageTranslations(translation, "zh");
 
-        return new Lyrics(lines, name(), true, romanization, translations);
+        String rawFormat = !yrc.isEmpty() ? yrc : lrc;
+        String formatType = !yrc.isEmpty() ? "yrc" : "lrc";
+        long songId = song.getLong("id");
+        String sourceUrl = "https://music.163.com/song?id=" + songId;
+        return new Lyrics(lines, name(), true, romanization, translations, null, null, rawFormat, formatType, sourceUrl);
     }
 
     private static boolean hasWordTimings(List<LyricsLine> lines) {

@@ -28,16 +28,23 @@ import java.util.Map;
  * @param romanization Legacy single-language romanization, kept for backward compatibility.
  * @param romanizations Multi-language romanizations keyed by BCP-47 language tag.
  * @param songwriters Songwriter/credits names extracted from TTML metadata.
+ * @param rawFormat Decrypted raw lyrics text in the provider's original format (e.g. LRC, QRC, TTML).
+ * @param formatType File extension for the raw format (e.g. {@code "lrc"}, {@code "qrc"}, {@code "ttml"}).
+ * @param sourceUrl Optional URL to the song page on the provider's platform, opened when the
+ *                  source label is clicked.
  */
 public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                      @Nullable List<LyricsLine> romanization,
                      @Nullable Map<String, List<LyricsLine>> translations,
                      @Nullable Map<String, List<LyricsLine>> romanizations,
-                     @Nullable List<String> songwriters) {
+                     @Nullable List<String> songwriters,
+                     @Nullable String rawFormat,
+                     @Nullable String formatType,
+                     @Nullable String sourceUrl) {
 
     /** Marker for a track that was looked up successfully but has no lyrics anywhere. */
     public static final Lyrics NOT_FOUND = new Lyrics(Collections.emptyList(), "", false,
-            null, null, null, null);
+            null, null, null, null, null, null, null);
 
     public static final String CAPTIONS_PROVIDER = "Captions";
 
@@ -51,23 +58,23 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                   @Nullable List<LyricsLine> romanization,
                   @Nullable Map<String, List<LyricsLine>> translations) {
-        this(lines, providerName, synced, romanization, translations, null, null);
+        this(lines, providerName, synced, romanization, translations, null, null, null, null, null);
     }
 
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                   @Nullable List<LyricsLine> romanization,
                   @Nullable Map<String, List<LyricsLine>> translations,
                   @Nullable Map<String, List<LyricsLine>> romanizations) {
-        this(lines, providerName, synced, romanization, translations, romanizations, null);
+        this(lines, providerName, synced, romanization, translations, romanizations, null, null, null, null);
     }
 
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced) {
-        this(lines, providerName, synced, null, null, null, null);
+        this(lines, providerName, synced, null, null, null, null, null, null, null);
     }
 
     public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                   @Nullable List<LyricsLine> romanization) {
-        this(lines, providerName, synced, romanization, null, null, null);
+        this(lines, providerName, synced, romanization, null, null, null, null, null, null);
     }
 
     private static Map<String, List<LyricsLine>> unmodifiableTranslations(

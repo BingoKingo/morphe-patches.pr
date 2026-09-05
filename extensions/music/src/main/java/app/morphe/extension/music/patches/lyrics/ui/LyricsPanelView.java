@@ -12,6 +12,8 @@ import static app.morphe.extension.shared.StringRef.str;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -47,6 +49,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
+import app.morphe.extension.music.patches.lyrics.LyricsFileSaver;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsManager;
 import app.morphe.extension.music.patches.lyrics.LyricsRomanizer;
@@ -158,6 +161,9 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
     private boolean translatedFromGoogle;
     /** When true, romanization is carried per-word on each {@link Word} (rendered above each word). */
     private boolean perWordRomaji;
+    /** URL to the song page on the provider's platform, opened when the source label is clicked. */
+    @Nullable
+    private String currentSourceUrl;
     /** When true, the next LOADED state was triggered by a refresh/cycle action. */
     private boolean refreshInProgress;
     private boolean translateInProgress;
@@ -302,6 +308,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             copyView = new TextView(context);
             applyButtonStyle(copyView, COPY_ICON);
             copyView.setOnClickListener(view -> onCopyClicked());
+            copyView.setOnLongClickListener(view -> {
+                onCopyLongPressed();
+                return true;
+            });
             buttonRow.addView(copyView, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -339,6 +349,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             refreshView = new TextView(context);
             applyButtonStyle(refreshView, REFRESH_ICON);
             refreshView.setOnClickListener(view -> onRefreshClicked());
+            refreshView.setOnLongClickListener(view -> {
+                onRefreshLongPressed();
+                return true;
+            });
             LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -645,8 +659,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             }
         });
 
+        currentSourceUrl = newLyrics.sourceUrl();
         footerView.setText(sourceText(newLyrics.providerName(),
                 translatedLines != null, translatedFromGoogle, romanizedFromGoogle));
+        footerView.setOnClickListener(view -> onSourceClicked());
         footerContainer.setVisibility(VISIBLE);
         footerView.setVisibility(VISIBLE);
         buttonRow.setVisibility(VISIBLE);
@@ -876,6 +892,19 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
      * Copies the original lyrics to the clipboard. Translations and romanizations are
      * excluded even when displayed on screen.
      */
+    private void onSourceClicked() {
+        try {
+            if (currentSourceUrl == null || currentSourceUrl.isEmpty()) {
+                return;
+            }
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(currentSourceUrl));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+        } catch (Exception ex) {
+            Logger.printException(() -> "Failed to open source URL", ex);
+        }
+    }
+
     private void onCopyClicked() {
         try {
             Lyrics current = lyrics;
@@ -909,6 +938,34 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             }
         } catch (Exception ex) {
             Logger.printException(() -> "onCopyClicked failure", ex);
+        }
+    }
+
+    private void onCopyLongPressed() {
+        try {
+            Lyrics current = lyrics;
+            if (current == null || current.rawFormat() == null) {
+                return;
+            }
+            TrackInfo track = LyricsManager.getInstance().getCurrentTrack();
+            if (track == null) {
+                return;
+            }
+            String savedPath = LyricsFileSaver.save(getContext(), track, current);
+            if (savedPath != null) {
+                Utils.showToastShort("Saved to " + savedPath);
+                if (copyView != null) {
+                    setButtonLabel(copyView, str("morphe_music_lyrics_saved"), true);
+                    handler.postDelayed(() -> {
+                        if (copyView != null) {
+                            setButtonLabel(copyView, null, false);
+                        }
+                    }, 1500);
+                }
+            } else {
+            }
+        } catch (Exception ex) {
+            Logger.printException(() -> "onCopyLongPressed failure", ex);
         }
     }
 
@@ -1000,6 +1057,20 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         refreshInProgress = true;
         setButtonLabel(refreshView, str("morphe_music_lyrics_refreshing"), true);
         LyricsManager.getInstance().fetchNextCandidate();
+    }
+
+    private void onRefreshLongPressed() {
+        if (refreshView == null) {
+            return;
+        }
+        LyricsManager manager = LyricsManager.getInstance();
+        if (manager.isOverrideNative()) {
+            setButtonLabel(refreshView, null, false);
+            manager.setOverrideNative(false);
+        } else {
+            manager.setOverrideNative(true);
+            setButtonLabel(refreshView, str("morphe_music_lyrics_refreshing"), true);
+        }
     }
 
     private void updateRefreshLabel() {

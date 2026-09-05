@@ -97,7 +97,7 @@ public final class AmllProvider implements LyricsProvider {
                 return null;
             }
             return new Lyrics(result.lines, name(), true, result.romanization, result.translations,
-                    result.romanizations, result.songwriters);
+                    result.romanizations, result.songwriters, ttml, "ttml", null);
         } finally {
             if (getConnection != null) {
                 getConnection.disconnect();

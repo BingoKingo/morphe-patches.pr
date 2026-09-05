@@ -11,6 +11,7 @@ import android.media.MediaMetadata;
 import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.SystemClock;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -49,7 +50,6 @@ import app.morphe.extension.music.patches.lyrics.requests.AppleMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
-import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
 /**
@@ -62,6 +62,8 @@ import app.morphe.extension.shared.Utils;
  * accumulate. A seek or play/pause also re-anchors via {@link #onSetPlaybackState}.
  */
 public final class LyricsManager {
+
+    private static final String TAG = "MorpheLyrics";
 
 
     public enum State {
@@ -114,6 +116,9 @@ public final class LyricsManager {
     private Lyrics currentLyrics;
 
     private State state = State.IDLE;
+
+    /** Temporarily disables the third-party lyrics overlay, showing native lyrics instead. */
+    private boolean overrideNative;
 
     /**
      * Incremented for every track change so that a late response for a previous
@@ -245,12 +250,14 @@ public final class LyricsManager {
     public void onSetMetadata(@Nullable MediaMetadata metadata) {
         Utils.verifyOnMainThread();
         if (metadata == null || !Settings.LYRICS_ENABLED.get()) {
+            Log.d(TAG, "onSetMetadata: null metadata or lyrics disabled");
             return;
         }
 
         String rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
         String rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
         if (rawTitle == null || rawTitle.isBlank() || rawArtist == null || rawArtist.isBlank()) {
+            Log.d(TAG, "onSetMetadata: title or artist is blank (title='" + rawTitle + "' artist='" + rawArtist + "')");
             return;
         }
 
@@ -266,6 +273,7 @@ public final class LyricsManager {
         );
 
         if (track.title().isEmpty() || track.artist().isEmpty()) {
+            Log.d(TAG, "onSetMetadata: cleaned title or artist is empty");
             return;
         }
 
@@ -273,7 +281,12 @@ public final class LyricsManager {
         currentRawArtist = rawArtist;
         currentMediaUri = parseMediaUri(metadata);
 
+        Log.d(TAG, "onSetMetadata: title='" + effectiveTitle + "' artist='" + effectiveArtist
+                + "' album='" + track.album() + "' duration=" + track.durationSeconds() + "s"
+                + " mediaUri=" + currentMediaUri);
+
         if (track.equals(currentTrack)) {
+            Log.d(TAG, "onSetMetadata: same track, resetting position only");
             positionMs = 0;
             positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
             lastVideoTimeSample = -1;
@@ -282,6 +295,7 @@ public final class LyricsManager {
         }
 
         currentTrack = track;
+        overrideNative = false;
         // A new track starts at zero, and the first playback state update corrects it.
         positionMs = 0;
         positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
@@ -351,6 +365,7 @@ public final class LyricsManager {
         }
 
         currentTrack = new TrackInfo(cleanedTitle, cleanedArtist, "", 0);
+        overrideNative = false;
         currentMediaUri = mediaUri;
         positionMs = 0;
         positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
@@ -363,6 +378,24 @@ public final class LyricsManager {
         Utils.verifyOnMainThread();
         currentMediaUri = null;
         setState(State.IDLE, null);
+    }
+
+    /**
+     * Temporarily disables the third-party lyrics overlay. When enabled, the native
+     * lyrics panel is shown instead. Automatically cleared on track change.
+     */
+    public void setOverrideNative(boolean override) {
+        Utils.verifyOnMainThread();
+        overrideNative = override;
+        if (override) {
+            setState(State.IDLE, null);
+        } else if (currentTrack != null) {
+            load(currentTrack);
+        }
+    }
+
+    public boolean isOverrideNative() {
+        return overrideNative;
     }
 
     /**
@@ -386,6 +419,7 @@ public final class LyricsManager {
 
     private void load(TrackInfo track) {
         final int id = ++requestId;
+        Log.d(TAG, "load: id=" + id + " title='" + track.title() + "' artist='" + track.artist() + "'");
         setState(State.LOADING, null);
 
         // Reset candidate cycling state for the new track.
@@ -398,6 +432,8 @@ public final class LyricsManager {
 
         final Lyrics cachedSubtitles = LyricsCache.get(track, LyricsSource.SUBTITLES.name());
         if (cachedSubtitles != null) {
+            Log.d(TAG, "load: subtitles cache " + (cachedSubtitles == Lyrics.NOT_FOUND ? "NOT_FOUND" :
+                    cachedSubtitles.lines().size() + " lines"));
             if (cachedSubtitles == Lyrics.NOT_FOUND) {
                 executor.execute(() -> runProviderLookup(id, track, null));
                 return;
@@ -430,8 +466,10 @@ public final class LyricsManager {
                     translations.put(langTag, outcome.translationLyrics.lines());
                     result = new Lyrics(result.lines(), result.providerName(), result.synced(),
                             result.romanization(), translations,
-                            result.romanizations(), result.songwriters());
-                    Logger.printDebug(() -> "Lyrics: embedded YouTube translation lang=" + langTag
+                            result.romanizations(), result.songwriters(),
+                            result.rawFormat(), result.formatType(),
+                            result.sourceUrl());
+                    Log.d(TAG, "Lyrics: embedded YouTube translation lang=" + langTag
                             + " lines=" + outcome.translationLyrics.lines().size());
                 }
                 final Lyrics toCache = result;
@@ -501,7 +539,7 @@ public final class LyricsManager {
                             candidates = new ArrayList<>(candidates.subList(0, 5));
                         }
                     } catch (Exception ex) {
-                        Logger.printInfo(() -> "Candidate fetch failed: " + provider.name(), ex);
+                        Log.e(TAG, "Candidate fetch failed: " + provider.name(), ex);
                     }
                     if (candidates == null) {
                         candidates = new ArrayList<>();
@@ -521,7 +559,7 @@ public final class LyricsManager {
                             if (id != requestId) {
                                 return;
                             }
-                            Logger.printDebug(() -> "Refresh: provider=" + currentProviders.get(providerIdx).name()
+                            Log.d(TAG, "Refresh: provider=" + currentProviders.get(providerIdx).name()
                                     + " candidate=" + (candidateIdx + 1) + "/" + candidateCount);
                             publish(id, toPublish);
                         });
@@ -545,7 +583,7 @@ public final class LyricsManager {
     }
 
     private void runProviderLookup(int id, TrackInfo track, @Nullable TrackInfo innertubeTrack) {
-        Logger.printInfo(() -> "Lyrics lookup start: title='" + track.title() + "' artist='"
+        Log.i(TAG, "Lyrics lookup start: title='" + track.title() + "' artist='"
                 + track.artist() + "' innertubeTitle='" + (innertubeTrack != null ? innertubeTrack.title() : "n/a")
                 + "' useEmbedded=" + Settings.LYRICS_USE_EMBEDDED.get()
                 + " isLocalTrack=" + isLocalTrack() + " mediaUri=" + currentMediaUri
@@ -553,22 +591,25 @@ public final class LyricsManager {
         // Local files take priority: read embedded LYRICS/LYRIC tags before hitting providers.
         if (Settings.LYRICS_USE_EMBEDDED.get()) {
             final Uri embeddedUri = localUriFor(track);
-            Logger.printInfo(() -> "Local embedded lyrics: videoId='"
+            Log.i(TAG, "Local embedded lyrics: videoId='"
                     + VideoInformation.getVideoId() + "' currentUri=" + currentMediaUri
                     + " resolvedUri=" + embeddedUri + " isLocalTrack=" + isLocalTrack());
             if (embeddedUri != null) {
-                Lyrics embedded = LyricsCache.get(track, LyricsSource.LOCAL.name());
-                if (embedded == null) {
-                    embedded = LocalLyricsFetcher.fetch(embeddedUri);
-                    LyricsCache.put(track, LyricsSource.LOCAL.name(),
-                            embedded != null ? embedded : Lyrics.NOT_FOUND);
-                }
-                if (embedded != null && embedded != Lyrics.NOT_FOUND) {
+                Log.d(TAG, "Embedded: reading directly from " + embeddedUri);
+                final Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
+                if (embedded != null) {
+                    Log.i(TAG, "Embedded: found " + embedded.lines().size() + " lines, synced=" + embedded.synced());
+                    LyricsCache.put(track, LyricsSource.LOCAL.name(), embedded);
                     final Lyrics toPublish = embedded;
                     Utils.runOnMainThread(() -> publish(id, toPublish));
                     return;
                 }
+                Log.d(TAG, "Embedded: no lyrics found, falling through to online providers");
+            } else {
+                Log.d(TAG, "Embedded: resolvedUri is null (not a local track), falling through to online providers");
             }
+        } else {
+            Log.d(TAG, "Embedded: LYRICS_USE_EMBEDDED is disabled, skipping");
         }
 
         final String order = Settings.LYRICS_SOURCE.get();
@@ -760,7 +801,7 @@ public final class LyricsManager {
                     return provider.fetch(track);
                 } catch (Exception ex) {
                     threadFailed.set(true);
-                    Logger.printInfo(() -> "Lyrics request failed: " + provider.name(), ex);
+                    Log.e(TAG, "Lyrics request failed: " + provider.name(), ex);
                     return null;
                 }
             }));
@@ -775,7 +816,7 @@ public final class LyricsManager {
         while (completed < futures.size()) {
             long remaining = deadline - System.currentTimeMillis();
             if (remaining <= 0) {
-                Logger.printDebug(() -> "fetchFromProviders: overall timeout reached");
+                Log.w(TAG, "fetchFromProviders: overall timeout reached");
                 break;
             }
 
@@ -787,7 +828,7 @@ public final class LyricsManager {
                 break;
             }
             if (f == null) {
-                Logger.printDebug(() -> "fetchFromProviders: poll timeout");
+                Log.w(TAG, "fetchFromProviders: poll timeout");
                 break;
             }
 
@@ -841,7 +882,7 @@ public final class LyricsManager {
 
     private void publish(int id, Lyrics lyrics) {
         if (id != requestId) {
-            Logger.printDebug(() -> "Discarding lyrics of a previous track");
+            Log.d(TAG, "Discarding lyrics of a previous track");
             return;
         }
 
@@ -854,7 +895,7 @@ public final class LyricsManager {
             LyricsPanelInstaller.enableLyricsButton();
             Utils.runOnMainThreadDelayed(() -> LyricsPanelInstaller.onLyricsPanelDetected(), 300);
             final Lyrics loaded = lyrics;
-            Logger.printInfo(() -> "Lyrics loaded: source=" + loaded.providerName()
+            Log.i(TAG, "Lyrics loaded: source=" + loaded.providerName()
                     + " subtitles=" + loaded.isSubtitles()
                     + " lines=" + loaded.lines().size());
         }
@@ -901,7 +942,9 @@ public final class LyricsManager {
             return lyrics;
         }
 
-        return new Lyrics(filtered, lyrics.providerName(), lyrics.synced());
+        return new Lyrics(filtered, lyrics.providerName(), lyrics.synced(),
+                null, null, null, null, lyrics.rawFormat(), lyrics.formatType(),
+                lyrics.sourceUrl());
     }
 
     private void setState(State newState, @Nullable Lyrics lyrics) {
@@ -913,7 +956,7 @@ public final class LyricsManager {
             try {
                 listener.onLyricsChanged(newState, lyrics);
             } catch (Exception ex) {
-                Logger.printException(() -> "Lyrics listener failure", ex);
+                Log.e(TAG, "Lyrics listener failure", ex);
             }
         }
     }

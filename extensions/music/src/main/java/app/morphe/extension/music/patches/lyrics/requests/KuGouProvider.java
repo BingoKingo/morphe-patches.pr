@@ -83,11 +83,13 @@ public final class KuGouProvider implements LyricsProvider {
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
-        String hash = resolveHash(track);
-        if (hash == null || hash.isEmpty()) {
-            Logger.printDebug(() -> "KuGou could not resolve a file hash for " + track);
+        SongInfo songInfo = resolveHash(track);
+        if (songInfo == null || songInfo.id.isEmpty()) {
+            Logger.printDebug(() -> "KuGou could not resolve a song id for " + track);
             return null;
         }
+        String hash = songInfo.hash;
+        String id = songInfo.id;
 
         String searchUrl = SEARCH_URL + encode(hash);
         HttpURLConnection searchConnection = LyricsRequests.openConnection(searchUrl);
@@ -107,13 +109,13 @@ public final class KuGouProvider implements LyricsProvider {
             return null;
         }
 
-        String id = candidate.optString("id", "");
+        String candidateId = candidate.optString("id", "");
         String accessKey = candidate.optString("accesskey", "");
-        if (id.isEmpty() || accessKey.isEmpty()) {
+        if (candidateId.isEmpty() || accessKey.isEmpty()) {
             return null;
         }
 
-        String downloadUrl = DOWNLOAD_URL + "&id=" + encode(id) + "&accesskey=" + encode(accessKey);
+        String downloadUrl = DOWNLOAD_URL + "&id=" + encode(candidateId) + "&accesskey=" + encode(accessKey);
         HttpURLConnection downloadConnection = LyricsRequests.openConnection(downloadUrl);
         if (downloadConnection.getResponseCode() != 200) {
             LyricsRequests.logFailure(name(), downloadConnection);
@@ -128,12 +130,17 @@ public final class KuGouProvider implements LyricsProvider {
 
         byte[] raw = Base64.decode(content, Base64.DEFAULT);
         KrcResult krcResult;
+        String rawFormat;
+        String formatType;
         if (raw.length > 4 && raw[0] == 'k' && raw[1] == 'r' && raw[2] == 'c' && raw[3] == '1') {
-            krcResult = parseKrc(decryptKrc(raw));
+            rawFormat = decryptKrc(raw);
+            krcResult = parseKrc(rawFormat);
+            formatType = "krc";
         } else {
             // Some tracks only expose plain LRC even when KRC is requested.
-            String lrc = new String(raw, StandardCharsets.UTF_8);
-            krcResult = new KrcResult(LrcParser.parseSynced(lrc), null, null);
+            rawFormat = new String(raw, StandardCharsets.UTF_8);
+            krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), null, null);
+            formatType = "lrc";
         }
         List<LyricsLine> lines = removeCreditLines(krcResult.lines);
         if (lines.isEmpty()) {
@@ -152,15 +159,18 @@ public final class KuGouProvider implements LyricsProvider {
                 + " lines (wordSynced=" + hasWordTimings(lines)
                 + " romanized=" + (attachedRomanization != null)
                 + " translated=" + (translations != null) + ") for " + track);
-        return new Lyrics(lines, name(), true, attachedRomanization, translations);
+        String sourceUrl = "https://www.kugou.com/mixsong/" + id + ".html";
+        return new Lyrics(lines, name(), true, attachedRomanization, translations, null, null, rawFormat, formatType, sourceUrl);
     }
 
     @Override
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
-        String hash = resolveHash(track);
-        if (hash == null || hash.isEmpty()) {
+        SongInfo songInfo = resolveHash(track);
+        if (songInfo == null || songInfo.id.isEmpty()) {
             return new ArrayList<>();
         }
+        String hash = songInfo.hash;
+        String id = songInfo.id;
 
         String searchUrl = SEARCH_URL + encode(hash);
         HttpURLConnection searchConnection = LyricsRequests.openConnection(searchUrl);
@@ -184,7 +194,8 @@ public final class KuGouProvider implements LyricsProvider {
                 continue;
             }
             try {
-                Lyrics lyrics = fetchFromCandidate(candidate, track);
+                String sourceUrl = "https://www.kugou.com/mixsong/" + id + ".html";
+                Lyrics lyrics = fetchFromCandidate(candidate, track, sourceUrl);
                 if (lyrics != null) {
                     results.add(lyrics);
                 }
@@ -196,7 +207,7 @@ public final class KuGouProvider implements LyricsProvider {
     }
 
     @Nullable
-    private Lyrics fetchFromCandidate(JSONObject candidate, TrackInfo track) throws Exception {
+    private Lyrics fetchFromCandidate(JSONObject candidate, TrackInfo track, @Nullable String sourceUrl) throws Exception {
         String id = candidate.optString("id", "");
         String accessKey = candidate.optString("accesskey", "");
         if (id.isEmpty() || accessKey.isEmpty()) {
@@ -217,11 +228,16 @@ public final class KuGouProvider implements LyricsProvider {
 
         byte[] raw = Base64.decode(content, Base64.DEFAULT);
         KrcResult krcResult;
+        String rawFormat;
+        String formatType;
         if (raw.length > 4 && raw[0] == 'k' && raw[1] == 'r' && raw[2] == 'c' && raw[3] == '1') {
-            krcResult = parseKrc(decryptKrc(raw));
+            rawFormat = decryptKrc(raw);
+            krcResult = parseKrc(rawFormat);
+            formatType = "krc";
         } else {
-            String lrc = new String(raw, StandardCharsets.UTF_8);
-            krcResult = new KrcResult(LrcParser.parseSynced(lrc), null, null);
+            rawFormat = new String(raw, StandardCharsets.UTF_8);
+            krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), null, null);
+            formatType = "lrc";
         }
         List<LyricsLine> lines = removeCreditLines(krcResult.lines);
         if (lines.isEmpty()) {
@@ -236,7 +252,7 @@ public final class KuGouProvider implements LyricsProvider {
         final List<LyricsLine> attachedRomanization =
                 isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
 
-        return new Lyrics(lines, name(), true, attachedRomanization, translations);
+        return new Lyrics(lines, name(), true, attachedRomanization, translations, null, null, rawFormat, formatType, sourceUrl);
     }
 
     private static boolean hasWordTimings(List<LyricsLine> lines) {
@@ -253,7 +269,7 @@ public final class KuGouProvider implements LyricsProvider {
     }
 
     @Nullable
-    private static String resolveHash(TrackInfo track) throws IOException, JSONException {
+    private static SongInfo resolveHash(TrackInfo track) throws IOException, JSONException {
         String keyword = track.artist() + " " + track.title();
         String url = SONG_SEARCH_URL + "&keyword=" + encode(keyword);
         HttpURLConnection connection = LyricsRequests.openConnection(url);
@@ -272,6 +288,7 @@ public final class KuGouProvider implements LyricsProvider {
         String wantedTitle = track.title().toLowerCase(Locale.ROOT);
         String wantedArtist = track.artist().toLowerCase(Locale.ROOT);
         String bestHash = null;
+        String bestId = null;
         int bestScore = -1;
         for (int i = 0; i < info.length(); i++) {
             JSONObject item = info.optJSONObject(i);
@@ -301,9 +318,10 @@ public final class KuGouProvider implements LyricsProvider {
             if (score > bestScore) {
                 bestScore = score;
                 bestHash = hash;
+                bestId = item.optString("id", "");
             }
         }
-        return bestHash;
+        return bestHash != null ? new SongInfo(bestHash, bestId) : null;
     }
 
     private static String decryptKrc(byte[] raw) throws IOException {
@@ -322,6 +340,16 @@ public final class KuGouProvider implements LyricsProvider {
         }
         input.close();
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private static final class SongInfo {
+        final String hash;
+        final String id;
+
+        SongInfo(String hash, String id) {
+            this.hash = hash;
+            this.id = id != null ? id : "";
+        }
     }
 
     private static final class KrcResult {
