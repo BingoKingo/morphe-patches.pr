@@ -135,6 +135,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
 
     private final ScrollView scrollView;
     private final LinearLayout linesContainer;
+    private final TextView creditView;
     private final TextView footerView;
     @Nullable
     private final TextView translateView;
@@ -367,7 +368,17 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         footerContainer = new LinearLayout(context);
         footerContainer.setOrientation(LinearLayout.VERTICAL);
         // The bottom padding keeps the last lines clear of the pinned buttons.
-        footerContainer.setPadding(0, Dim.dp24, 0, Dim.dp(200));
+        footerContainer.setPadding(0, Dim.dp16, 0, Dim.dp(200));
+
+        creditView = new TextView(context);
+        applyFooterStyle(creditView);
+        creditView.setVisibility(GONE);
+        LinearLayout.LayoutParams creditParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        creditParams.bottomMargin = Dim.dp16;
+        footerContainer.addView(creditView, creditParams);
+
         footerContainer.addView(footerView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -661,6 +672,20 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         footerView.setText(sourceText(newLyrics.providerName(),
                 translatedLines != null, translatedFromGoogle, romanizedFromGoogle));
         footerView.setOnClickListener(view -> onSourceClicked());
+
+        List<String> songwriters = newLyrics.songwriters();
+        if (songwriters != null && !songwriters.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < songwriters.size(); i++) {
+                if (i > 0) sb.append('\n');
+                sb.append(songwriters.get(i));
+            }
+            creditView.setText(sb.toString());
+            creditView.setVisibility(VISIBLE);
+        } else {
+            creditView.setVisibility(GONE);
+        }
+
         footerContainer.setVisibility(VISIBLE);
         footerView.setVisibility(VISIBLE);
         buttonRow.setVisibility(VISIBLE);

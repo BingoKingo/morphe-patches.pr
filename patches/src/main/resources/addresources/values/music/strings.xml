@@ -404,6 +404,8 @@ To ensure scrobbling is synced during background playback, ensure that YouTube M
     <string name="morphe_music_lyrics_custom_regex_summary">Regular expression applied to titles, artists, and albums before looking up lyrics. Leave empty to disable. The default removes common clutter like \"Official Video\", \"Remaster\", and \"- Topic\"</string>
     <string name="morphe_music_lyrics_text_filter_title">Lyrics filter regex</string>
     <string name="morphe_music_lyrics_text_filter_summary">Regular expression applied to the original lyrics text only (not translations or romanizations). Leave empty to disable</string>
+    <string name="morphe_music_lyrics_credit_line_regex_title">Info line markers</string>
+    <string name="morphe_music_lyrics_credit_line_regex_summary">Comma-separated markers. Lines containing a marker followed by a colon are shown as credit info at the bottom. Leave empty to disable</string>
     <string name="morphe_music_lyrics_text_size_title">Text size</string>
     <string name="morphe_music_lyrics_text_size_summary">Size of the lyrics text</string>
     <string name="morphe_music_lyrics_offset_ms_title">Timing offset</string>

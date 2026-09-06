@@ -125,7 +125,18 @@ final class TtmlParser {
             return null;
         }
         try {
-            final List<String> songwriters = parseSongwriters(ttml);
+            final List<String> rawSongwriters = parseSongwriters(ttml);
+            final List<String> songwriters;
+            if (!rawSongwriters.isEmpty()) {
+                StringBuilder sb = new StringBuilder("Created by ");
+                for (int i = 0; i < rawSongwriters.size(); i++) {
+                    if (i > 0) sb.append(" · ");
+                    sb.append(rawSongwriters.get(i));
+                }
+                songwriters = List.of(sb.toString());
+            } else {
+                songwriters = null;
+            }
             final Map<String, AgentInfo> agentTypes = parseAgentTypes(ttml);
             final Map<String, List<RomajiSyllable>> sidecarRoman =
                     parseSidecarTransliterations(ttml);
@@ -296,27 +307,6 @@ final class TtmlParser {
                 return null;
             }
 
-            // Insert songwriter header as first line before resolveDuet
-            // so that romanization/translations indices align with lines
-            if (!songwriters.isEmpty()) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < songwriters.size(); i++) {
-                    if (i > 0) sb.append(" · ");
-                    sb.append(songwriters.get(i));
-                }
-                String header = "Created by " + sb.toString();
-                lines.add(0, new LyricsLine(
-                        0, 0,
-                        header, List.of(), null, false, false, null));
-                romanization.add(0, new LyricsLine(LyricsLine.NO_TIME, ""));
-                for (List<LyricsLine> langLines : translations.values()) {
-                    langLines.add(0, new LyricsLine(LyricsLine.NO_TIME, ""));
-                }
-                for (List<LyricsLine> langLines : romanizations.values()) {
-                    langLines.add(0, new LyricsLine(LyricsLine.NO_TIME, ""));
-                }
-            }
-
             resolveDuet(lines, agentTypes);
 
             final Map<String, List<LyricsLine>> transOut =
@@ -340,7 +330,7 @@ final class TtmlParser {
             return new TtmlResult(lines,
                     LyricsMerge.hasText(romanization) ? romanization : null,
                     transOut, romaOut,
-                    songwriters.isEmpty() ? null : songwriters,
+                    songwriters,
                     agentNames);
         } catch (XmlPullParserException | IOException ex) {
             return null;

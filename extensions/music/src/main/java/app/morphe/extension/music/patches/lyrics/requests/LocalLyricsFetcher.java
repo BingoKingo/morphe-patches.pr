@@ -1174,12 +1174,11 @@ public final class LocalLyricsFetcher {
         return r;
     }
 
-    /** Collapses whitespace and lower-cases for case/space-insensitive matching. */
     private static String normalize(@Nullable String s) {
         if (s == null) {
             return "";
         }
-        return s.trim().replaceAll("\\s+", " ").toLowerCase();
+        return CharactersConverter.normalize(s);
     }
 
     /** Escapes SQLite LIKE wildcards so the pattern matches the literal string. */

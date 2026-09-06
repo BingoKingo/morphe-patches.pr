@@ -33,6 +33,7 @@ import java.util.regex.Pattern;
 import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.LyricsCreditLines;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
@@ -139,6 +140,12 @@ public final class NetEaseProvider implements LyricsProvider {
             return null;
         }
 
+        List<String> creditLines = new ArrayList<>();
+        lines = LyricsCreditLines.removeCreditLines(lines, creditLines);
+        if (lines.isEmpty()) {
+            return null;
+        }
+
         List<LyricsLine> romaLines = romalrc.isEmpty() ? null : LrcParser.parseSynced(romalrc);
         List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, romaLines);
 
@@ -151,7 +158,8 @@ public final class NetEaseProvider implements LyricsProvider {
         String formatType = !yrc.isEmpty() ? "yrc" : "lrc";
         long songId = song.getLong("id");
         String sourceUrl = "https://music.163.com/song?id=" + songId;
-        return new Lyrics(lines, name(), true, romanization, translations, null, null, rawFormat, formatType, sourceUrl);
+        return new Lyrics(lines, name(), true, romanization, translations, null,
+                creditLines.isEmpty() ? null : creditLines, rawFormat, formatType, sourceUrl);
     }
 
     private static String optLyric(JSONObject root, String key) {

@@ -358,6 +358,8 @@ YouTube Music 8.x —— 交叉淡入仅在 9.x 及更高版本上运行"</strin
   <string name="morphe_music_lyrics_custom_regex_summary">在查询歌词前，应用于标题、艺术家和专辑的正则表达式。留空则不清理。默认移除「Official Video」「Remaster」「- Topic」等常见杂乱信息</string>
   <string name="morphe_music_lyrics_text_filter_title">歌词过滤正则</string>
   <string name="morphe_music_lyrics_text_filter_summary">仅应用于歌词原文的正则表达式（不影响翻译和罗马音）。留空则不过滤</string>
+  <string name="morphe_music_lyrics_credit_line_regex_title">信息行标记</string>
+  <string name="morphe_music_lyrics_credit_line_regex_summary">英文逗号分隔的标记列表。包含标记后跟冒号的行将作为信用信息显示在底部。留空则不过滤</string>
   <string name="morphe_music_lyrics_text_size_title">文本大小</string>
   <string name="morphe_music_lyrics_text_size_summary">歌词文本的大小</string>
   <string name="morphe_music_lyrics_offset_ms_title">时间偏移</string>

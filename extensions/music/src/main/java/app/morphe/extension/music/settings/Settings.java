@@ -171,7 +171,7 @@ public class Settings extends SharedYouTubeSettings {
     // Lyrics
     public static final BooleanSetting LYRICS_ENABLED = new BooleanSetting("morphe_music_lyrics_enabled", TRUE, true);
     public static final String DEFAULT_LYRICS_ORDER =
-            "LRCLIB,QQ,NetEase,KuGou,bLyrics,BiniLyrics,Unison,AMLL,Apple,Musixmatch,Spotify";
+            "LRCLIB,QQ,NetEase,KuGou,-bLyrics,-BiniLyrics,-Unison,-AMLL,Apple,Musixmatch,Spotify";
     public static final StringSetting LYRICS_SOURCE = new StringSetting("morphe_music_lyrics_source", DEFAULT_LYRICS_ORDER, true, parent(LYRICS_ENABLED));
     public static final StringSetting APPLE_MUSIC_TOKEN = new StringSetting("morphe_music_apple_music_token", "", true, parent(LYRICS_ENABLED));
     public static final StringSetting MUSIXMATCH_TOKEN = new StringSetting("morphe_music_musixmatch_token", "", true, parent(LYRICS_ENABLED));
@@ -199,7 +199,97 @@ public class Settings extends SharedYouTubeSettings {
             + "|[（(][^）)]*[\\uff1a:][^）)]*[）)]"
             + "|(?i)\\s*-\\s*topic$";
     public static final StringSetting LYRICS_CUSTOM_REGEX = new StringSetting("morphe_music_lyrics_custom_regex", DEFAULT_LYRICS_REGEX, true, parent(LYRICS_ENABLED));
-    public static final StringSetting LYRICS_TEXT_FILTER = new StringSetting("morphe_music_lyrics_text_filter", "", true, parent(LYRICS_ENABLED));
+    public static final String DEFAULT_LYRICS_TEXT_FILTER =
+            ".*?(?:"
+            + "未经.*?(?:不得|禁止)"
+            + "|本作品声明.*?著作权权利保留.*?不得"
+            + "|本字幕由TME AI技术生成"
+            + "|部分素材源自网络"
+            + "|酷我音乐.*?特别出品"
+            + "|酷狗.*?星曜计划"
+            + "|酷狗.*?国潮"
+            + "|酷狗音乐.*?就是歌多"
+            + "|听国潮.*?酷狗"
+            + "|未经许可.*?(?:翻唱|盗版)"
+            + "|本作品.*?授权"
+            + "|已获得.*?授权"
+            + "|星曜计划.*?企划|黑胶复刻"
+            + "|此歌曲为没有填词的纯音乐"
+            + "|纯音乐，请欣赏"
+            + "|此歌曲由Vemus未音APP\\.制作 音乐创作如此简单！"
+            + "|酷狗音乐『万物皆可dj』企划"
+            + "|『听dj, 到中国酷狗』"
+            + "|本歌曲来自〖飓风计划〗"
+            + "|10亿现金激励，千亿流量扶持！"
+            + ").*";
+    public static final StringSetting LYRICS_TEXT_FILTER = new StringSetting("morphe_music_lyrics_text_filter", DEFAULT_LYRICS_TEXT_FILTER, true, parent(LYRICS_ENABLED));
+    public static final String DEFAULT_LYRICS_CREDIT_LINE_REGEX =
+            "词,曲,编曲,制作,统筹,监制,发行,原唱,混音,母带,录音,人声,合声,和声,配唱,吉他,贝斯,出品,"
+            + "企划,封面,版权,营销,推广,策划,舞台,灯光,合音,和音,团队,助理,"
+            + "大提琴,中提琴,小提琴,二胡,笛子,口琴,班卓琴,钢琴,键盘,鼓,打击乐,弦乐,"
+            + "演唱,歌名,歌手,创作者,艺术家,采样,原版,音频,音响,音乐,乐队,演奏,"
+            + "微信,微博,视觉,联合,联系,私人,"
+            + "电吉他,电钢琴,木吉他,低音提琴,"
+            + "Lyric,Music,Arranger,Composer,Produced,Recording,Voice,Backing,Executive,Manufacturing,Rap,OP,SP,"
+            + "A&R,A.Guita,Arranged by,Assistant Engineer,Background Vocals,Bass,Composed by,Credit,Drums,"
+            + "E.Guitar,Engineered by,Percussion,Performing,Program,QQ,Recorded at,Strings,Synthesizer,"
+            + "Pro-Tools Editing,Surround,"
+            + "Vocal Directed by,Recorded by,Digital Edited by,Mixed by,Mastered by,Original Title,"
+            + "Sub Publisher,Publisher,Main Sample,Sample,"
+            + "Vocals Arrangement,Digital Editing,Mix Engineer,All Instruments,Keyboard,"
+            + "Vocal Arrangement,Background Vocal,"
+            + "Assistant Mix Engineers,Assistant Mix Engineer,"
+            + "Mastering Engineers,Mastering Engineer,"
+            + "Engineer,Master,Mastering,Engineering,"
+            + "Artists Agency,Agency,Artists,Artist,"
+            + "Publishing Group administered by,Administered,Administer,Administering,"
+            + "Lead Vocal,Harmony,Guitar,Drum,Leader,Lead,"
+            + "Child Lead,Child Choir Instruction,Vocal Producer,"
+            + "作词,作曲,马头琴,ISRC,海外配唱执行,执行,原歌名,原词曲,改编词,"
+            + "中提,大提,小提,企业宣传,企宣统筹,宣传统筹,宣发,前置混音,"
+            + "声乐指导老师,声乐指导,指导,歌曲联合发行,监唱Vocal Producer,联合发行,歌曲发行,监唱,"
+            + "作者,画师,作画,DJ,Cover,封设,原著,海报,"
+            + "翻译,译者,Author（作词）,总监制,修音师 Editing Engineer,项目企划,项目营销,总策划,"
+            + "dj制作人dj producer,项目统筹project overall planning,项目统筹,执行制作 production assistant,"
+            + "童声,原词,改编,Vocals,艺人统筹,艺人制作统筹,混缩室 mixing studio,混缩室,Mixing,Mixer,Written by,Copyright,"
+            + "箫,题字,后期,美工,美术设计,宣传,发布者,发布,笛,笛萧,"
+            + "PV,剧情策划,编剧,剧情后期,剧情,书法,导演,翻唱,古筝,"
+            + "CV,COS,COS图,工作室,原画,萧笛,作词Lyrics by,作曲Composition by,小号Trumpet,小号,"
+            + "总企划,项目总企划,商务统筹,商务,商务合作,合作者,合作,创作,"
+            + "填词,谱曲,抖音,快手,原曲,原词,原翻,混缩,作词Lyrics,作词lyrics,作曲music,"
+            + "说唱,说唱词,艺人经纪公司,经纪公司,经纪,联系方式,"
+            + "音编,曲编,编著,后期制作,琵琶,制作人,原曲制作人,唢呐,助力推广,翻唱混音,漫画,设计,"
+            + "文案,平面设计,编,合成,合成器,宣推,"
+            + "花脸,板胡,长号,次中音萨克斯,长笛,萨克斯,口风琴,手风琴,鼓机,"
+            + "舞蹈总监,编舞师,舞团,编舞,舞蹈,领舞,伴舞,"
+            + "官方指定音乐合作伙伴,指定音乐合作伙伴,官方音乐合作伙伴,合作伙伴,"
+            + "PGM,Autotune,乐团,总顾问,项目协力,项目总监,协力,"
+            + "主唱,伴唱,合唱,男声,女声,"
+            + "附加制作,附加,厂牌,"
+            + "乐器,乐器录音,伴奏,"
+            + "中文作词,中文填词,中文,英文,英文填词,英文作词,粤语,粤语填词,粤语作词,"
+            + "舞曲制作,舞曲,"
+            + "歌曲企划,歌曲混音,歌曲,"
+            + "特别鸣谢,鸣谢,"
+            + "艺术指导,录音指导,混音指导,美术指导,声音监制,声音,"
+            + "编导,造型,造型顾问,顾问,"
+            + "人声监制,人声录音师,编辑,人声编辑,人声制作,人声录音棚,"
+            + "修音,贴唱,贴唱混音,调音,调校,校准,音准调校,"
+            + "念白,念白混音,题记,记,"
+            + "吟唱,编写,吟唱编写,歌声,"
+            + "歌词改编,艺统,主催,"
+            + "杜比全景声混音,杜比全景声,"
+            + "艺人经纪artists agency,艺人经纪,"
+            + "原编曲,剪纸艺术家,"
+            + "业务联系,业务邮箱,邮箱地址,邮件地址,邮件,"
+            + "音效,音效设计,音效指导,"
+            + "总监,领唱,领唱指导,合唱指导,演唱指导,"
+            + "音乐人,飓风计划商务合作,网易音乐人商务合作,"
+            + "滤镜,MV滤镜,图片,图片编辑,图片摄影,摄影,拍摄,图片拍摄,"
+            + "MV,MV制作,MV拍摄,MV摄影,MV后期,"
+            + "场景提供,场景,"
+            + "童声领唱,童声合唱指导";
+    public static final StringSetting LYRICS_CREDIT_LINE_REGEX = new StringSetting("morphe_music_lyrics_credit_line_regex", DEFAULT_LYRICS_CREDIT_LINE_REGEX, true, parent(LYRICS_ENABLED));
 
     // SponsorBlock
     public static final BooleanSetting SB_ENABLED = new BooleanSetting("morphe_sb_enabled", TRUE);

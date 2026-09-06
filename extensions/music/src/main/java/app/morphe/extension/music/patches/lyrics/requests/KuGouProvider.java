@@ -37,6 +37,7 @@ import java.util.zip.InflaterInputStream;
 import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.LyricsCreditLines;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
@@ -62,13 +63,6 @@ public final class KuGouProvider implements LyricsProvider {
     private static final Pattern KRC_LINE = Pattern.compile("^\\[(\\d+),(\\d+)](.*)");
     private static final Pattern KRC_WORD = Pattern.compile("<(\\d+),(\\d+),(\\d+)>([^<]*)");
 
-    /**
-     * KuGou lyrics frequently start with credit lines that are not part of the song.
-     */
-    private static final String[] CREDIT_LINE_MARKERS = {
-            "作词", "作曲", "编曲", "制作人", "混音", "母带", "录音", "吉他", "贝斯", "鼓",
-            "和声", "监制", "出品", "发行", "词：", "曲：", "唱：",
-    };
 
     @Override
     public String name() {
@@ -145,7 +139,8 @@ public final class KuGouProvider implements LyricsProvider {
             krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), null, null);
             formatType = "lrc";
         }
-        List<LyricsLine> lines = removeCreditLines(krcResult.lines);
+        List<String> creditLines = new ArrayList<>();
+        List<LyricsLine> lines = LyricsCreditLines.removeCreditLines(krcResult.lines, creditLines);
         if (lines.isEmpty()) {
             return null;
         }
@@ -160,10 +155,12 @@ public final class KuGouProvider implements LyricsProvider {
 
         Logger.printDebug(() -> "KuGou returned " + lines.size()
                 + " lines (wordSynced=" + LyricsLine.hasAnyWordTimings(lines)
+                + " creditLines=" + creditLines.size()
                 + " romanized=" + (attachedRomanization != null)
                 + " translated=" + (translations != null) + ") for " + track);
         String sourceUrl = "https://www.kugou.com/song/" + id + ".html";
-        return new Lyrics(lines, name(), true, attachedRomanization, translations, null, null, rawFormat, formatType, sourceUrl);
+        return new Lyrics(lines, name(), true, attachedRomanization, translations, null,
+                creditLines.isEmpty() ? null : creditLines, rawFormat, formatType, sourceUrl);
     }
 
     @Override
@@ -244,7 +241,8 @@ public final class KuGouProvider implements LyricsProvider {
             krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), null, null);
             formatType = "lrc";
         }
-        List<LyricsLine> lines = removeCreditLines(krcResult.lines);
+        List<String> creditLines = new ArrayList<>();
+        List<LyricsLine> lines = LyricsCreditLines.removeCreditLines(krcResult.lines, creditLines);
         if (lines.isEmpty()) {
             return null;
         }
@@ -257,7 +255,8 @@ public final class KuGouProvider implements LyricsProvider {
         final List<LyricsLine> attachedRomanization =
                 isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
 
-        return new Lyrics(lines, name(), true, attachedRomanization, translations, null, null, rawFormat, formatType, sourceUrl);
+        return new Lyrics(lines, name(), true, attachedRomanization, translations, null,
+                creditLines.isEmpty() ? null : creditLines, rawFormat, formatType, sourceUrl);
     }
 
     private static boolean isChineseLanguage() {
@@ -552,37 +551,5 @@ public final class KuGouProvider implements LyricsProvider {
             }
         }
         return builder.toString();
-    }
-
-    /**
-     * Drops the leading credit lines. Only leading lines are checked so that a
-     * lyric that happens to contain one of the markers is kept.
-     */
-    private static List<LyricsLine> removeCreditLines(List<LyricsLine> lines) {
-        int firstLyric = 0;
-        while (firstLyric < lines.size() && isCreditLine(lines.get(firstLyric).text())) {
-            firstLyric++;
-        }
-
-        if (firstLyric == 0) {
-            return lines;
-        }
-        // Every line being a credit line means the parse produced nothing usable.
-        if (firstLyric == lines.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(lines.subList(firstLyric, lines.size()));
-    }
-
-    private static boolean isCreditLine(String text) {
-        if (text.isEmpty()) {
-            return true;
-        }
-        for (String marker : CREDIT_LINE_MARKERS) {
-            if (text.contains(marker)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

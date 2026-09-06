@@ -43,6 +43,7 @@ final class LyricsCache {
     private static final String HEADER_PROVIDER = "#provider=";
     private static final String HEADER_SYNCED = "#synced=";
     private static final String HEADER_SOURCE_URL = "#sourceUrl=";
+    private static final String HEADER_SONGWRITERS = "#songwriters=";
     private static final String NOT_FOUND_MARKER = "#notfound";
 
     private static final Map<String, Lyrics> memoryCache =
@@ -261,6 +262,7 @@ final class LyricsCache {
             String provider = "";
             boolean synced = false;
             String sourceUrl = null;
+            List<String> songwriters = null;
             int contentStart = 0;
 
             for (String line : lines) {
@@ -276,6 +278,19 @@ final class LyricsCache {
                     if (sourceUrl.isEmpty()) {
                         sourceUrl = null;
                     }
+                } else if (line.startsWith(HEADER_SONGWRITERS)) {
+                    String value = line.substring(HEADER_SONGWRITERS.length());
+                    if (!value.isEmpty()) {
+                        songwriters = new ArrayList<>();
+                        for (String s : value.split("␟")) {
+                            if (!s.isEmpty()) {
+                                songwriters.add(s);
+                            }
+                        }
+                        if (songwriters.isEmpty()) {
+                            songwriters = null;
+                        }
+                    }
                 } else {
                     break;
                 }
@@ -290,7 +305,7 @@ final class LyricsCache {
                 return null;
             }
             return new Lyrics(parsed, provider, synced, readEmbeddedRomanization(key),
-                    null, null, null, null, null, sourceUrl);
+                    null, null, songwriters, null, null, sourceUrl);
         } catch (Exception ex) {
             Log.e(TAG, "Could not read cached lyrics: " + file, ex);
             return null;
@@ -312,6 +327,9 @@ final class LyricsCache {
                 fileLines.add(HEADER_SYNCED + lyrics.synced());
                 if (lyrics.sourceUrl() != null) {
                     fileLines.add(HEADER_SOURCE_URL + lyrics.sourceUrl());
+                }
+                if (lyrics.songwriters() != null && !lyrics.songwriters().isEmpty()) {
+                    fileLines.add(HEADER_SONGWRITERS + String.join("␟", lyrics.songwriters()));
                 }
                 for (LyricsLine line : lyrics.lines()) {
                     fileLines.add(lyrics.synced()

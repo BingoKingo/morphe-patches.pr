@@ -20,11 +20,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -87,16 +85,6 @@ public final class LyricsManager {
 
     private static final Lyrics EMPTY_SUBTITLES =
             new Lyrics(Collections.emptyList(), Lyrics.CAPTIONS_PROVIDER, true);
-
-    /**
-     * Strings some providers or captions return for instrumental tracks, indicating the
-     * track has no actual lyrics. A result made up entirely of these is discarded.
-     */
-    private static final Set<String> INSTRUMENTAL_PLACEHOLDERS = new HashSet<>(Arrays.asList(
-            "此歌曲为没有填词的纯音乐，请您欣赏",
-            "纯音乐，请欣赏",
-            "《纯音乐，请欣赏》"
-    ));
 
     @Nullable
     private TrackInfo currentTrack;
@@ -189,11 +177,6 @@ public final class LyricsManager {
         final String trimmed = text.trim();
         if (trimmed.isEmpty()) {
             return false;
-        }
-        for (String placeholder : INSTRUMENTAL_PLACEHOLDERS) {
-            if (trimmed.contains(placeholder)) {
-                return true;
-            }
         }
         return false;
     }
@@ -914,7 +897,7 @@ public final class LyricsManager {
         }
 
         return new Lyrics(filtered, lyrics.providerName(), lyrics.synced(),
-                null, null, null, null, lyrics.rawFormat(), lyrics.formatType(),
+                null, null, null, lyrics.songwriters(), lyrics.rawFormat(), lyrics.formatType(),
                 lyrics.sourceUrl());
     }
 

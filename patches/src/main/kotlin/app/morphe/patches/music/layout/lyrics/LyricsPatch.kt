@@ -126,6 +126,11 @@ val lyricsPatch = bytecodePatch(
                         key = "morphe_music_lyrics_text_filter",
                         inputType = InputType.TEXT_MULTI_LINE,
                         dependency = dep
+                    ),
+                    TextPreference(
+                        key = "morphe_music_lyrics_credit_line_regex",
+                        inputType = InputType.TEXT_MULTI_LINE,
+                        dependency = dep
                     )
                 )
             ),

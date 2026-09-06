@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.LyricsCreditLines;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
@@ -129,6 +130,12 @@ public final class QQProvider implements LyricsProvider {
             return null;
         }
 
+        List<String> creditLines = new ArrayList<>();
+        lines = LyricsCreditLines.removeCreditLines(lines, creditLines);
+        if (lines.isEmpty()) {
+            return null;
+        }
+
         String romaPayload = decodeQqLyricPayload(data.optString("roma", ""));
         List<LyricsLine> romaLines = romaPayload.isEmpty() ? null : parseQrcFormat(romaPayload);
         List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, romaLines);
@@ -145,7 +152,8 @@ public final class QQProvider implements LyricsProvider {
         Map<String, List<LyricsLine>> translations =
                 LyricsMerge.singleLanguageTranslations(translation, "zh");
 
-        return new Lyrics(lines, name(), true, romanization, translations, null, null, original, "qrc", sourceUrl);
+        return new Lyrics(lines, name(), true, romanization, translations, null,
+                creditLines.isEmpty() ? null : creditLines, original, "qrc", sourceUrl);
     }
 
     @Nullable

@@ -9,6 +9,8 @@ package app.morphe.extension.music.patches.lyrics;
 
 import androidx.annotation.Nullable;
 
+import app.morphe.extension.music.patches.lyrics.requests.CharactersConverter;
+
 /**
  * Normalizes YouTube Music metadata into what a lyrics database expects.
  *
@@ -54,7 +56,7 @@ final class MetadataCleaner {
             return input;
         }
         try {
-            return input.replaceAll(regex, "");
+            return CharactersConverter.normalize(input).replaceAll(regex, "");
         } catch (Exception ex) {
             return input;
         }
