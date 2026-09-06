@@ -9,8 +9,6 @@ package app.morphe.extension.music.patches.lyrics;
 
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.View;
 import android.widget.TextView;
 
@@ -34,9 +32,6 @@ import app.morphe.extension.shared.ResourceUtils;
  */
 public final class MiniPlayerLyrics {
 
-    /** How often to check whether the current lyric line changed. */
-    private static final long TICK_INTERVAL_MS = 300;
-
     private static volatile int titleId;
     private static volatile int subtitleId;
     @Nullable
@@ -50,14 +45,15 @@ public final class MiniPlayerLyrics {
     @Nullable
     private static volatile String displayArtist;
 
-    /** Title pushed on the last tick, to avoid redundant {@code setText} calls. */
-    @Nullable
-    private static volatile String lastPushedTitle;
-    @Nullable
-    private static volatile String lastPushedSubtitle;
+    /** Drives the periodic check that mirrors the current line into the mini player. */
+    private static final LyricsTicker ticker = new LyricsTicker(MiniPlayerLyrics::tick);
 
-    private static final Handler handler = new Handler(Looper.getMainLooper());
-    private static final Runnable ticker = MiniPlayerLyrics::tick;
+    /** Listener that re-schedules the ticker immediately when lyrics finish loading. */
+    private static final LyricsManager.Listener lyricsListener = (state, lyrics) -> {
+        if (state == LyricsManager.State.LOADED || state == LyricsManager.State.NOT_FOUND) {
+            ticker.schedule();
+        }
+    };
 
     private MiniPlayerLyrics() {
     }
@@ -71,9 +67,16 @@ public final class MiniPlayerLyrics {
         if (title == null || title.isBlank() || artist == null || artist.isBlank()) {
             return;
         }
-        displayTitle = MetadataCleaner.cleanTitle(title);
-        displayArtist = MetadataCleaner.cleanArtist(artist);
-        LyricsManager.getInstance().onDisplayedTrackChanged(title, artist);
+        final String[] parsed = MetadataCleaner.parseTitleAndArtist(title);
+        displayTitle = parsed != null ? parsed[1] : MetadataCleaner.cleanTitle(title);
+        displayArtist = parsed != null ? parsed[0] : MetadataCleaner.cleanArtist(artist);
+
+        android.net.Uri mediaUri = null;
+        final String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
+        if (uriString != null) {
+            mediaUri = android.net.Uri.parse(uriString);
+        }
+        LyricsManager.getInstance().onDisplayedTrackChanged(title, artist, mediaUri);
     }
 
     /**
@@ -105,56 +108,42 @@ public final class MiniPlayerLyrics {
 
         titleRef = new WeakReference<>(title);
         subtitleRef = new WeakReference<>(subtitle);
-        lastPushedTitle = null;
-        lastPushedSubtitle = null;
 
         final TrackInfo current = LyricsManager.getInstance().getCurrentTrack();
-        final CharSequence shownTitle = title.getText();
-        final String cleanedShown = shownTitle == null ? "" : MetadataCleaner.cleanTitle(shownTitle.toString());
-        displayTitle = cleanedShown;
-        if (current != null && !cleanedShown.isEmpty() && !cleanedShown.equals(current.title())) {
-            LyricsManager.getInstance().clearLyrics();
+        if (current != null) {
+            displayTitle = current.title();
+            displayArtist = current.artist();
         }
 
         if (!Settings.LYRICS_ENABLED.get() || !Settings.LYRICS_MINIPLAYER.get()) {
-            stopTicker();
+            ticker.stop();
+            LyricsManager.getInstance().removeListener(lyricsListener);
             return;
         }
 
-        scheduleTick();
-    }
-
-    private static void scheduleTick() {
-        handler.removeCallbacks(ticker);
-        handler.postDelayed(ticker, TICK_INTERVAL_MS);
-    }
-
-    private static void stopTicker() {
-        handler.removeCallbacks(ticker);
+        LyricsManager.getInstance().addListener(lyricsListener);
+        ticker.schedule();
     }
 
     private static void tick() {
         if (!Settings.LYRICS_ENABLED.get() || !Settings.LYRICS_MINIPLAYER.get()) {
-            stopTicker();
-            lastPushedTitle = null;
-            lastPushedSubtitle = null;
+            ticker.stop();
+            LyricsManager.getInstance().removeListener(lyricsListener);
             return;
         }
 
         final TextView title = titleRef != null ? titleRef.get() : null;
         final TextView subtitle = subtitleRef != null ? subtitleRef.get() : null;
         if (title == null || subtitle == null) {
-            // The view was released; wait for the next construction.
-            stopTicker();
-            lastPushedTitle = null;
-            lastPushedSubtitle = null;
+            ticker.stop();
+            LyricsManager.getInstance().removeListener(lyricsListener);
             return;
         }
 
         final LyricsManager manager = LyricsManager.getInstance();
         final TrackInfo track = manager.getCurrentTrack();
         if (track == null) {
-            scheduleTick();
+            ticker.schedule();
             return;
         }
 
@@ -165,26 +154,31 @@ public final class MiniPlayerLyrics {
         if (synced) {
             final String line = manager.getCurrentLineText();
             final String newTitle = (line == null || line.isEmpty()) ? track.title() : line;
-            if (!newTitle.equals(lastPushedTitle)) {
+            final String actualTitle = title.getText() != null ? title.getText().toString() : null;
+            if (!newTitle.equals(actualTitle)) {
                 title.setText(newTitle);
-                lastPushedTitle = newTitle;
             }
-            final String newSubtitle = track.artist() + " - " + track.title();
-            if (!newSubtitle.equals(lastPushedSubtitle)) {
+            final String newSubtitle;
+            if (Settings.LYRICS_DISPLAY_ARTIST_FIRST.get()) {
+                newSubtitle = track.artist() + " - " + track.title();
+            } else {
+                newSubtitle = track.title() + " - " + track.artist();
+            }
+            final String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
+            if (!newSubtitle.equals(actualSubtitle)) {
                 subtitle.setText(newSubtitle);
-                lastPushedSubtitle = newSubtitle;
             }
         } else {
-            if (!track.title().equals(lastPushedTitle)) {
+            final String actualTitle = title.getText() != null ? title.getText().toString() : null;
+            if (!track.title().equals(actualTitle)) {
                 title.setText(track.title());
-                lastPushedTitle = track.title();
             }
-            if (!track.artist().equals(lastPushedSubtitle)) {
+            final String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
+            if (!track.artist().equals(actualSubtitle)) {
                 subtitle.setText(track.artist());
-                lastPushedSubtitle = track.artist();
             }
         }
 
-        scheduleTick();
+        ticker.schedule();
     }
 }

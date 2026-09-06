@@ -12,10 +12,10 @@ import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.translation.TextTranslator;
 
@@ -29,7 +29,7 @@ public final class LyricsTranslator {
          * Called on the main thread with one translated line per original line,
          * or {@code null} if the translation failed.
          */
-        void onTranslated(@Nullable List<String> translatedLines);
+        void onTranslated(@Nullable List<String> translatedLines, boolean fromGoogle);
     }
 
     /** Separate from the lyrics executor, so a translation never delays a lyrics lookup. */
@@ -42,10 +42,59 @@ public final class LyricsTranslator {
         return Locale.getDefault().getLanguage();
     }
 
+    @Nullable
+    private static List<String> embeddedTranslation(Lyrics lyrics, String target, int lineCount) {
+        final Map<String, List<LyricsLine>> byLang = lyrics.translations();
+        if (byLang == null || byLang.isEmpty()) {
+            return null;
+        }
+        final String targetLang = primarySubtag(target);
+        for (Map.Entry<String, List<LyricsLine>> entry : byLang.entrySet()) {
+            if (!primarySubtag(entry.getKey()).equals(targetLang)) {
+                continue;
+            }
+            final List<LyricsLine> lines = entry.getValue();
+            if (lines == null || lines.size() != lineCount || !LyricsMerge.hasText(lines)) {
+                continue;
+            }
+            final List<String> out = new ArrayList<>(lines.size());
+            for (LyricsLine line : lines) {
+                final String text = line.text();
+                out.add(text == null ? "" : text);
+            }
+            // Fill BG lines with their parent's translation
+            final List<LyricsLine> allLines = lyrics.lines();
+            for (int i = 0; i < out.size() && i < allLines.size(); i++) {
+                if (allLines.get(i).isBG()) {
+                    for (int j = i - 1; j >= 0; j--) {
+                        if (!allLines.get(j).isBG() && j < out.size()) {
+                            final String parentTrans = out.get(j);
+                            if (parentTrans != null && !parentTrans.isEmpty()) {
+                                out.set(i, parentTrans);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            return out;
+        }
+        return null;
+    }
+
+    /** Returns the primary language subtag of a BCP-47 tag, lower-cased (e.g. {@code zh-Hans} -> {@code zh}). */
+    private static String primarySubtag(String lang) {
+        if (lang == null) {
+            return "";
+        }
+        final int idx = lang.indexOf('-');
+        return (idx >= 0 ? lang.substring(0, idx) : lang).toLowerCase(Locale.ROOT);
+    }
+
     /**
      * Translates the lyrics of a track, using the cache when possible.
      */
-    public static void translate(TrackInfo track, Lyrics lyrics, LyricsSource source, Callback callback) {
+    public static void translate(TrackInfo track, Lyrics lyrics, String source, Callback callback) {
         Utils.verifyOnMainThread();
 
         List<String> lines = new ArrayList<>(lyrics.lines().size());
@@ -54,6 +103,13 @@ public final class LyricsTranslator {
         }
 
         final String language = deviceLanguage();
+
+        final List<String> embedded = embeddedTranslation(lyrics, language, lines.size());
+        if (embedded != null) {
+            // The provider already ships this translation; do not attribute it to Google.
+            Utils.runOnMainThread(() -> callback.onTranslated(embedded, false));
+            return;
+        }
 
         executor.execute(() -> {
             List<String> translated = LyricsCache.getTranslation(track, source, language, lines.size());
@@ -65,7 +121,7 @@ public final class LyricsTranslator {
             }
 
             final List<String> result = translated;
-            Utils.runOnMainThread(() -> callback.onTranslated(result));
+            Utils.runOnMainThread(() -> callback.onTranslated(result, result != null));
         });
     }
 
@@ -75,45 +131,13 @@ public final class LyricsTranslator {
      */
     @Nullable
     private static List<String> translateOnline(List<String> lines, String language) {
-        if (!Utils.isNetworkConnected()) {
-            return null;
-        }
-
-        // Blank lines are instrumental breaks. They are held back because the endpoint
-        // collapses empty lines between the newlines it is given, which would shift
-        // every following translation onto the wrong lyrics line.
-        List<String> toTranslate = new ArrayList<>(lines.size());
-        for (String line : lines) {
-            if (!line.isEmpty()) {
-                toTranslate.add(line);
-            }
-        }
-
-        List<String> translated = new ArrayList<>(toTranslate.size());
-        try {
-            for (List<String> batch : TextTranslator.splitByCharacterBudget(
-                    toTranslate, TextTranslator.MAXIMUM_BATCH_CHARACTERS)) {
-                List<String> translatedBatch = TextTranslator.translate(batch, language);
-
-                // A mismatched count cannot be mapped back safely, and showing lines
-                // under the wrong lyrics is worse than showing no translation at all.
-                if (translatedBatch.size() != batch.size()) {
-                    Logger.printDebug(() -> "Discarding translation: expected " + batch.size()
-                            + " lines but got " + translatedBatch.size());
-                    return null;
-                }
-                translated.addAll(translatedBatch);
-            }
-        } catch (Exception ex) {
-            Logger.printDebug(() -> "Could not translate the lyrics", ex);
-            return null;
-        }
-
-        List<String> result = new ArrayList<>(lines.size());
-        int next = 0;
-        for (String line : lines) {
-            result.add(line.isEmpty() ? "" : translated.get(next++));
-        }
-        return result;
+        return LyricsMerge.mapLinesOnline(
+                lines, b -> {
+                    try {
+                        return TextTranslator.translate(b, language);
+                    } catch (Exception ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }, "translation", "translate");
     }
 }

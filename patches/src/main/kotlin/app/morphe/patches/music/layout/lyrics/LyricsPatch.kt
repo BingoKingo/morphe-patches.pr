@@ -20,11 +20,15 @@ import app.morphe.patches.music.video.information.musicVideoInformationPatch
 import app.morphe.patches.shared.MediaSessionSetPlaybackStateFingerprint
 import app.morphe.patches.shared.misc.litho.filter.addLithoFilter
 import app.morphe.patches.shared.misc.media.hookMediaSessionArgument
-import app.morphe.patches.shared.misc.settings.preference.ListPreference
+import app.morphe.patches.shared.misc.settings.preference.InputType
 import app.morphe.patches.shared.misc.settings.preference.NonInteractivePreference
+import app.morphe.patches.shared.misc.settings.preference.PreferenceCategory
+import app.morphe.patches.shared.misc.settings.preference.PreferenceScreenPreference.Sorting
 import app.morphe.patches.shared.misc.settings.preference.SwitchPreference
+import app.morphe.patches.shared.misc.settings.preference.TextPreference
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.getInstruction
+import app.morphe.util.insertLiteralOverride
 import app.morphe.util.ResourceGroup
 import app.morphe.util.copyResources
 import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
@@ -39,7 +43,7 @@ private const val LYRICS_PANEL_FILTER =
 @Suppress("unused")
 val lyricsPatch = bytecodePatch(
     name = "Third-party lyrics",
-    description = "Adds an option to show synced lyrics from LRCLIB, QQ, KuGou or Netease in the lyrics panel."
+    description = "Adds an option to show synced lyrics with experience enhancement from 8+ providers in the lyrics panel."
 ) {
     dependsOn(
         sharedExtensionPatch,
@@ -62,32 +66,116 @@ val lyricsPatch = bytecodePatch(
     compatibleWith(COMPATIBILITY_YOUTUBE_MUSIC)
 
     execute {
+        val dep = "morphe_music_lyrics_enabled"
         PreferenceScreen.LYRICS.addPreferences(
             SwitchPreference("morphe_music_lyrics_enabled", summary = true),
-            ListPreference("morphe_music_lyrics_source"),
-            SwitchPreference("morphe_music_lyrics_tap_to_seek", summary = true),
-            SwitchPreference("morphe_music_lyrics_word_sync", summary = true),
-            SwitchPreference("morphe_music_lyrics_show_copy_button"),
-            SwitchPreference("morphe_music_lyrics_show_translate_button"),
-            SwitchPreference("morphe_music_lyrics_mediasession"),
-            SwitchPreference("morphe_music_lyrics_miniplayer"),
-            NonInteractivePreference(
-                key = "morphe_music_lyrics_text_size",
-                summaryKey = "morphe_music_lyrics_text_size_summary",
-                tag = "app.morphe.extension.shared.settings.preference.SeekBarPreference",
-                selectable = true
+            PreferenceCategory(
+                key = "morphe_music_lyrics_section_service",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    NonInteractivePreference(
+                        key = "morphe_music_lyrics_source",
+                        titleKey = null,
+                        summaryKey = "morphe_music_lyrics_source_summary",
+                        tag = "app.morphe.extension.music.settings.preference.OrderedListPreference",
+                        selectable = false,
+                        dependency = dep
+                    ),
+                )
             ),
-            NonInteractivePreference(
-                key = "morphe_music_lyrics_offset_ms",
-                summaryKey = "morphe_music_lyrics_offset_ms_summary",
-                tag = "app.morphe.extension.shared.settings.preference.SeekBarPreference",
-                selectable = true
+            PreferenceCategory(
+                key = "morphe_music_lyrics_section_tokens",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    NonInteractivePreference(
+                        key = "morphe_music_apple_music_token",
+                        titleKey = "morphe_music_apple_music_token_title",
+                        summaryKey = "morphe_music_apple_music_token_summary",
+                        tag = "app.morphe.extension.music.settings.preference.AppleMusicTokenPreference",
+                        selectable = true,
+                        dependency = dep
+                    ),
+                    NonInteractivePreference(
+                        key = "morphe_music_musixmatch_token",
+                        titleKey = "morphe_music_musixmatch_token_title",
+                        summaryKey = "morphe_music_musixmatch_token_summary",
+                        tag = "app.morphe.extension.music.settings.preference.MusixmatchTokenPreference",
+                        selectable = true,
+                        dependency = dep
+                    ),
+                    NonInteractivePreference(
+                        key = "morphe_music_spotify_token",
+                        titleKey = "morphe_music_spotify_token_title",
+                        summaryKey = "morphe_music_spotify_token_summary",
+                        tag = "app.morphe.extension.music.settings.preference.SpotifyTokenPreference",
+                        selectable = true,
+                        dependency = dep
+                    ),
+                )
             ),
-            NonInteractivePreference(
-                key = "morphe_music_lyrics_about",
-                titleKey = "morphe_music_lyrics_about_title",
-                summaryKey = "morphe_music_lyrics_about_summary"
-            )
+            PreferenceCategory(
+                key = "morphe_settings_music_lyrics_metadata",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    TextPreference(
+                        key = "morphe_music_lyrics_custom_regex",
+                        inputType = InputType.TEXT_MULTI_LINE,
+                        dependency = dep
+                    ),
+                    TextPreference(
+                        key = "morphe_music_lyrics_text_filter",
+                        inputType = InputType.TEXT_MULTI_LINE,
+                        dependency = dep
+                    )
+                )
+            ),
+            PreferenceCategory(
+                key = "morphe_music_lyrics_section_overlay",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    NonInteractivePreference(
+                        key = "morphe_music_lyrics_text_size",
+                        summaryKey = "morphe_music_lyrics_text_size_summary",
+                        tag = "app.morphe.extension.shared.settings.preference.SeekBarPreference",
+                        selectable = true,
+                        dependency = dep
+                    ),
+                    SwitchPreference("morphe_music_lyrics_word_sync", summary = true, dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_tap_to_seek", summary = true, dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_show_copy_button", summary = true, dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_show_translate_button", summary = true, dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_show_romanize_button", summary = true, dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_show_refresh_button", summary = true, dependency = dep),
+                )
+            ),
+            PreferenceCategory(
+                key = "morphe_music_lyrics_section_sync",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    NonInteractivePreference(
+                        key = "morphe_music_lyrics_offset_ms",
+                        summaryKey = "morphe_music_lyrics_offset_ms_summary",
+                        tag = "app.morphe.extension.shared.settings.preference.SeekBarPreference",
+                        selectable = true,
+                        dependency = dep
+                    ),
+                    SwitchPreference("morphe_music_lyrics_miniplayer", dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_mediasession", dependency = dep),
+                    SwitchPreference("morphe_music_lyrics_display_artist_first", summary = true, dependency = dep),
+                )
+            ),
+            PreferenceCategory(
+                key = "morphe_music_lyrics_section_about",
+                sorting = Sorting.UNSORTED,
+                preferences = setOf(
+                    NonInteractivePreference(
+                        key = "morphe_music_lyrics_about",
+                        titleKey = null,
+                        summaryKey = "morphe_music_lyrics_about_summary",
+                        dependency = dep
+                    )
+                )
+            ),
         )
 
         // The panel content is built by Elements, so there is no view to hook. The timed

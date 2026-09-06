@@ -35,6 +35,14 @@ public final class TextTranslator {
     private static final String GOOGLE_TRANSLATE_URL =
             "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t&tl=";
 
+    /**
+     * Romanization (transliteration to Latin script) of the source text. The target
+     * language is irrelevant to the {@code dt=rm} field, so a dummy target is used while
+     * {@code sl=auto} lets Google detect the script to romanize.
+     */
+    private static final String GOOGLE_ROMANIZE_URL =
+            "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t&dt=rm&tl=en";
+
     private static final int CONNECT_TIMEOUT_MILLISECONDS = 10_000;
     private static final int READ_TIMEOUT_MILLISECONDS = 15_000;
 
@@ -105,6 +113,29 @@ public final class TextTranslator {
     @NonNull
     public static List<String> translate(@NonNull List<String> lines, @NonNull String targetLanguage)
             throws Exception {
+        return requestLines(lines, GOOGLE_TRANSLATE_URL + targetLanguage, false);
+    }
+
+    /**
+     * Romanizes one batch of lines (transliterates the source script into Latin).
+     * Always call off the main thread.
+     *
+     * @return Romanized lines, in the order they were given.
+     */
+    @NonNull
+    public static List<String> romanize(@NonNull List<String> lines) throws Exception {
+        return requestLines(lines, GOOGLE_ROMANIZE_URL, true);
+    }
+
+    /**
+     * Sends one batch to the public endpoint and returns the per-line result. Shared by
+     * {@link #translate} and {@link #romanize}; the only difference is which field of each
+     * sentence Google returns (the translation, or the romanization at index 3/2).
+     */
+    @NonNull
+    private static List<String> requestLines(@NonNull List<String> lines,
+                                             @NonNull String url,
+                                             boolean romanize) throws Exception {
         Utils.verifyOffMainThread();
         final long startTime = System.currentTimeMillis();
 
@@ -128,7 +159,7 @@ public final class TextTranslator {
             final int attemptNumber = attempt + 1;
             HttpURLConnection connection = null;
             try {
-                connection = Requester.openConnection(GOOGLE_TRANSLATE_URL + targetLanguage);
+                connection = Requester.openConnection(url);
                 connection.setRequestMethod("POST");
                 connection.setConnectTimeout(CONNECT_TIMEOUT_MILLISECONDS);
                 connection.setReadTimeout(READ_TIMEOUT_MILLISECONDS);
@@ -145,41 +176,49 @@ public final class TextTranslator {
 
                 final int code = connection.getResponseCode();
                 if (code == 200) {
-                    // Response: [[["translated","original",...],...],null,"src_lang",...]
+                    // Response: [[["translated","original",null,"romanized",...],...],...]
                     // The endpoint splits into sentences; concatenating restores the lines that were sent.
                     JSONArray sentences = new JSONArray(Requester.parseString(connection)).getJSONArray(0);
-                    StringBuilder translated = new StringBuilder();
+                    StringBuilder result = new StringBuilder();
                     for (int i = 0, length = sentences.length(); i < length; i++) {
-                        translated.append(sentences.getJSONArray(i).getString(0));
+                        JSONArray sentence = sentences.getJSONArray(i);
+                        if (romanize) {
+                            // The romanization lives at index 3, falling back to index 2.
+                            String romanized = sentence.optString(3);
+                            if (romanized.isEmpty() || romanized.equals("null")) {
+                                romanized = sentence.optString(2);
+                            }
+                            if (romanized.equals("null")) {
+                                romanized = "";
+                            }
+                            result.append(romanized);
+                        } else {
+                            result.append(sentence.getString(0));
+                        }
                     }
 
-                    Logger.printDebug(() -> "Translation complete: " + targetLanguage
-                            + " lines: " + lines.size()
-                            + " attempt: " + attemptNumber
-                            + " fetchTime: " + (System.currentTimeMillis() - startTime) + "ms");
-                    return Arrays.asList(translated.toString().split("\n", -1));
+                    return Arrays.asList(result.toString().split("\n", -1));
                 }
 
                 // A non-2xx response: read the body through the error stream, because
                 // parseString() would throw on the error stream and hide the real status.
                 String response = Requester.parseErrorString(connection);
                 TranslationHttpException httpFailure = new TranslationHttpException(code,
-                        "Translation HTTP status: " + code
-                                + " language: " + targetLanguage
+                        (romanize ? "Romanization" : "Translation") + " HTTP status: " + code
                                 + " response: " + response);
                 if (!isRetryable(code) || attempt == MAX_ATTEMPTS - 1) {
                     throw httpFailure;
                 }
                 lastFailure = httpFailure;
-                Logger.printInfo(() -> "Translation attempt " + attemptNumber
-                        + " failed (" + code + "), retrying");
+                Logger.printInfo(() -> (romanize ? "Romanization" : "Translation") + " attempt "
+                        + attemptNumber + " failed (" + code + "), retrying");
             } catch (IOException ex) {
                 if (attempt == MAX_ATTEMPTS - 1) {
                     throw ex;
                 }
                 lastFailure = ex;
-                Logger.printInfo(() -> "Translation attempt " + attemptNumber
-                        + " failed (" + ex.getClass().getSimpleName() + "), retrying");
+                Logger.printInfo(() -> (romanize ? "Romanization" : "Translation") + " attempt "
+                        + attemptNumber + " failed (" + ex.getClass().getSimpleName() + "), retrying");
             } finally {
                 if (connection != null) {
                     connection.disconnect();
@@ -188,7 +227,7 @@ public final class TextTranslator {
         }
 
         throw lastFailure != null ? lastFailure : new IOException(
-                "Translation failed after " + MAX_ATTEMPTS + " attempts");
+                (romanize ? "Romanization" : "Translation") + " failed after " + MAX_ATTEMPTS + " attempts");
     }
 
     private static boolean isRetryable(int code) {

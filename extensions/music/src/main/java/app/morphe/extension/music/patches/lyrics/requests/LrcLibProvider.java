@@ -14,9 +14,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import app.morphe.extension.music.patches.lyrics.LrcParser;
@@ -41,6 +43,11 @@ public final class LrcLibProvider implements LyricsProvider {
         return "LRCLIB";
     }
 
+    @Override
+    public boolean hasCandidates() {
+        return true;
+    }
+
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
@@ -53,13 +60,62 @@ public final class LrcLibProvider implements LyricsProvider {
         return fetchSearch(track);
     }
 
+    @Override
+    public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
+        List<Lyrics> results = new ArrayList<>();
+
+        // Exact match first
+        Lyrics exact = fetchExact(track);
+        if (exact != null) {
+            results.add(exact);
+        }
+
+        // Then search results, sorted by duration delta
+        String url = BASE_URL + "search?track_name=" + LyricsRequests.encode(track.title())
+                + "&artist_name=" + LyricsRequests.encode(track.artist());
+        HttpURLConnection connection = LyricsRequests.openConnection(url);
+        if (connection.getResponseCode() != 200) {
+            return results;
+        }
+
+        JSONArray searchResults = Requester.parseJSONArray(connection);
+        if (searchResults.length() == 0) {
+            return results;
+        }
+
+        List<JSONObject> candidates = new ArrayList<>();
+        for (int i = 0; i < searchResults.length(); i++) {
+            JSONObject candidate = searchResults.optJSONObject(i);
+            if (candidate != null) {
+                candidates.add(candidate);
+            }
+        }
+
+        candidates.sort((a, b) -> {
+            int deltaA = Math.abs(a.optInt("duration", 0) - track.durationSeconds());
+            int deltaB = Math.abs(b.optInt("duration", 0) - track.durationSeconds());
+            return deltaA - deltaB;
+        });
+
+        for (JSONObject candidate : candidates) {
+            if (results.size() >= 5) {
+                break;
+            }
+            Lyrics lyrics = toLyrics(candidate);
+            if (lyrics != null && !lyrics.isEmpty()) {
+                results.add(lyrics);
+            }
+        }
+        return results;
+    }
+
     @Nullable
     private Lyrics fetchExact(TrackInfo track) throws Exception {
         StringBuilder url = new StringBuilder(BASE_URL);
-        url.append("get?track_name=").append(encode(track.title()));
-        url.append("&artist_name=").append(encode(track.artist()));
+        url.append("get?track_name=").append(LyricsRequests.encode(track.title()));
+        url.append("&artist_name=").append(LyricsRequests.encode(track.artist()));
         if (!track.album().isEmpty()) {
-            url.append("&album_name=").append(encode(track.album()));
+            url.append("&album_name=").append(LyricsRequests.encode(track.album()));
         }
         if (track.durationSeconds() > 0) {
             url.append("&duration=").append(track.durationSeconds());
@@ -74,8 +130,8 @@ public final class LrcLibProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics fetchSearch(TrackInfo track) throws Exception {
-        String url = BASE_URL + "search?track_name=" + encode(track.title())
-                + "&artist_name=" + encode(track.artist());
+        String url = BASE_URL + "search?track_name=" + LyricsRequests.encode(track.title())
+                + "&artist_name=" + LyricsRequests.encode(track.artist());
 
         HttpURLConnection connection = LyricsRequests.openConnection(url);
         if (connection.getResponseCode() != 200) {
@@ -121,9 +177,9 @@ public final class LrcLibProvider implements LyricsProvider {
             return Lyrics.NOT_FOUND;
         }
 
-        String lyricsFile = optString(response, "lyricsFile");
+        String lyricsFile = LyricsRequests.optString(response, "lyricsFile");
         if (lyricsFile == null) {
-            lyricsFile = optString(response, "lyricsfile");
+            lyricsFile = LyricsRequests.optString(response, "lyricsfile");
         }
         if (lyricsFile != null) {
             Lyrics fromFile = LyricsfileParser.parse(lyricsFile, name());
@@ -132,27 +188,27 @@ public final class LrcLibProvider implements LyricsProvider {
             }
         }
 
-        String enhanced = optString(response, "enhancedLyrics");
+        String enhanced = LyricsRequests.optString(response, "enhancedLyrics");
         if (enhanced != null) {
             List<LyricsLine> lines = LrcParser.parseSynced(enhanced);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), true);
+                return new Lyrics(lines, name(), true, null, null, null, null, enhanced, "lrc", null);
             }
         }
 
-        String synced = optString(response, "syncedLyrics");
+        String synced = LyricsRequests.optString(response, "syncedLyrics");
         if (synced != null) {
             List<LyricsLine> lines = LrcParser.parseSynced(synced);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), true);
+                return new Lyrics(lines, name(), true, null, null, null, null, synced, "lrc", null);
             }
         }
 
-        String plain = optString(response, "plainLyrics");
+        String plain = LyricsRequests.optString(response, "plainLyrics");
         if (plain != null) {
             List<LyricsLine> lines = LrcParser.parsePlain(plain);
             if (!lines.isEmpty()) {
-                return new Lyrics(lines, name(), false);
+                return new Lyrics(lines, name(), false, null, null, null, null, plain, "lrc", null);
             }
         }
 
@@ -172,22 +228,5 @@ public final class LrcLibProvider implements LyricsProvider {
             return null;
         }
         return Requester.parseJSONObject(connection);
-    }
-
-    @Nullable
-    private static String optString(JSONObject object, String key) {
-        if (object.isNull(key)) {
-            return null;
-        }
-        String value = object.optString(key, "");
-        return value.isBlank() ? null : value;
-    }
-
-    /**
-     * The Charset overload of encode() needs API 33, so the charset is named instead.
-     */
-    @SuppressWarnings("CharsetObjectCanBeUsed")
-    private static String encode(String value) throws UnsupportedEncodingException {
-        return URLEncoder.encode(value, "UTF-8");
     }
 }

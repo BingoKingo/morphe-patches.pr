@@ -16,5 +16,9 @@ public enum LyricsSource {
     KUGOU,
     NETEASE,
     QQ,
-    SUBTITLES
+    BINIMUM,
+    UNISON,
+    AMLL,
+    SUBTITLES,
+    LOCAL
 }

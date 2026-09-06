@@ -8,24 +8,81 @@
 package app.morphe.extension.music.patches.lyrics;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Lyrics of a single track, either synced (each line carries a timestamp) or plain.
  *
  * @param providerName Provider name shown to the user, for example {@code LRCLIB}.
+ * @param translations Embedded translations keyed by BCP-47 language tag (e.g. {@code zh},
+ *                     {@code en}, {@code zh-Hans}). A translation entry is a line-level list
+ *                     aligned 1:1 with {@link #lines()}; an empty string marks a line with no
+ *                     translation. {@code null} when the source ships none.
+ * @param romanization Legacy single-language romanization, kept for backward compatibility.
+ * @param romanizations Multi-language romanizations keyed by BCP-47 language tag.
+ * @param songwriters Songwriter/credits names extracted from TTML metadata.
+ * @param rawFormat Decrypted raw lyrics text in the provider's original format (e.g. LRC, QRC, TTML).
+ * @param formatType File extension for the raw format (e.g. {@code "lrc"}, {@code "qrc"}, {@code "ttml"}).
+ * @param sourceUrl Optional URL to the song page on the provider's platform, opened when the
+ *                  source label is clicked.
  */
-public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced) {
+public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                     @Nullable List<LyricsLine> romanization,
+                     @Nullable Map<String, List<LyricsLine>> translations,
+                     @Nullable Map<String, List<LyricsLine>> romanizations,
+                     @Nullable List<String> songwriters,
+                     @Nullable String rawFormat,
+                     @Nullable String formatType,
+                     @Nullable String sourceUrl) {
 
     /** Marker for a track that was looked up successfully but has no lyrics anywhere. */
-    public static final Lyrics NOT_FOUND = new Lyrics(Collections.emptyList(), "", false);
+    public static final Lyrics NOT_FOUND = new Lyrics(Collections.emptyList(), "", false,
+            null, null, null, null, null, null, null);
 
     public static final String CAPTIONS_PROVIDER = "Captions";
 
     public Lyrics {
         lines = Collections.unmodifiableList(lines);
+        romanization = (romanization == null) ? null : Collections.unmodifiableList(romanization);
+        translations = (translations == null) ? null : unmodifiableTranslations(translations);
+        romanizations = (romanizations == null) ? null : unmodifiableTranslations(romanizations);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization,
+                  @Nullable Map<String, List<LyricsLine>> translations) {
+        this(lines, providerName, synced, romanization, translations, null, null, null, null, null);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization,
+                  @Nullable Map<String, List<LyricsLine>> translations,
+                  @Nullable Map<String, List<LyricsLine>> romanizations) {
+        this(lines, providerName, synced, romanization, translations, romanizations, null, null, null, null);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced) {
+        this(lines, providerName, synced, null, null, null, null, null, null, null);
+    }
+
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization) {
+        this(lines, providerName, synced, romanization, null, null, null, null, null, null);
+    }
+
+    private static Map<String, List<LyricsLine>> unmodifiableTranslations(
+            Map<String, List<LyricsLine>> in) {
+        final Map<String, List<LyricsLine>> out = new HashMap<>(in.size());
+        for (Map.Entry<String, List<LyricsLine>> entry : in.entrySet()) {
+            final List<LyricsLine> value = entry.getValue();
+            out.put(entry.getKey(), value == null ? null : Collections.unmodifiableList(value));
+        }
+        return Collections.unmodifiableMap(out);
     }
 
     public boolean isEmpty() {
@@ -60,7 +117,8 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
                 if (next >= size || positionMs < lines.get(next).startTimeMs()) {
                     return hintIndex;
                 }
-                if (next + 1 >= size || positionMs < lines.get(next + 1).startTimeMs()) {
+                final int nextNext = next + 1;
+                if (nextNext >= size || positionMs < lines.get(nextNext).startTimeMs()) {
                     return next;
                 }
             }

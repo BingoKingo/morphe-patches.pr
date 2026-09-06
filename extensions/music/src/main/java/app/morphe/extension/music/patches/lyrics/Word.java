@@ -7,7 +7,18 @@
 
 package app.morphe.extension.music.patches.lyrics;
 
-public record Word(long startMs, long endMs, String text) {
+import androidx.annotation.Nullable;
+
+public record Word(long startMs, long endMs, String text, @Nullable String romaji,
+                   boolean endsWithSpace) {
 
     public static final long NO_TIME = -1;
+
+    public Word(long startMs, long endMs, String text) {
+        this(startMs, endMs, text, null, false);
+    }
+
+    public Word(long startMs, long endMs, String text, @Nullable String romaji) {
+        this(startMs, endMs, text, romaji, false);
+    }
 }

@@ -30,8 +30,10 @@ import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.shared.Logger;
@@ -79,16 +81,47 @@ public final class NetEaseProvider implements LyricsProvider {
         return "NetEase";
     }
 
+    @Override
+    public boolean hasCandidates() {
+        return true;
+    }
+
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
         String keyword = track.title() + " " + track.artist();
         JSONObject song = searchBest(keyword, track);
         if (song == null || !song.has("id")) {
-            Logger.printDebug(() -> "NetEase no matching song for keyword='" + keyword + "'");
             return null;
         }
+        return fetchFromSong(song, track);
+    }
 
+    @Override
+    public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
+        String keyword = track.title() + " " + track.artist();
+        List<JSONObject> songs = searchAll(keyword, track);
+        List<Lyrics> results = new ArrayList<>();
+        for (JSONObject song : songs) {
+            if (results.size() >= 5) {
+                break;
+            }
+            if (song == null || !song.has("id")) {
+                continue;
+            }
+            try {
+                Lyrics lyrics = fetchFromSong(song, track);
+                if (lyrics != null) {
+                    results.add(lyrics);
+                }
+            } catch (Exception ex) {
+            }
+        }
+        return results;
+    }
+
+    @Nullable
+    private Lyrics fetchFromSong(JSONObject song, TrackInfo track) throws Exception {
         JSONObject root = eapiRequest("/eapi/song/lyric/v1", new JSONObject()
                 .put("id", song.getLong("id"))
                 .put("lv", "-1")
@@ -99,32 +132,49 @@ public final class NetEaseProvider implements LyricsProvider {
         String yrc = optLyric(root, "yrc");
         String lrc = optLyric(root, "lrc");
         String tlyric = optLyric(root, "tlyric");
-        Logger.printDebug(() -> "NetEase lyric fields yrc=" + !yrc.isEmpty()
-                + " lrc=" + !lrc.isEmpty() + " tlyric=" + !tlyric.isEmpty());
+        String romalrc = optLyric(root, "romalrc");
+
         List<LyricsLine> lines = parseNeteaseOriginalLyrics(yrc, lrc);
         if (lines.isEmpty()) {
-            Logger.printDebug(() -> "NetEase parsed 0 lines (yrc len=" + yrc.length()
-                    + " lrc len=" + lrc.length() + ") for " + track);
             return null;
         }
 
-        Logger.printDebug(() -> "NetEase returned " + lines.size()
-                + " lines (wordSynced=" + hasWordTimings(lines) + ") for " + track);
-        return new Lyrics(lines, name(), true);
-    }
+        List<LyricsLine> romaLines = romalrc.isEmpty() ? null : LrcParser.parseSynced(romalrc);
+        List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, romaLines);
 
-    private static boolean hasWordTimings(List<LyricsLine> lines) {
-        for (LyricsLine line : lines) {
-            if (line.hasWords()) {
-                return true;
-            }
-        }
-        return false;
+        List<LyricsLine> transLines = tlyric.isEmpty() ? null : LrcParser.parseSynced(tlyric);
+        List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, transLines);
+        Map<String, List<LyricsLine>> translations =
+                LyricsMerge.singleLanguageTranslations(translation, "zh");
+
+        String rawFormat = !yrc.isEmpty() ? yrc : lrc;
+        String formatType = !yrc.isEmpty() ? "yrc" : "lrc";
+        long songId = song.getLong("id");
+        String sourceUrl = "https://music.163.com/song?id=" + songId;
+        return new Lyrics(lines, name(), true, romanization, translations, null, null, rawFormat, formatType, sourceUrl);
     }
 
     private static String optLyric(JSONObject root, String key) {
         JSONObject section = root.optJSONObject(key);
         return section == null ? "" : section.optString("lyric", "");
+    }
+
+    private static List<JSONObject> searchAll(String keyword, TrackInfo track) {
+        List<JSONObject> candidates = new ArrayList<>();
+        try {
+            candidates.addAll(searchByEapi(keyword));
+        } catch (Exception ex) {
+            try {
+                candidates.addAll(searchByCloudSearch(keyword));
+            } catch (Exception ignored) {
+            }
+        }
+        if (candidates.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<JSONObject> scored = new ArrayList<>(candidates);
+        scored.sort((a, b) -> scoreCandidate(b, track) - scoreCandidate(a, track));
+        return scored;
     }
 
     @Nullable
@@ -209,7 +259,7 @@ public final class NetEaseProvider implements LyricsProvider {
     }
 
     private static List<JSONObject> searchByCloudSearch(String keyword) throws IOException, JSONException {
-        String form = "s=" + encode(keyword) + "&type=1&offset=0&limit=30";
+        String form = "s=" + LyricsRequests.encode(keyword) + "&type=1&offset=0&limit=30";
         HttpURLConnection connection = LyricsRequests.postForm(
                 "https://music.163.com/api/cloudsearch/pc", form);
         if (connection.getResponseCode() != 200) {
@@ -522,8 +572,20 @@ public final class NetEaseProvider implements LyricsProvider {
                 long wordStart = starts.get(i);
                 long wordEnd = wordStart + durations.get(i);
                 String wordText = texts.get(i);
-                words.add(new Word(wordStart, wordEnd, wordText));
-                full.append(wordText);
+                if (wordText.isEmpty()) {
+                    continue;
+                }
+                boolean endsWithSpace = !wordText.isEmpty()
+                        && Character.isWhitespace(wordText.charAt(wordText.length() - 1));
+                String trimmed = wordText.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                if (full.length() > 0 && needsSpaceBetween(full.toString(), trimmed)) {
+                    full.append(' ');
+                }
+                words.add(new Word(wordStart, wordEnd, trimmed, null, endsWithSpace));
+                full.append(trimmed);
             }
             if (words.isEmpty() && !content.isEmpty()) {
                 words.add(new Word(lineStart, lineEnd, content));
@@ -721,8 +783,27 @@ public final class NetEaseProvider implements LyricsProvider {
         return randomMac() + "@@@" + randomUpper(8) + "@@@@@@" + randomHex(64);
     }
 
-    @SuppressWarnings("CharsetObjectCanBeUsed")
-    private static String encode(String value) throws IOException {
-        return java.net.URLEncoder.encode(value, "UTF-8");
+    private static boolean isCjk(char c) {
+        Character.UnicodeBlock block = Character.UnicodeBlock.of(c);
+        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
+                || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
+                || block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
+                || block == Character.UnicodeBlock.HIRAGANA
+                || block == Character.UnicodeBlock.KATAKANA
+                || block == Character.UnicodeBlock.HANGUL_JAMO
+                || block == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO
+                || block == Character.UnicodeBlock.HANGUL_SYLLABLES;
+    }
+
+    private static boolean needsSpaceBetween(String a, String b) {
+        if (a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+        char last = a.charAt(a.length() - 1);
+        char first = b.charAt(0);
+        return !isCjk(last) && !isCjk(first);
     }
 }
