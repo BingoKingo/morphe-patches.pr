@@ -188,7 +188,6 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
 
     private int lastWordLineIndex = -1;
 
-    /** Previous line whose last word is still animating after the active line switched. */
     private int pendingOldWordLineIndex = -1;
 
     private static final class WordTiming {
@@ -213,6 +212,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         private final float relativeSize;
         private final Paint romajiPaint = new Paint();
         private final Paint.FontMetrics romajiFm = new Paint.FontMetrics();
+        private final Paint.FontMetrics wordFm = new Paint.FontMetrics();
 
         RomajiSpan(String romaji, int color, float relativeSize) {
             this.romaji = romaji;
@@ -248,7 +248,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             final float romajiX = x + Math.max(0f, (wordWidth - romajiWidth) / 2f);
 
             romajiPaint.getFontMetrics(romajiFm);
-            final Paint.FontMetrics wordFm = paint.getFontMetrics();
+            paint.getFontMetrics(wordFm);
             final int gap = Math.max(1, (int) (paint.getTextSize() * 0.1f));
             final float romajiBaseline = y + wordFm.ascent - romajiFm.descent - gap;
 
@@ -264,6 +264,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         private int unsungColor;
         private int sungColor;
         private int originalTextStart;
+        private float[] lineMaxSungX;
 
         LyricsLineView(Context context) {
             super(context);
@@ -304,8 +305,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
 
             // Track sung extent per visual line for multi-line wrap support.
             final int lineCount = layout.getLineCount();
-            final float[] lineMaxSungX = new float[lineCount];
-            Arrays.fill(lineMaxSungX, -1f);
+            if (lineMaxSungX == null || lineMaxSungX.length != lineCount) {
+                lineMaxSungX = new float[lineCount];
+            }
+            Arrays.fill(lineMaxSungX, 0, lineCount, -1f);
             int firstSungLine = -1;
 
             for (WordTiming timing : wordTimings) {
@@ -750,9 +753,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             if (tapToSeek) {
                 final long seekTime = line.startTimeMs();
                 lineView.setOnClickListener(view -> {
-                    final long videoSeekTime = LyricsManager.getInstance().toVideoTime(seekTime);
-                    if (!VideoInformation.seekTo(videoSeekTime)) {
-                        Logger.printDebug(() -> "Seek to lyrics line failed: " + videoSeekTime);
+                    if (!VideoInformation.seekTo(seekTime)) {
+                        Logger.printDebug(() -> "Seek to lyrics line failed: " + seekTime);
                     }
                     userScrollUntilUptimeMs = 0;
                 });
@@ -1330,7 +1332,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                 final List<WordTiming> timings = lineWordSpans.get(highlightedIndex);
                 if (!timings.isEmpty()) {
                     final long lastEnd = timings.get(timings.size() - 1).endMs;
-                    if (pos < lastEnd) {
+                    final long firstStart = timings.get(0).startMs;
+                    if (pos < lastEnd && pos >= firstStart) {
                         keepFullOpacity = true;
                     }
                 }
@@ -1397,7 +1400,6 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                     }
                     applyWordColors(i, Long.MIN_VALUE, true);
                 }
-                pendingOldWordLineIndex = -1;
             }
             wordSyncWasEnabled = enabled;
         }
@@ -1430,14 +1432,13 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             final List<WordTiming> pendingTimings = lineWordSpans.get(pendingOldWordLineIndex);
             if (!pendingTimings.isEmpty()) {
                 final long lastEnd = pendingTimings.get(pendingTimings.size() - 1).endMs;
-                if (positionMs >= lastEnd) {
-                    // Last word done — reset pending line now.
+                final long firstStart = pendingTimings.get(0).startMs;
+                if (positionMs >= lastEnd || positionMs < firstStart) {
                     applyWordColors(pendingOldWordLineIndex, Long.MIN_VALUE, false);
                     resetBgWordColors(pendingOldWordLineIndex);
                     fadeTo(lineViews.get(pendingOldWordLineIndex), INACTIVE_LINE_ALPHA);
                     pendingOldWordLineIndex = -1;
                 } else {
-                    // Still playing — keep it fully highlighted.
                     applyWordColors(pendingOldWordLineIndex, positionMs, false);
                     applyBgWordColors(pendingOldWordLineIndex, positionMs, false);
                 }
@@ -1463,8 +1464,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                 final List<WordTiming> oldTimings = lineWordSpans.get(lastWordLineIndex);
                 if (!oldTimings.isEmpty()) {
                     final long lastEnd = oldTimings.get(oldTimings.size() - 1).endMs;
-                    if (positionMs < lastEnd) {
-                        // Delay reset — old line becomes pending.
+                    final long firstStart = oldTimings.get(0).startMs;
+                    if (positionMs < lastEnd && positionMs >= firstStart) {
                         pendingOldWordLineIndex = lastWordLineIndex;
                     } else {
                         applyWordColors(lastWordLineIndex, Long.MIN_VALUE, false);
@@ -1532,6 +1533,17 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         List<WordTiming> timings = lineWordSpans.get(index);
         int origStart = index < lineOriginalStarts.size() ? lineOriginalStarts.get(index) : 0;
         TextView lineView = lineViews.get(index);
+
+        if (positionMs == Long.MIN_VALUE && lineView.getText() instanceof Spannable) {
+            Spannable sp = (Spannable) lineView.getText();
+            int unsung = unsungWordColor();
+            for (ForegroundColorSpan s : sp.getSpans(0, sp.length(), ForegroundColorSpan.class)) {
+                if (s.getForegroundColor() == unsung) {
+                    sp.removeSpan(s);
+                }
+            }
+        }
+
         if (lineView instanceof LyricsLineView) {
             ((LyricsLineView) lineView).setHighlight(
                     timings, positionMs, allSung, unsungWordColor(), lineTextColor(), origStart);

@@ -73,6 +73,7 @@ public final class LrcLibProvider implements LyricsProvider {
                 + "&artist_name=" + LyricsRequests.encode(track.artist());
         HttpURLConnection connection = LyricsRequests.openConnection(url);
         if (connection.getResponseCode() != 200) {
+            connection.disconnect();
             return results;
         }
 

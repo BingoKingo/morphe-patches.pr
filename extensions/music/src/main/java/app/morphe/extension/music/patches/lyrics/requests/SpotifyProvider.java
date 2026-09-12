@@ -463,6 +463,7 @@ public final class SpotifyProvider implements LyricsProvider {
             return cachedAccessToken;
         }
 
+        HttpURLConnection connection = null;
         try {
             ensureTotpSecrets();
 
@@ -476,7 +477,7 @@ public final class SpotifyProvider implements LyricsProvider {
                     + "&totpVer=" + cachedTotpVersion
                     + "&totpServer=" + totpValue;
 
-            final HttpURLConnection connection = (HttpURLConnection)
+            connection = (HttpURLConnection)
                     new java.net.URL(url).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
@@ -509,6 +510,8 @@ public final class SpotifyProvider implements LyricsProvider {
             return cachedAccessToken;
         } catch (Exception ex) {
             return null;
+        } finally {
+            if (connection != null) connection.disconnect();
         }
     }
 
@@ -598,8 +601,9 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     private long getServerTime(String spDc) {
+        HttpURLConnection connection = null;
         try {
-            final HttpURLConnection connection = (HttpURLConnection)
+            connection = (HttpURLConnection)
                     new java.net.URL(SERVER_TIME_URL).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
@@ -619,6 +623,8 @@ public final class SpotifyProvider implements LyricsProvider {
                 }
             }
         } catch (Exception ex) {
+        } finally {
+            if (connection != null) connection.disconnect();
         }
         return System.currentTimeMillis();
     }
@@ -711,8 +717,9 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private static String fetchUrlWithRetry(String url, int maxRetries) {
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            HttpURLConnection connection = null;
             try {
-                final HttpURLConnection connection = (HttpURLConnection)
+                connection = (HttpURLConnection)
                         new java.net.URL(url).openConnection();
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(5000);
@@ -724,6 +731,8 @@ public final class SpotifyProvider implements LyricsProvider {
                     return parseBody(connection);
                 }
             } catch (IOException ex) {
+            } finally {
+                if (connection != null) connection.disconnect();
             }
             if (attempt < maxRetries) {
                 try {

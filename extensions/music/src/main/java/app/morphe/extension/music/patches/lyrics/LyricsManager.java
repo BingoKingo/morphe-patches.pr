@@ -90,9 +90,6 @@ public final class LyricsManager {
 
     private final List<Listener> listeners = new ArrayList<>(2);
 
-    private static final Lyrics EMPTY_CAPTIONS =
-            new Lyrics(Collections.emptyList(), Lyrics.CAPTIONS_PROVIDER, true);
-
     private static final int MAX_ARTIST_SONG_LINE_LENGTH = 80;
 
     private static final Pattern ARTIST_SONG_PATTERN =
@@ -145,11 +142,11 @@ public final class LyricsManager {
         VideoInformation.addVideoIdListener(videoId -> reloadCurrentTrack());
     }
 
-    private int currentProviderIndex;
-    private int currentCandidateIndex;
-    private List<LyricsProvider> currentProviders;
-    private int currentCandidateRequestId;
-    private java.util.Map<Integer, List<Lyrics>> candidateCache;
+    private volatile int currentProviderIndex;
+    private volatile int currentCandidateIndex;
+    private volatile List<LyricsProvider> currentProviders;
+    private volatile int currentCandidateRequestId;
+    private volatile java.util.Map<Integer, List<Lyrics>> candidateCache;
 
     public static LyricsManager getInstance() {
         return INSTANCE;
@@ -1323,10 +1320,4 @@ public final class LyricsManager {
         }
     }
 
-    /**
-     * Maps a lyrics (content) timeline position to the player video time.
-     */
-    public long toVideoTime(long contentMs) {
-        return contentMs;
-    }
 }
