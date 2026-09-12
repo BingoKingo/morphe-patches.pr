@@ -48,18 +48,19 @@ public final class OrderedListPreference extends Preference {
     /** Canonical provider ids, in the default priority order, shown in the list. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "Captions", "LRCLIB", "LyricallyApple", "QQ", "NetEase", "KuGou", "Luna", "bLyrics", "BiniLyrics",
-            "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Deezer");
+            "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Lyricify", "Deezer");
 
     /** Friendlier labels for display; ids not present here are shown verbatim. */
     private static final Map<String, String> PROVIDER_LABELS = new HashMap<>();
     static {
         PROVIDER_LABELS.put("Captions", "YouTube Captions (Auto) *");
         PROVIDER_LABELS.put("LyricallyApple", "Apple Music (via Lyrically)");
-        PROVIDER_LABELS.put("Apple", "Apple Music *");
-        PROVIDER_LABELS.put("bLyrics", "BetterLyrics (bLyrics)");
         PROVIDER_LABELS.put("Luna", "Soda (Luna)");
+        PROVIDER_LABELS.put("bLyrics", "BetterLyrics (bLyrics)");
+        PROVIDER_LABELS.put("Apple", "Apple Music *");
         PROVIDER_LABELS.put("Musixmatch", "Musixmatch *");
         PROVIDER_LABELS.put("Spotify", "Spotify *");
+        PROVIDER_LABELS.put("Lyricify", "Lyricify *");
         PROVIDER_LABELS.put("Deezer", "Deezer *");
     }
 
@@ -194,14 +195,15 @@ public final class OrderedListPreference extends Preference {
         return (id.equals("Captions") && Settings.LYRICS_CAPTION_COOKIES.get().isBlank())
                 || (id.equals("Apple") && Settings.APPLE_MUSIC_TOKEN.get().isBlank())
                 || (id.equals("Spotify") && Settings.SPOTIFY_TOKEN.get().isBlank())
+                || (id.equals("Lyricify") && Settings.SPOTIFY_TOKEN.get().isBlank())
                 || (id.equals("Deezer") && Settings.DEEZER_ARL.get().isBlank())
                 || (id.equals("Musixmatch") && Settings.MUSIXMATCH_TOKEN.get().isBlank());
     }
 
     private static boolean hasTokenDialog(String id) {
         return id.equals("Captions") || id.equals("Apple")
-                || id.equals("Spotify") || id.equals("Deezer")
-                || id.equals("Musixmatch");
+                || id.equals("Spotify") || id.equals("Lyricify")
+                || id.equals("Deezer") || id.equals("Musixmatch");
     }
 
     private void showTokenDialogFor(String id, Runnable onTokenSaved) {
@@ -211,6 +213,7 @@ public final class OrderedListPreference extends Preference {
             case "Captions":    pref = TokenDialogPreference.youtube(context); break;
             case "Apple":       pref = TokenDialogPreference.apple(context); break;
             case "Spotify":     pref = TokenDialogPreference.spotify(context); break;
+            case "Lyricify":    pref = TokenDialogPreference.spotify(context); break;
             case "Deezer":      pref = TokenDialogPreference.deezer(context); break;
             case "Musixmatch":  pref = TokenDialogPreference.musixmatch(context); break;
             default: return;

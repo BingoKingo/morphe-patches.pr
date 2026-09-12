@@ -42,6 +42,7 @@ import app.morphe.extension.music.patches.lyrics.requests.KuGouProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LocalLyricsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.LrcLibProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LyricallyAppleMusicProvider;
+import app.morphe.extension.music.patches.lyrics.requests.LyricifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LunaProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.NetEaseProvider;
@@ -1257,7 +1258,7 @@ public final class LyricsManager {
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "Captions", "LRCLIB", "LyricallyApple", "QQ", "NetEase", "KuGou",
             "Luna", "bLyrics", "BiniLyrics",
-            "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Deezer");
+            "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Lyricify", "Deezer");
 
     @NonNull
     private static List<String> enabledProviderIds(String order) {
@@ -1304,17 +1305,18 @@ public final class LyricsManager {
             case "Captions": return new CaptionsFetcher.CaptionsProvider();
             case "LRCLIB": return new LrcLibProvider();
             case "LyricallyApple": return new LyricallyAppleMusicProvider();
-            case "Spotify": return new SpotifyProvider();
             case "QQ": return new QQProvider();
+            case "NetEase": return new NetEaseProvider();
             case "KuGou": return new KuGouProvider();
             case "Luna": return new LunaProvider();
-            case "NetEase": return new NetEaseProvider();
-            case "BiniLyrics": return new BinimumProvider();
             case "bLyrics": return new BlyricsProvider();
-            case "Musixmatch": return new MusixmatchProvider();
+            case "BiniLyrics": return new BinimumProvider();
             case "Unison": return new UnisonProvider();
             case "AMLL": return new AmllProvider();
             case "Apple": return new AppleMusicProvider();
+            case "Spotify": return new SpotifyProvider();
+            case "Lyricify": return new LyricifyProvider();
+            case "Musixmatch": return new MusixmatchProvider();
             case "Deezer": return new DeezerProvider();
             default: return null;
         }

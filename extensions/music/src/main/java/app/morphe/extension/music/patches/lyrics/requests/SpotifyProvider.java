@@ -7,6 +7,8 @@
 
 package app.morphe.extension.music.patches.lyrics.requests;
 
+import android.util.Log;
+
 import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
@@ -35,6 +37,18 @@ import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.music.settings.Settings;
 
 public final class SpotifyProvider implements LyricsProvider {
+
+    private static final String TAG = "SpotifyProvider";
+
+    static final class TrackSearchResult {
+        final String trackId;
+        @Nullable final String isrc;
+
+        TrackSearchResult(String trackId, @Nullable String isrc) {
+            this.trackId = trackId;
+            this.isrc = isrc;
+        }
+    }
 
     private static final String SECRETS_URL =
             "https://raw.githubusercontent.com/xyloflake/spot-secrets-go/refs/heads/main/secrets/secretDict.json";
@@ -197,6 +211,128 @@ public final class SpotifyProvider implements LyricsProvider {
         return null;
     }
 
+    /**
+     * Searches Spotify for a track and returns both track ID and ISRC.
+     * Package-private so that {@link LyricifyProvider} can reuse it.
+     */
+    @Nullable
+    static TrackSearchResult searchTrackWithISRC(String spDc, String title, String artist) {
+        Log.d(TAG, "searchTrackWithISRC: title=" + title + ", artist=" + artist);
+        try {
+            final SpotifyProvider instance = new SpotifyProvider();
+            final String accessToken = instance.getAccessToken(spDc);
+            if (accessToken == null) {
+                Log.w(TAG, "searchTrackWithISRC: failed to get access token");
+                return null;
+            }
+
+            final String clientToken = instance.getClientToken(spDc);
+            final String query = title + " " + artist;
+
+            for (String hash : SEARCH_HASHES) {
+                final String body = new JSONObject()
+                        .put("extensions", new JSONObject()
+                                .put("persistedQuery", new JSONObject()
+                                        .put("sha256Hash", hash)
+                                        .put("version", 1)))
+                        .put("operationName", "searchDesktop")
+                        .put("variables", new JSONObject()
+                                .put("searchTerm", query)
+                                .put("limit", 5)
+                                .put("numberOfTopResults", 5)
+                                .put("offset", 0))
+                        .toString();
+
+                final String json = instance.executeSearchRaw(accessToken, clientToken, body);
+                if (json == null) continue;
+
+                final JSONObject root = new JSONObject(json);
+                final JSONObject data = root.optJSONObject("data");
+                if (data == null) continue;
+
+                JSONArray items = null;
+                final JSONObject searchV2 = data.optJSONObject("searchV2");
+                if (searchV2 != null) {
+                    final JSONObject tracks = searchV2.optJSONObject("tracks");
+                    if (tracks != null) items = tracks.optJSONArray("items");
+                }
+                if (items == null || items.length() == 0) {
+                    final JSONObject search = data.optJSONObject("search");
+                    if (search != null) {
+                        final JSONObject st = search.optJSONObject("tracks");
+                        if (st != null) items = st.optJSONArray("items");
+                    }
+                }
+                if (items == null || items.length() == 0) continue;
+
+                final TrackSearchResult result = extractTrackSearchResult(items);
+                if (result != null) {
+                    Log.d(TAG, "searchTrackWithISRC: found trackId=" + result.trackId
+                            + ", isrc(from search)=" + result.isrc);
+                    final String isrc = fetchIsrc(spDc, result.trackId);
+                    Log.d(TAG, "searchTrackWithISRC: isrc(from fetchIsrc)=" + isrc);
+                    return new TrackSearchResult(result.trackId, isrc);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "searchTrackWithISRC failed: " + e.getMessage(), e);
+        }
+        return null;
+    }
+
+    @Nullable
+    private String executeSearchRaw(String accessToken, @Nullable String clientToken,
+                                     String body) throws Exception {
+        for (int attempt = 0; attempt <= 2; attempt++) {
+            final HttpURLConnection connection = (HttpURLConnection)
+                    new java.net.URL(PARTNER_GRAPHQL_URL).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(8000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("app-platform", "WebPlayer");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Referer", "https://open.spotify.com/");
+            connection.setRequestProperty("Origin", "https://open.spotify.com");
+            connection.setRequestProperty("spotify-app-version", CLIENT_VERSION);
+            if (clientToken != null) {
+                connection.setRequestProperty("client-token", clientToken);
+            }
+
+            final byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(bodyBytes.length);
+            try (java.io.OutputStream os = connection.getOutputStream()) {
+                os.write(bodyBytes);
+            }
+
+            final int code = connection.getResponseCode();
+            if (code == 200) {
+                final String json = parseBody(connection);
+                connection.disconnect();
+                return json;
+            }
+
+            if (code == 429 && attempt < 2) {
+                final long retryAfterMs = parseRetryAfter(connection);
+                connection.disconnect();
+                try {
+                    Thread.sleep(retryAfterMs);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+                continue;
+            }
+
+            connection.disconnect();
+            break;
+        }
+        return null;
+    }
+
     @Nullable
     private String parseSearchResult(String json) {
         try {
@@ -252,6 +388,88 @@ public final class SpotifyProvider implements LyricsProvider {
             }
         }
 
+        return null;
+    }
+
+    @Nullable
+    private static TrackSearchResult extractTrackSearchResult(JSONArray items) {
+        for (int i = 0; i < items.length(); i++) {
+            final JSONObject itemWrapper = items.optJSONObject(i);
+            if (itemWrapper == null) continue;
+
+            final JSONObject dataNode = itemWrapper.optJSONObject("data");
+            final JSONObject node = dataNode != null ? dataNode : itemWrapper;
+
+            Log.d(TAG, "extractTrackSearchResult: node=" + node.toString());
+
+            String id = node.optString("id", null);
+            if (id == null || id.isEmpty()) {
+                final String uri = node.optString("uri", null);
+                if (uri != null && uri.startsWith("spotify:track:")) {
+                    id = uri.substring("spotify:track:".length());
+                }
+            }
+            if (id == null || id.isEmpty()) continue;
+
+            String isrc = null;
+            final JSONObject externalIds = node.optJSONObject("externalIds");
+            if (externalIds != null) {
+                isrc = externalIds.optString("isrc", null);
+            }
+            return new TrackSearchResult(id, isrc);
+        }
+
+        return null;
+    }
+
+    @Nullable
+    static String fetchIsrc(String spDc, String trackId) {
+        Log.d(TAG, "fetchIsrc: trackId=" + trackId);
+        try {
+            final SpotifyProvider instance = new SpotifyProvider();
+            final String accessToken = instance.getAccessToken(spDc);
+            if (accessToken == null) {
+                Log.w(TAG, "fetchIsrc: accessToken is null");
+                return null;
+            }
+
+            final String url = LYRICS_URL + trackId + "?format=json&market=from_token";
+            Log.d(TAG, "fetchIsrc: GET " + url);
+            final HttpURLConnection connection = LyricsRequests.openConnection(url);
+            connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("app-platform", "WebPlayer");
+
+            final int code = connection.getResponseCode();
+            if (code != 200) {
+                Log.w(TAG, "fetchIsrc: HTTP " + code + " for trackId=" + trackId);
+                connection.disconnect();
+                return null;
+            }
+
+            final String body = LyricsRequests.parseGzipString(connection);
+            connection.disconnect();
+            if (body == null || body.isEmpty()) {
+                Log.w(TAG, "fetchIsrc: empty body for trackId=" + trackId);
+                return null;
+            }
+
+            final JSONObject response = new JSONObject(body);
+            final JSONObject track = response.optJSONObject("track");
+            if (track == null) {
+                Log.w(TAG, "fetchIsrc: track object is null for trackId=" + trackId);
+                return null;
+            }
+            final JSONObject externalIds = track.optJSONObject("external_ids");
+            if (externalIds != null) {
+                final String isrc = externalIds.optString("isrc", null);
+                Log.d(TAG, "fetchIsrc: isrc=" + isrc + " for trackId=" + trackId);
+                return isrc;
+            }
+            Log.w(TAG, "fetchIsrc: external_ids is null for trackId=" + trackId);
+        } catch (Exception e) {
+            Log.e(TAG, "fetchIsrc failed: " + e.getMessage(), e);
+        }
         return null;
     }
 

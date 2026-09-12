@@ -175,7 +175,7 @@ public class Settings extends SharedYouTubeSettings {
     // Lyrics
     public static final BooleanSetting LYRICS_ENABLED = new BooleanSetting("morphe_music_lyrics_enabled", TRUE, true);
     public static final String DEFAULT_LYRICS_ORDER =
-            "-Captions,LRCLIB,LyricallyApple,QQ,NetEase,KuGou,-Luna,-bLyrics,-BiniLyrics,-Unison,-AMLL,-Apple,-Spotify,-Musixmatch,-Deezer,";
+            "-Captions,LRCLIB,LyricallyApple,QQ,NetEase,KuGou,-Luna,-bLyrics,-BiniLyrics,-Unison,-AMLL,-Apple,-Spotify,-Lyricify,-Musixmatch,-Deezer,";
     public static final StringSetting LYRICS_SOURCE = new StringSetting("morphe_music_lyrics_source", DEFAULT_LYRICS_ORDER, true, parent(LYRICS_ENABLED));
     public static final StringSetting APPLE_MUSIC_TOKEN = new StringSetting("morphe_music_apple_music_token", "", true, parent(LYRICS_ENABLED));
     public static final StringSetting SPOTIFY_TOKEN = new StringSetting("morphe_music_spotify_token", "", true, parent(LYRICS_ENABLED));
