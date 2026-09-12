@@ -448,8 +448,8 @@ Synced lyrics follow playback. If they drift, adjust the timing offset
 
 When no third-party lyrics are found, the built-in lyrics are shown instead"</string>
 
-    <string name="morphe_music_lyrics_hide_info_title">Hide info line</string>
-    <string name="morphe_music_lyrics_hide_info_summary">Hide source attribution and songwriter credits at the bottom</string>
+    <string name="morphe_music_lyrics_hide_info_title">Hide songwriter credits</string>
+    <string name="morphe_music_lyrics_hide_info_summary">Hide the songwriter credits shown below the lyrics</string>
     <string name="morphe_music_lyrics_swap_trans_roma_title">Swap translation and romanization</string>
     <string name="morphe_music_lyrics_swap_trans_roma_summary">ON puts romanization below lyrics and translation above; OFF keeps romanization above and translation below</string>
 

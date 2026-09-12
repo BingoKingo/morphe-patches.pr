@@ -30,7 +30,7 @@ public final class DeezerProvider implements LyricsProvider {
 
     private static final String SEARCH_URL = "https://api.deezer.com/search";
     private static final String GW_URL = "https://www.deezer.com/ajax/gw-light.php";
-    private static final String USER_AGENT = "Morphe/1.0 (Android)";
+
 
     private static final long REQUEST_THROTTLE_MS = 250;
     private static final AtomicLong lastRequestTime = new AtomicLong(0);
@@ -268,7 +268,7 @@ public final class DeezerProvider implements LyricsProvider {
         try {
             final HttpURLConnection connection = (HttpURLConnection) new java.net.URL(url).openConnection();
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
             connection.setRequestProperty("Accept", "application/json");
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(15000);
@@ -283,7 +283,7 @@ public final class DeezerProvider implements LyricsProvider {
         try {
             final HttpURLConnection connection = (HttpURLConnection) new java.net.URL(url).openConnection();
             connection.setRequestMethod("POST");
-            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             String cookie = "arl=" + arl;
             if (sid != null && !sid.isEmpty()) {
@@ -313,6 +313,7 @@ public final class DeezerProvider implements LyricsProvider {
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(8000);
+            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
             connection.setRequestProperty("Cookie", "arl=" + arl);
             final int code = connection.getResponseCode();
             connection.disconnect();

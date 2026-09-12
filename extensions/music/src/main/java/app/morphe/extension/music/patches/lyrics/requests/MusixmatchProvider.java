@@ -40,7 +40,7 @@ public final class MusixmatchProvider implements LyricsProvider {
     private static final String MACRO_URL = API_BASE + "macro.subtitles.get";
     private static final String SUBTITLE_TRANSLATION_URL = API_BASE + "track.subtitle.translation.get";
     private static final String APP_ID = "android-player-v1.0";
-    private static final String USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 13)";
+    private static final String USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 17)";
     private static final String COOKIE = "AWSELB=0; AWSELBCORS=0";
 
     private static final long MIN_WORD_MS = 40;
@@ -734,8 +734,13 @@ public final class MusixmatchProvider implements LyricsProvider {
 
     private static String joinWords(List<Word> words) {
         final StringBuilder sb = new StringBuilder();
-        for (Word w : words) {
-            sb.append(w.text());
+        for (int i = 0; i < words.size(); i++) {
+            final String t = words.get(i).text();
+            if (i > 0 && !t.isEmpty() && !t.startsWith(" ")
+                    && sb.length() > 0 && sb.charAt(sb.length() - 1) != ' ') {
+                sb.append(' ');
+            }
+            sb.append(t);
         }
         return sb.toString();
     }

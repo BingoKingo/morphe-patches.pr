@@ -683,13 +683,8 @@ public final class NetEaseProvider implements LyricsProvider {
         }
 
         items.sort(Comparator.comparingLong(i -> i.start));
-        for (int i = 0; i < items.size(); i++) {
-            Item item = items.get(i);
-            long end = (i < items.size() - 1)
-                    ? Math.max(item.start, items.get(i + 1).start - 10)
-                    : item.start + 3000;
-            Word word = new Word(item.start, end, item.text);
-            lines.add(new LyricsLine(item.start, item.text, List.of(word)));
+        for (Item item : items) {
+            lines.add(new LyricsLine(item.start, item.text));
         }
         return lines;
     }
@@ -754,13 +749,8 @@ public final class NetEaseProvider implements LyricsProvider {
 
         items.sort(Comparator.comparingLong(i -> i.start));
         List<LyricsLine> lines = new ArrayList<>();
-        for (int i = 0; i < items.size(); i++) {
-            Item item = items.get(i);
-            long end = (i < items.size() - 1)
-                    ? Math.max(item.start, items.get(i + 1).start - 10)
-                    : item.start + 3000;
-            Word word = new Word(item.start, end, item.text);
-            lines.add(new LyricsLine(item.start, item.text, List.of(word)));
+        for (Item item : items) {
+            lines.add(new LyricsLine(item.start, item.text));
         }
         return lines;
     }

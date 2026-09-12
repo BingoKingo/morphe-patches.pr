@@ -42,6 +42,12 @@ final class LyricsRequests {
     private LyricsRequests() {
     }
 
+    static String userAgent() {
+        return "Morphe/" + Utils.getAppVersionName()
+                + " (" + Utils.getPatchesReleaseVersion() + ")"
+                + " https://github.com/MorpheApp/morphe-patches";
+    }
+
     /**
      * Opens a GET connection. LRCLIB asks clients to identify themselves in the
      * User-Agent header, and rate limits requests that do not.
@@ -51,10 +57,7 @@ final class LyricsRequests {
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MILLISECONDS);
         connection.setReadTimeout(READ_TIMEOUT_MILLISECONDS);
-        connection.setRequestProperty("User-Agent",
-                "Morphe/" + Utils.getAppVersionName()
-                        + " (" + Utils.getPatchesReleaseVersion() + ")"
-                        + " https://github.com/MorpheApp/morphe-patches");
+        connection.setRequestProperty("User-Agent", userAgent());
         return connection;
     }
 
@@ -87,10 +90,7 @@ final class LyricsRequests {
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(CONNECT_TIMEOUT_MILLISECONDS);
         connection.setReadTimeout(READ_TIMEOUT_MILLISECONDS);
-        connection.setRequestProperty("User-Agent",
-                "Morphe/" + Utils.getAppVersionName()
-                        + " (" + Utils.getPatchesReleaseVersion() + ")"
-                        + " https://github.com/MorpheApp/morphe-patches");
+        connection.setRequestProperty("User-Agent", userAgent());
         connection.setRequestProperty("Content-Type", contentType);
         if (headers != null) {
             for (Map.Entry<String, String> entry : headers.entrySet()) {

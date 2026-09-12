@@ -37,8 +37,8 @@ public final class CaptionsFetcher {
             "https://www.youtube.com/api/timedtext";
 
     private static final String CAPTION_USER_AGENT =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
 
     private static final String SW_COOKIE_URL = "https://www.youtube.com/sw.js";
     private static final java.util.List<String> COOKIE_KEYS = java.util.Arrays.asList(
@@ -1046,18 +1046,7 @@ public final class CaptionsFetcher {
                 continue;
             }
 
-            long endTimeMs = startTimeMs + 3000;
-            for (int k = i + 1; k < events.length(); k++) {
-                final JSONObject next = events.getJSONObject(k);
-                if (next.optInt("aAppend", 0) == 1) continue;
-                if (!next.has("segs")) continue;
-                endTimeMs = next.optLong("tStartMs", endTimeMs);
-                break;
-            }
-
-            final List<Word> words = new ArrayList<>();
-            words.add(new Word(startTimeMs, endTimeMs, trimmed));
-            lines.add(new LyricsLine(startTimeMs, trimmed, words));
+            lines.add(new LyricsLine(startTimeMs, trimmed));
         }
 
         return lines;

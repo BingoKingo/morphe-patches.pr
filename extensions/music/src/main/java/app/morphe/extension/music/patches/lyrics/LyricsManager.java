@@ -41,6 +41,7 @@ import app.morphe.extension.music.patches.lyrics.requests.CaptionsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.KuGouProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LocalLyricsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.LrcLibProvider;
+import app.morphe.extension.music.patches.lyrics.requests.LyricallyAppleMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LunaProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.NetEaseProvider;
@@ -838,6 +839,15 @@ public final class LyricsManager {
 
         lyrics = filterCreditLines(lyrics, currentTrack);
         lyrics = filterLyricsText(lyrics);
+        if (lyrics.synced() && !lyrics.isEmpty()) {
+            lyrics = new Lyrics(
+                    Lyrics.clampLastWordEnds(
+                            Lyrics.fixAnomalousWordTimestamps(lyrics.lines())),
+                    lyrics.providerName(), true, lyrics.romanization(),
+                    lyrics.translations(), lyrics.romanizations(),
+                    lyrics.songwriters(), lyrics.rawFormat(),
+                    lyrics.formatType(), lyrics.sourceUrl());
+        }
 
         if (lyrics == Lyrics.NOT_FOUND || lyrics.isEmpty()) {
             setState(State.NOT_FOUND, null);
@@ -1248,7 +1258,8 @@ public final class LyricsManager {
 
     /** Canonical provider ids, in the default priority order. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
-            "Captions", "LRCLIB", "QQ", "NetEase", "KuGou", "Luna", "bLyrics", "BiniLyrics",
+            "Captions", "LRCLIB", "LyricallyApple", "QQ", "NetEase", "KuGou",
+            "Luna", "bLyrics", "BiniLyrics",
             "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Deezer");
 
     @NonNull
@@ -1295,6 +1306,7 @@ public final class LyricsManager {
         switch (id) {
             case "Captions": return new CaptionsFetcher.CaptionsProvider();
             case "LRCLIB": return new LrcLibProvider();
+            case "LyricallyApple": return new LyricallyAppleMusicProvider();
             case "Spotify": return new SpotifyProvider();
             case "QQ": return new QQProvider();
             case "KuGou": return new KuGouProvider();

@@ -291,9 +291,9 @@ public final class SpotifyProvider implements LyricsProvider {
             return null;
         }
 
-        final boolean isSynced = !"UNSYNCED".equals(syncType);
-
-        if (isSynced) {
+        if ("SYLLABLE_SYNCED".equals(syncType)) {
+            return parseSyllableLines(linesArr, rawJson, sourceUrl);
+        } else if (!"UNSYNCED".equals(syncType)) {
             return parseSyncedLines(linesArr, rawJson, sourceUrl);
         } else {
             return parsePlainLines(linesArr, rawJson, sourceUrl);
@@ -303,8 +303,6 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private Lyrics parseSyncedLines(JSONArray linesArr, String rawJson, @Nullable String sourceUrl) {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
-        long totalDuration = 0;
-        int durationCount = 0;
 
         for (int i = 0; i < linesArr.length(); i++) {
             final JSONObject lineObj = linesArr.optJSONObject(i);
@@ -312,29 +310,13 @@ public final class SpotifyProvider implements LyricsProvider {
                 continue;
             }
 
-            final long startTimeMs = lineObj.optLong("startTimeMs", LyricsLine.NO_TIME);
+            final long startTimeMs = parseStartTimeMs(lineObj);
             final String text = lineObj.optString("words", "").trim();
             if (text.isEmpty()) {
                 continue;
             }
 
-            final long nextStartMs;
-            if (i + 1 < linesArr.length()) {
-                nextStartMs = linesArr.optJSONObject(i + 1).optLong("startTimeMs", startTimeMs + 2000);
-            } else {
-                nextStartMs = startTimeMs + (durationCount > 0 ? totalDuration / durationCount : 2000);
-            }
-            final long lineDuration = Math.max(nextStartMs - startTimeMs, 100);
-
-            if (lineDuration > 100 && lineDuration < 10000) {
-                totalDuration += lineDuration;
-                durationCount++;
-            }
-
-            final String[] tokens = text.split("\\s+");
-            final List<Word> words = distributeWords(tokens, startTimeMs, lineDuration);
-
-            lines.add(new LyricsLine(startTimeMs, text, words));
+            lines.add(new LyricsLine(startTimeMs, text));
         }
 
         if (lines.isEmpty()) {
@@ -359,6 +341,97 @@ public final class SpotifyProvider implements LyricsProvider {
             cursor = wordEnd;
         }
         return words;
+    }
+
+    @Nullable
+    private Lyrics parseSyllableLines(JSONArray linesArr, String rawJson,
+                                       @Nullable String sourceUrl) {
+        final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
+
+        for (int i = 0; i < linesArr.length(); i++) {
+            final JSONObject lineObj = linesArr.optJSONObject(i);
+            if (lineObj == null) {
+                continue;
+            }
+
+            final long startTimeMs = parseStartTimeMs(lineObj);
+            final String text = lineObj.optString("words", "").trim();
+            if (text.isEmpty()) {
+                continue;
+            }
+
+            final JSONArray syllablesArr = lineObj.optJSONArray("syllables");
+            final List<Word> words;
+            if (syllablesArr != null && syllablesArr.length() > 0) {
+                words = parseSyllables(syllablesArr, text);
+            } else {
+                final long nextStartMs;
+                if (i + 1 < linesArr.length()) {
+                    nextStartMs = peekNextStartTime(linesArr, i + 1, startTimeMs + 2000);
+                } else {
+                    nextStartMs = startTimeMs + 2000;
+                }
+                final long lineDuration = Math.max(nextStartMs - startTimeMs, 100);
+                words = distributeWords(text.split("\\s+"), startTimeMs, lineDuration);
+            }
+
+            lines.add(new LyricsLine(startTimeMs, text, words));
+        }
+
+        if (lines.isEmpty()) {
+            return null;
+        }
+        return new Lyrics(lines, name(), true, null, null, null, null, rawJson, "sp.json", sourceUrl);
+    }
+
+    private static List<Word> parseSyllables(JSONArray syllablesArr, String lineText) {
+        final List<Word> words = new ArrayList<>(syllablesArr.length());
+        int charOffset = 0;
+
+        for (int j = 0; j < syllablesArr.length(); j++) {
+            final JSONObject syllable = syllablesArr.optJSONObject(j);
+            if (syllable == null) {
+                continue;
+            }
+
+            final long startMs = parseStartTimeMs(syllable);
+            final long endMs = syllable.optLong("endTimeMs", startMs);
+            final int numChars = syllable.optInt("numChars", 0);
+            if (numChars <= 0 || charOffset >= lineText.length()) {
+                continue;
+            }
+
+            final int end = Math.min(charOffset + numChars, lineText.length());
+            final String wordText = lineText.substring(charOffset, end);
+            final boolean spaceAfter = end < lineText.length();
+            words.add(new Word(startMs, endMs, wordText, null, spaceAfter));
+            charOffset = end;
+        }
+
+        return words;
+    }
+
+    private static long parseStartTimeMs(JSONObject obj) {
+        final String raw = obj.optString("startTimeMs", null);
+        if (raw == null || raw.isEmpty()) {
+            return LyricsLine.NO_TIME;
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            return LyricsLine.NO_TIME;
+        }
+    }
+
+    private static long peekNextStartTime(JSONArray linesArr, int index, long fallback) {
+        final JSONObject next = linesArr.optJSONObject(index);
+        if (next != null) {
+            final long nextStart = parseStartTimeMs(next);
+            if (nextStart > 0) {
+                return nextStart;
+            }
+        }
+        return fallback;
     }
 
     @Nullable

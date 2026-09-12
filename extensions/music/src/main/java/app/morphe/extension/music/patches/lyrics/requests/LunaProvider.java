@@ -230,7 +230,7 @@ public final class LunaProvider implements LyricsProvider {
         final List<String> songwriters = extractSongwriters(response);
         final String sourceUrl = "https://www.douyin.com/qishui/song/" + trackId;
 
-        return new Lyrics(lines, name(), true, null,
+        return new Lyrics(lines, name(), !"txt".equals(formatType), null,
                 translations != null && !translations.isEmpty() ? translations : null,
                 null, songwriters, content, formatType, sourceUrl);
     }

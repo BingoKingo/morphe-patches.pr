@@ -152,6 +152,14 @@ public final class LyricsfileParser {
                 }
             }
         }
+        if (!words.isEmpty()) {
+            int last = words.size() - 1;
+            Word lastWord = words.get(last);
+            if (lastWord.endMs() == LyricsLine.NO_TIME) {
+                words.set(last, new Word(lastWord.startMs(),
+                        lastWord.startMs() + 800, lastWord.text()));
+            }
+        }
 
         return new LyricsLine(asLong(map.get("start_ms")), text, words);
     }

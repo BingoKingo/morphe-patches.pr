@@ -238,6 +238,14 @@ public final class LrcParser {
                 words.set(i, new Word(word.startMs(), words.get(i + 1).startMs(), word.text()));
             }
         }
+        if (!words.isEmpty()) {
+            int last = words.size() - 1;
+            Word lastWord = words.get(last);
+            if (lastWord.endMs() == LyricsLine.NO_TIME) {
+                words.set(last, new Word(lastWord.startMs(),
+                        lastWord.startMs() + 800, lastWord.text()));
+            }
+        }
     }
 
     public static String formatLine(LyricsLine line) {
@@ -248,6 +256,9 @@ public final class LrcParser {
                         .append(formatWordTimestamp(word.startMs()))
                         .append('>')
                         .append(word.text());
+                if (word.endsWithSpace()) {
+                    builder.append(' ');
+                }
             }
         } else {
             builder.append(line.text());
