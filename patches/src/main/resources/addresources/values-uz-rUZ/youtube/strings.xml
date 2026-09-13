@@ -464,6 +464,7 @@ Ma'lumot: Jonli efirlarda ishlamasligi mumkin"</string>
   <string name="morphe_queue_override_flyout_menu_summary">YouTube navbati o\'rniga Morphe navbatini ochadi</string>
   <string name="morphe_queue_add_flyout_menu_title">Lenta ochiladigan menyusiga navbat bandini qo\'shish</string>
   <string name="morphe_queue_add_flyout_menu_summary">Qo\'shimcha ochiladigan menyu bandini qo\'shadi. Agar \"Navbatga qo\'shish\" ko\'rsatilmasa, buni yoqing</string>
+  <!-- "Spoof video streams" must use the same translation as morphe_spoof_video_streams_screen_title -->
   <string name="morphe_queue_manager_check_failed_auth">Tizimga kirmagan</string>
   <string name="morphe_queue_manager_check_failed_playlist_id">Navbat bo\'sh</string>
   <string name="morphe_queue_manager_check_failed_queue">Navbat boʻsh</string>
@@ -942,7 +943,6 @@ Cheklov: Agar 'Eski video harakatlar panelini tiklash' o'chirilgan bo'lsa, 'Ko'p
   <string name="morphe_miniplayer_disable_resuming_summary">YouTube Premium xususiyati bo\'lgan mini-pleyerning qayta tiklanishini o\'chirish</string>
   <string name="morphe_miniplayer_screen_title">Mini pleyer</string>
   <string name="morphe_miniplayer_screen_summary">Kichraytirilgan video pleerni ko\'rinishi va xulq-atvorini sozlash</string>
-  <string name="morphe_miniplayer_not_available_summary">O\'y qo\'shimcha miniplayerlarni olib tashladi. Miniplayer turini o\'zgartirish uchun YouTube 21.28.208 yoki undan eski versiyasiga patch qo\'llang.</string>
   <string name="morphe_miniplayer_type_title">Mini pleyer turi</string>
   <string name="morphe_miniplayer_type_entry_0">O\'chirilgan</string>
   <string name="morphe_miniplayer_type_entry_1">Standart</string>
