@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -17,7 +17,6 @@ import android.graphics.drawable.shapes.RoundRectShape;
 import android.net.Uri;
 import android.preference.Preference;
 import android.text.InputType;
-import android.util.AttributeSet;
 import android.util.Pair;
 import android.util.TypedValue;
 import android.widget.Button;
@@ -38,14 +37,13 @@ import app.morphe.extension.shared.ui.CustomDialog;
 import app.morphe.extension.shared.ui.Dim;
 
 @SuppressWarnings({"unused", "deprecation"})
-public class TokenDialogPreference extends Preference {
+public class LyricsTokenDialogPreference extends Preference {
 
     public interface TokenValidator {
         boolean validate(String token);
     }
 
-    private static final TokenValidator APPLE_VALIDATOR =
-            token -> AppleMusicProvider.validateToken(token);
+    private static final TokenValidator APPLE_VALIDATOR = AppleMusicProvider::validateToken;
 
     private final String titleRes;
     private final String instructionRes;
@@ -59,10 +57,10 @@ public class TokenDialogPreference extends Preference {
     private final boolean multiline;
     private final TokenValidator validator;
 
-    private TokenDialogPreference(Context context, String titleRes, String instructionRes,
-            String hintRes, String toastSavedRes, String toastClearedRes, String toastInvalidRes,
-            StringSetting setting, String getTokenUrl, String getTokenUrlLogTag,
-            boolean multiline, TokenValidator validator) {
+    private LyricsTokenDialogPreference(Context context, String titleRes, String instructionRes,
+                                        String hintRes, String toastSavedRes, String toastClearedRes, String toastInvalidRes,
+                                        StringSetting setting, String getTokenUrl, String getTokenUrlLogTag,
+                                        boolean multiline, TokenValidator validator) {
         super(context);
         this.titleRes = titleRes;
         this.instructionRes = instructionRes;
@@ -81,8 +79,8 @@ public class TokenDialogPreference extends Preference {
 
     // --- Factory methods ---
 
-    public static TokenDialogPreference apple(Context context) {
-        return new TokenDialogPreference(context,
+    public static LyricsTokenDialogPreference apple(Context context) {
+        return new LyricsTokenDialogPreference(context,
                 "morphe_music_apple_music_token_title",
                 "morphe_music_apple_music_token_dialog_instruction",
                 "morphe_music_apple_music_token_dialog_hint",
@@ -96,8 +94,8 @@ public class TokenDialogPreference extends Preference {
                 APPLE_VALIDATOR);
     }
 
-    public static TokenDialogPreference spotify(Context context) {
-        return new TokenDialogPreference(context,
+    public static LyricsTokenDialogPreference spotify(Context context) {
+        return new LyricsTokenDialogPreference(context,
                 "morphe_music_spotify_token_title",
                 "morphe_music_spotify_token_dialog_instruction",
                 "morphe_music_spotify_token_dialog_hint",
@@ -111,8 +109,8 @@ public class TokenDialogPreference extends Preference {
                 SpotifyProvider::validateToken);
     }
 
-    public static TokenDialogPreference youtube(Context context) {
-        return new TokenDialogPreference(context,
+    public static LyricsTokenDialogPreference youtube(Context context) {
+        return new LyricsTokenDialogPreference(context,
                 "morphe_music_youtube_cookies_title",
                 "morphe_music_youtube_cookies_dialog_instruction",
                 "morphe_music_youtube_cookies_dialog_hint",
@@ -126,8 +124,8 @@ public class TokenDialogPreference extends Preference {
                 CaptionsFetcher::validateYouTubeCookies);
     }
 
-    public static TokenDialogPreference deezer(Context context) {
-        return new TokenDialogPreference(context,
+    public static LyricsTokenDialogPreference deezer(Context context) {
+        return new LyricsTokenDialogPreference(context,
                 "morphe_music_deezer_arl_title",
                 "morphe_music_deezer_arl_dialog_instruction",
                 "morphe_music_deezer_arl_dialog_hint",
@@ -141,8 +139,8 @@ public class TokenDialogPreference extends Preference {
                 DeezerProvider::validateArl);
     }
 
-    public static TokenDialogPreference musixmatch(Context context) {
-        return new TokenDialogPreference(context,
+    public static LyricsTokenDialogPreference musixmatch(Context context) {
+        return new LyricsTokenDialogPreference(context,
                 "morphe_music_musixmatch_token_title",
                 "morphe_music_musixmatch_token_dialog_instruction",
                 "morphe_music_musixmatch_token_dialog_hint",

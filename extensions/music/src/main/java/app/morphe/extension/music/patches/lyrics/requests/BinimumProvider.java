@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -14,10 +14,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
-
 import java.net.HttpURLConnection;
-import java.net.URLEncoder;
-import java.util.List;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
@@ -35,7 +32,7 @@ public final class BinimumProvider implements LyricsProvider {
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
-        final String lyricsUrl = resolveLyricsUrl(track);
+        String lyricsUrl = resolveLyricsUrl(track);
         if (lyricsUrl == null) {
             return null;
         }
@@ -43,11 +40,11 @@ public final class BinimumProvider implements LyricsProvider {
         HttpURLConnection connection = null;
         try {
             connection = LyricsRequests.openConnection(lyricsUrl);
-            if (connection.getResponseCode() != 200) {
+            if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
                 LyricsRequests.logFailure(name(), connection);
                 return null;
             }
-            final String ttml = Requester.parseString(connection);
+            String ttml = Requester.parseString(connection);
             return TtmlParser.ttmlToLyrics(ttml, name(), null);
         } finally {
             if (connection != null) {
@@ -62,7 +59,7 @@ public final class BinimumProvider implements LyricsProvider {
             return null;
         }
 
-        final StringBuilder url = new StringBuilder(BASE_URL);
+        StringBuilder url = new StringBuilder(BASE_URL);
         url.append("?track=").append(LyricsRequests.encode(track.title()));
         url.append("&artist=").append(LyricsRequests.encode(track.artist()));
         if (!track.album().isEmpty()) {
@@ -84,16 +81,16 @@ public final class BinimumProvider implements LyricsProvider {
                 LyricsRequests.logFailure(name(), connection);
                 return null;
             }
-            final JSONObject response = Requester.parseJSONObject(connection);
-            final JSONArray results = response.optJSONArray("results");
+            JSONObject response = Requester.parseJSONObject(connection);
+            JSONArray results = response.optJSONArray("results");
             if (results == null || results.length() == 0) {
                 return null;
             }
-            final JSONObject best = results.optJSONObject(0);
+            JSONObject best = results.optJSONObject(0);
             if (best == null) {
                 return null;
             }
-            final String lyricsUrl = LyricsRequests.optString(best, "lyricsUrl");
+            String lyricsUrl = LyricsRequests.optString(best, "lyricsUrl");
             return lyricsUrl != null ? lyricsUrl : null;
         } finally {
             if (connection != null) {

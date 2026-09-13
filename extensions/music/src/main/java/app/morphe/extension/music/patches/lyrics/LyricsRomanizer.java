@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -16,8 +16,6 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import app.morphe.extension.music.patches.lyrics.LyricsLine;
-import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.translation.TextTranslator;
 
@@ -64,7 +62,7 @@ public final class LyricsRomanizer {
         final boolean perWord = LyricsMerge.anyWordHasRomaji(lyrics.lines());
         if (LyricsMerge.hasText(embedded) || perWord) {
             // The source already ships an aligned (line-level or per-word) romanization: no network needed.
-            final List<LyricsLine> result = embedded;
+            List<LyricsLine> result = embedded;
             Utils.runOnMainThread(() -> callback.onRomanized(result, false, perWord));
             return;
         }
@@ -85,18 +83,18 @@ public final class LyricsRomanizer {
                 }
             }
 
-            final List<LyricsLine> result = romanized;
+            List<LyricsLine> result = romanized;
             Utils.runOnMainThread(() -> callback.onRomanized(result, true, false));
         });
     }
 
     private static List<LyricsLine> collectMatchingRomanizations(
             Map<String, List<LyricsLine>> romanizations, List<LyricsLine> allLines) {
-        final String langTag = Locale.getDefault().toLanguageTag();
-        final String langCode = langTag.contains("-")
+        String langTag = Locale.getDefault().toLanguageTag();
+        String langCode = langTag.contains("-")
                 ? langTag.substring(0, langTag.indexOf("-")) : langTag;
 
-        final List<String> matchedKeys = new ArrayList<>();
+        List<String> matchedKeys = new ArrayList<>();
         for (String key : romanizations.keySet()) {
             if (key.startsWith("bg:")) continue;
             if (key.equals(langTag) || key.equals(langCode)
@@ -128,9 +126,9 @@ public final class LyricsRomanizer {
         }
 
         // Merge multi-language romanizations line by line
-        final List<LyricsLine> result = new ArrayList<>(lineCount);
+        List<LyricsLine> result = new ArrayList<>(lineCount);
         for (int i = 0; i < lineCount; i++) {
-            final StringBuilder merged = new StringBuilder();
+            StringBuilder merged = new StringBuilder();
             for (String key : matchedKeys) {
                 List<LyricsLine> langLines = romanizations.get(key);
                 if (langLines == null || i >= langLines.size()) continue;
@@ -148,11 +146,11 @@ public final class LyricsRomanizer {
         if (allLines != null) {
             for (int i = 0; i < result.size() && i < allLines.size(); i++) {
                 if (allLines.get(i).isBG()) {
-                    final String bgRoma = result.get(i).text();
+                    String bgRoma = result.get(i).text();
                     if (bgRoma == null || bgRoma.isEmpty()) {
                         for (int j = i - 1; j >= 0; j--) {
                             if (!allLines.get(j).isBG() && j < result.size()) {
-                                final String parentRoma = result.get(j).text();
+                                String parentRoma = result.get(j).text();
                                 if (parentRoma != null && !parentRoma.isEmpty()) {
                                     result.set(i, new LyricsLine(LyricsLine.NO_TIME, parentRoma));
                                 }

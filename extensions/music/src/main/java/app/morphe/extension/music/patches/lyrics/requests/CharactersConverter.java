@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -134,7 +134,7 @@ public final class CharactersConverter {
      */
     @NonNull
     public static List<TrackInfo> variants(@NonNull TrackInfo track) {
-        final Set<TrackInfo> variants = new LinkedHashSet<>();
+        Set<TrackInfo> variants = new LinkedHashSet<>();
 
         addVariant(variants, track, TO_TRADITIONAL);
         addVariant(variants, track, TO_SIMPLIFIED);
@@ -149,11 +149,11 @@ public final class CharactersConverter {
 
     @NonNull
     public static List<String> variants(@NonNull String text) {
-        final Set<String> variants = new LinkedHashSet<>();
+        Set<String> variants = new LinkedHashSet<>();
         variants.add(text);
         variants.add(toTraditional(text));
         variants.add(toSimplified(text));
-        final String normalized = normalize(text);
+        String normalized = normalize(text);
         variants.add(normalized);
         variants.add(toTraditional(normalized));
         variants.add(toSimplified(normalized));
@@ -165,7 +165,7 @@ public final class CharactersConverter {
         if (transliterator == null) {
             return;
         }
-        final TrackInfo converted = new TrackInfo(
+        TrackInfo converted = new TrackInfo(
                 transliterate(transliterator, track.title()),
                 transliterate(transliterator, track.artist()),
                 transliterate(transliterator, track.album()),

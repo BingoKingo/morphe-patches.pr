@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -12,7 +12,6 @@ import static app.morphe.extension.shared.StringRef.str;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Context;
-import android.graphics.Color;
 import android.preference.Preference;
 import android.util.AttributeSet;
 import android.view.DragEvent;
@@ -43,7 +42,7 @@ import app.morphe.extension.shared.ui.Dim;
  * {@code '-'} marking a disabled provider.
  */
 @SuppressWarnings({"unused", "deprecation"})
-public final class OrderedListPreference extends Preference {
+public final class LyricsOrderedListPreference extends Preference {
 
     /** Canonical provider ids, in the default priority order, shown in the list. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
@@ -87,22 +86,22 @@ public final class OrderedListPreference extends Preference {
     private int dragIndex = -1;
     private boolean dragReordered = false;
 
-    public OrderedListPreference(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
+    public LyricsOrderedListPreference(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
         super(context, attrs, defStyleAttr, defStyleRes);
         init();
     }
 
-    public OrderedListPreference(Context context, AttributeSet attrs, int defStyleAttr) {
+    public LyricsOrderedListPreference(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         init();
     }
 
-    public OrderedListPreference(Context context, AttributeSet attrs) {
+    public LyricsOrderedListPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
         init();
     }
 
-    public OrderedListPreference(Context context) {
+    public LyricsOrderedListPreference(Context context) {
         super(context);
         init();
     }
@@ -206,13 +205,13 @@ public final class OrderedListPreference extends Preference {
 
     private void showTokenDialogFor(String id, Runnable onTokenSaved) {
         Context context = getContext();
-        TokenDialogPreference pref;
+        LyricsTokenDialogPreference pref;
         switch (id) {
-            case "Captions":    pref = TokenDialogPreference.youtube(context); break;
-            case "Apple":       pref = TokenDialogPreference.apple(context); break;
-            case "Spotify":     pref = TokenDialogPreference.spotify(context); break;
-            case "Deezer":      pref = TokenDialogPreference.deezer(context); break;
-            case "Musixmatch":  pref = TokenDialogPreference.musixmatch(context); break;
+            case "Captions":    pref = LyricsTokenDialogPreference.youtube(context); break;
+            case "Apple":       pref = LyricsTokenDialogPreference.apple(context); break;
+            case "Spotify":     pref = LyricsTokenDialogPreference.spotify(context); break;
+            case "Deezer":      pref = LyricsTokenDialogPreference.deezer(context); break;
+            case "Musixmatch":  pref = LyricsTokenDialogPreference.musixmatch(context); break;
             default: return;
         }
         pref.showDialog(onTokenSaved);

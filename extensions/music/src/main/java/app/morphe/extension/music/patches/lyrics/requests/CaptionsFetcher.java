@@ -1,3 +1,10 @@
+/*
+ * Copyright 2026 Morphe.
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
+ *
+ * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
+ */
+
 package app.morphe.extension.music.patches.lyrics.requests;
 
 import androidx.annotation.Nullable;
@@ -13,19 +20,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
-import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
 import app.morphe.extension.shared.innertube.utils.AuthUtils;
 import app.morphe.extension.shared.requests.Requester;
 import app.morphe.extension.shared.spoof.ClientType;
 import app.morphe.extension.shared.spoof.potoken.PoTokenManager;
-
 
 public final class CaptionsFetcher {
 
@@ -41,7 +47,7 @@ public final class CaptionsFetcher {
                     + "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
 
     private static final String SW_COOKIE_URL = "https://www.youtube.com/sw.js";
-    private static final java.util.List<String> COOKIE_KEYS = java.util.Arrays.asList(
+    private static final List<String> COOKIE_KEYS = java.util.Arrays.asList(
             "YSC", "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA", "__Secure-ROLLOUT_TOKEN"
     );
     private static volatile String cachedCookies = null;
@@ -132,7 +138,7 @@ public final class CaptionsFetcher {
         @Override
         @Nullable
         public Lyrics fetch(app.morphe.extension.music.patches.lyrics.TrackInfo track) throws Exception {
-            final CaptionsOutcome outcome = CaptionsFetcher.fetch();
+            CaptionsOutcome outcome = CaptionsFetcher.fetch();
 
             if (outcome.errorReason != null) {
                 return null;
@@ -144,8 +150,8 @@ public final class CaptionsFetcher {
 
             Lyrics result = outcome.lyrics;
             if (outcome.translationLyrics != null && !outcome.translationLyrics.isEmpty()) {
-                final String langTag = java.util.Locale.getDefault().toLanguageTag();
-                final java.util.Map<String, java.util.List<LyricsLine>> translations = new java.util.HashMap<>();
+                String langTag = java.util.Locale.getDefault().toLanguageTag();
+                Map<String, List<LyricsLine>> translations = new java.util.HashMap<>();
                 translations.put(langTag, outcome.translationLyrics.lines());
                 result = new Lyrics(result.lines(), result.providerName(), result.synced(),
                         result.romanization(), translations,
@@ -159,13 +165,13 @@ public final class CaptionsFetcher {
     }
 
     public static CaptionsOutcome fetch() {
-        final String videoId = readVideoIdWithRetry();
+        String videoId = readVideoIdWithRetry();
         if (videoId == null || videoId.isEmpty()) {
             return CaptionsOutcome.ALLOW_PROVIDERS;
         }
 
         try {
-            final CaptionListResult captions = findCaptionList(videoId);
+            CaptionListResult captions = findCaptionList(videoId);
             if (captions == null) {
                 return CaptionsOutcome.ALLOW_PROVIDERS;
             }
@@ -182,17 +188,17 @@ public final class CaptionsFetcher {
             }
 
             if (!captions.tracks.isEmpty()) {
-                final CaptionTrack primaryTrack = selectPrimaryTrack(captions.tracks,
+                CaptionTrack primaryTrack = selectPrimaryTrack(captions.tracks,
                         captions.sourceLangCode);
                 if (primaryTrack != null) {
-                    final Lyrics primaryLyrics = fetchTrackLyrics(primaryTrack, captions.poToken);
+                    Lyrics primaryLyrics = fetchTrackLyrics(primaryTrack, captions.poToken);
                     if (primaryLyrics != null && !primaryLyrics.isEmpty()) {
-                        final CaptionTrack translationTrack =
+                        CaptionTrack translationTrack =
                                 selectTranslationTrack(captions.tracks, primaryTrack.langCode,
                                         captions.sourceLangCode);
                         Lyrics translationLyrics = null;
                         if (translationTrack != null) {
-                            final Lyrics tl = fetchTrackLyrics(translationTrack, captions.poToken);
+                            Lyrics tl = fetchTrackLyrics(translationTrack, captions.poToken);
                             if (tl != null && !tl.isEmpty()) {
                                 translationLyrics = tl;
                             }
@@ -204,7 +210,7 @@ public final class CaptionsFetcher {
                 }
             }
 
-            final Lyrics timed = fetchViaTimedtext(videoId, captions.poToken, null);
+            Lyrics timed = fetchViaTimedtext(videoId, captions.poToken, null);
             if (timed != null && !timed.isEmpty()) {
                 lastFetchedVideoId = videoId;
                 return CaptionsOutcome.captions(timed, captions.innertubeTrack);
@@ -218,9 +224,9 @@ public final class CaptionsFetcher {
     @Nullable
     private static Lyrics fetchTrackLyrics(CaptionTrack track, @Nullable String poToken) {
         try {
-            final String url = buildCaptionUrl(track.url, poToken);
-            final String json = fetchCaptionUrl(url);
-            final List<LyricsLine> lines = parseJson3(json);
+            String url = buildCaptionUrl(track.url, poToken);
+            String json = fetchCaptionUrl(url);
+            List<LyricsLine> lines = parseJson3(json);
             if (!lines.isEmpty()) {
                 return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true, null, null, null, null, json, "json3", null);
             }
@@ -239,7 +245,7 @@ public final class CaptionsFetcher {
 
     private static CaptionsOutcome tryTimedtext(String videoId, @Nullable String poToken,
                                                  @Nullable TrackInfo innertubeTrack) {
-        final Lyrics timed = fetchViaTimedtext(videoId, poToken, null);
+        Lyrics timed = fetchViaTimedtext(videoId, poToken, null);
         if (timed != null && !timed.isEmpty()) {
             lastFetchedVideoId = videoId;
             return CaptionsOutcome.captions(timed, innertubeTrack);
@@ -254,7 +260,7 @@ public final class CaptionsFetcher {
     @Nullable
     private static String readVideoIdWithRetry() {
         String videoId = VideoInformation.getVideoId();
-        final String previousId = lastFetchedVideoId;
+        String previousId = lastFetchedVideoId;
 
         if (videoId != null && !videoId.isEmpty()) {
             if (!videoId.equals(previousId)) {
@@ -317,16 +323,16 @@ public final class CaptionsFetcher {
 
     @Nullable
     private static CaptionListResult findCaptionList(String videoId) {
-        final String json = fetchInnertubePlayer(videoId);
+        String json = fetchInnertubePlayer(videoId);
         if (json == null) {
             return null;
         }
-        final TrackInfo innertubeTrack = extractVideoDetails(json);
-        final String videoLangCode = extractVideoLanguageCode(json);
+        TrackInfo innertubeTrack = extractVideoDetails(json);
+        String videoLangCode = extractVideoLanguageCode(json);
         if (videoLangCode == null || videoLangCode.isEmpty()) {
         }
 
-        final String errorReason = extractPlayabilityError(json);
+        String errorReason = extractPlayabilityError(json);
         if (errorReason != null) {
             return new CaptionListResult(false, new ArrayList<>(), null, innertubeTrack,
                     null, videoLangCode, errorReason);
@@ -339,16 +345,16 @@ public final class CaptionsFetcher {
             } catch (Exception ex) {
             }
         }
-        final String poToken = resolvedPoToken;
+        String poToken = resolvedPoToken;
         final int tracksIdx = json.indexOf("\"captionTracks\":[");
         if (tracksIdx < 0) {
             return new CaptionListResult(false, new ArrayList<>(), poToken, innertubeTrack,
                     null, videoLangCode, null);
         }
-        final List<CaptionTrack> tracks = extractCaptionTracks(json, tracksIdx);
-        final java.util.Set<String> translationLangs = extractTranslationLanguages(json);
-        final String microLang = extractMicroformatLanguage(json);
-        final String audioTracksLang = extractAudioTracksLanguage(json, tracks);
+        List<CaptionTrack> tracks = extractCaptionTracks(json, tracksIdx);
+        Set<String> translationLangs = extractTranslationLanguages(json);
+        String microLang = extractMicroformatLanguage(json);
+        String audioTracksLang = extractAudioTracksLanguage(json, tracks);
         String sourceLangCode = determineSourceLanguage(tracks, videoLangCode,
                 microLang, audioTracksLang, translationLangs);
 
@@ -356,8 +362,8 @@ public final class CaptionsFetcher {
                 sourceLangCode, videoLangCode, null);
     }
 
-    private static java.util.Set<String> extractTranslationLanguages(String json) {
-        final java.util.Set<String> langs = new java.util.HashSet<>();
+    private static Set<String> extractTranslationLanguages(String json) {
+        Set<String> langs = new java.util.HashSet<>();
         int idx = json.indexOf("\"translationLanguages\":[");
         if (idx < 0) {
             return langs;
@@ -376,9 +382,9 @@ public final class CaptionsFetcher {
         }
         if (arrEnd < 0) return langs;
         try {
-            final JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
+            JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
             for (int i = 0; i < arr.length(); i++) {
-                final JSONObject obj = arr.getJSONObject(i);
+                JSONObject obj = arr.getJSONObject(i);
                 String langCode = obj.optString("languageCode", "");
                 if (!langCode.isEmpty()) {
                     langs.add(langCode);
@@ -394,7 +400,7 @@ public final class CaptionsFetcher {
                                                    @Nullable String videoLangCode,
                                                    @Nullable String microLang,
                                                    @Nullable String audioTracksLang,
-                                                   java.util.Set<String> translationLangs) {
+                                                   Set<String> translationLangs) {
         for (CaptionTrack track : tracks) {
             if (track.isAsr) {
                 return track.langCode;
@@ -430,8 +436,8 @@ public final class CaptionsFetcher {
                 }
             }
         }
-        java.util.List<CaptionTrack> translatable = new java.util.ArrayList<>();
-        java.util.List<CaptionTrack> nonTranslatable = new java.util.ArrayList<>();
+        List<CaptionTrack> translatable = new ArrayList<>();
+        List<CaptionTrack> nonTranslatable = new ArrayList<>();
         for (CaptionTrack track : tracks) {
             if (!track.isAsr) {
                 if (track.isTranslatable) translatable.add(track);
@@ -510,7 +516,7 @@ public final class CaptionsFetcher {
         if (arrEnd < 0) return null;
 
         int defaultIdx = -1;
-        final String daiKey = "\"defaultAudioTrackIndex\":";
+        String daiKey = "\"defaultAudioTrackIndex\":";
         int daiIdx = json.indexOf(daiKey);
         if (daiIdx >= 0 && daiIdx < arrEnd + 200) {
             int numStart = daiIdx + daiKey.length();
@@ -529,18 +535,18 @@ public final class CaptionsFetcher {
         }
 
         try {
-            final JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
+            JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
             if (defaultIdx >= arr.length()) {
                 defaultIdx = 0;
             }
-            final JSONObject defaultTrack = arr.getJSONObject(defaultIdx);
-            final JSONArray indices = defaultTrack.optJSONArray("captionTrackIndices");
+            JSONObject defaultTrack = arr.getJSONObject(defaultIdx);
+            JSONArray indices = defaultTrack.optJSONArray("captionTrackIndices");
             if (indices == null || indices.length() == 0) {
                 return null;
             }
             final int captionIdx = indices.getInt(0);
             if (captionIdx >= 0 && captionIdx < tracks.size()) {
-                final String lang = tracks.get(captionIdx).langCode;
+                String lang = tracks.get(captionIdx).langCode;
                 return lang;
             }
         } catch (Exception ex) {
@@ -564,10 +570,10 @@ public final class CaptionsFetcher {
         final int psIdx = json.indexOf("\"playabilityStatus\":{");
         if (psIdx < 0) return null;
         final int psStart = psIdx + "\"playabilityStatus\":".length();
-        final String status = extractJsonString(json, psStart, "status");
+        String status = extractJsonString(json, psStart, "status");
         if (status == null || "OK".equals(status)) return null;
 
-        final String reason = extractJsonString(json, psStart, "reason");
+        String reason = extractJsonString(json, psStart, "reason");
         if (reason != null && !reason.isEmpty()) {
             return reason;
         }
@@ -581,8 +587,8 @@ public final class CaptionsFetcher {
             return null;
         }
         final int vdStart = vdIdx + "\"videoDetails\":".length();
-        final String title = extractJsonString(json, vdStart, "title");
-        final String author = extractJsonString(json, vdStart, "author");
+        String title = extractJsonString(json, vdStart, "title");
+        String author = extractJsonString(json, vdStart, "author");
         if (title == null || title.isEmpty() || author == null || author.isEmpty()) {
             return null;
         }
@@ -654,9 +660,9 @@ public final class CaptionsFetcher {
             }
             if (arrEnd < 0) return tracks;
 
-            final JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
+            JSONArray arr = new JSONArray(json.substring(arrStart, arrEnd + 1));
             for (int i = 0; i < arr.length(); i++) {
-                final JSONObject obj = arr.getJSONObject(i);
+                JSONObject obj = arr.getJSONObject(i);
 
                 String baseUrl = obj.optString("baseUrl", "");
                 if (baseUrl.isEmpty()) continue;
@@ -728,7 +734,7 @@ public final class CaptionsFetcher {
     private static CaptionTrack selectTranslationTrack(List<CaptionTrack> tracks,
                                                        String primaryLang,
                                                        @Nullable String sourceLangCode) {
-        final String sysLang = Locale.getDefault().getLanguage();
+        String sysLang = Locale.getDefault().getLanguage();
         if (sysLang.isEmpty()) {
             return null;
         }
@@ -756,7 +762,7 @@ public final class CaptionsFetcher {
     }
 
     private static String getCookies() {
-        final String userCookies = Settings.LYRICS_CAPTION_COOKIES.get();
+        String userCookies = Settings.LYRICS_CAPTION_COOKIES.get();
         if (userCookies != null && !userCookies.isEmpty()) {
             return userCookies;
         }
@@ -779,7 +785,7 @@ public final class CaptionsFetcher {
 
             final int responseCode = conn.getResponseCode();
             if (responseCode == 200) {
-                final java.util.List<String> setCookies = conn.getHeaderFields().get("Set-Cookie");
+                List<String> setCookies = conn.getHeaderFields().get("Set-Cookie");
                 cachedCookies = parseCookies(setCookies);
                 cachedCookiesTime = System.currentTimeMillis();
                 return cachedCookies;
@@ -793,12 +799,12 @@ public final class CaptionsFetcher {
 
     private static String parseCookies(java.util.List<String> setCookies) {
         if (setCookies == null || setCookies.isEmpty()) return "";
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         for (String setCookie : setCookies) {
-            final String entry = setCookie.split(";")[0].trim();
+            String entry = setCookie.split(";")[0].trim();
             final int eq = entry.indexOf('=');
             if (eq > 0) {
-                final String key = entry.substring(0, eq).trim();
+                String key = entry.substring(0, eq).trim();
                 if (COOKIE_KEYS.contains(key)) {
                     if (sb.length() > 0) sb.append("; ");
                     sb.append(entry);
@@ -829,11 +835,11 @@ public final class CaptionsFetcher {
         if (sapisid == null || sapisid.isEmpty()) return null;
 
         final long timestamp = System.currentTimeMillis() / 1000;
-        final String input = timestamp + " " + sapisid + " https://www.youtube.com";
+        String input = timestamp + " " + sapisid + " https://www.youtube.com";
         try {
-            final MessageDigest md = MessageDigest.getInstance("SHA-1");
-            final byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            final StringBuilder hex = new StringBuilder(hash.length * 2);
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
             for (byte b : hash) {
                 hex.append(String.format("%02x", b));
             }
@@ -846,18 +852,18 @@ public final class CaptionsFetcher {
     public static boolean validateYouTubeCookies(String cookies) {
         if (cookies == null || cookies.trim().isEmpty()) return false;
         try {
-            final JSONObject body = new JSONObject();
-            final JSONObject client = new JSONObject();
+            JSONObject body = new JSONObject();
+            JSONObject client = new JSONObject();
             client.put("clientName", "WEB");
             client.put("clientVersion", "2.20250101.00.00");
             client.put("hl", "en");
             client.put("gl", "US");
-            final JSONObject context = new JSONObject();
+            JSONObject context = new JSONObject();
             context.put("client", client);
             body.put("context", context);
             body.put("videoId", "dQw4w9WgXcQ");
 
-            final HttpURLConnection conn = Requester.openConnection(INNERTUBE_PLAYER_URL);
+            HttpURLConnection conn = Requester.openConnection(INNERTUBE_PLAYER_URL);
             try {
                 conn.setRequestMethod("POST");
                 conn.setConnectTimeout(5000);
@@ -871,7 +877,7 @@ public final class CaptionsFetcher {
                 conn.setRequestProperty("X-YouTube-Client-Version", "2.20250101.00.00");
                 conn.setRequestProperty("X-Goog-AuthUser", "0");
                 conn.setRequestProperty("Cookie", cookies);
-                final String sapisidHash = computeSapisidHash(cookies);
+                String sapisidHash = computeSapisidHash(cookies);
                 if (sapisidHash != null) {
                     conn.setRequestProperty("Authorization", sapisidHash);
                 }
@@ -886,10 +892,10 @@ public final class CaptionsFetcher {
                     return false;
                 }
 
-                final String json = Requester.parseString(conn);
-                final JSONObject resp = new JSONObject(json);
-                final JSONObject ps = resp.optJSONObject("playabilityStatus");
-                final String status = ps != null ? ps.optString("status") : null;
+                String json = Requester.parseString(conn);
+                JSONObject resp = new JSONObject(json);
+                JSONObject ps = resp.optJSONObject("playabilityStatus");
+                String status = ps != null ? ps.optString("status") : null;
                 return "OK".equals(status);
             } finally {
                 conn.disconnect();
@@ -901,32 +907,32 @@ public final class CaptionsFetcher {
 
     @Nullable
     private static String fetchInnertubePlayer(String videoId) {
-        final String cookies = getCookies();
+        String cookies = getCookies();
         final boolean hasCookies = cookies != null && !cookies.isEmpty();
 
         try {
-            final JSONObject body = new JSONObject();
+            JSONObject body = new JSONObject();
 
-            final JSONObject client = new JSONObject();
+            JSONObject client = new JSONObject();
             client.put("clientName", "WEB");
             client.put("clientVersion", "2.20250101.00.00");
             client.put("hl", "en");
             client.put("gl", "US");
 
-            final JSONObject context = new JSONObject();
+            JSONObject context = new JSONObject();
             context.put("client", client);
             body.put("context", context);
 
             body.put("videoId", videoId);
 
-            final JSONObject captionParams = new JSONObject();
+            JSONObject captionParams = new JSONObject();
             captionParams.put("captionsEnabled", true);
             body.put("captionParams", captionParams);
 
             body.put("contentCheckOk", true);
             body.put("racyCheckOk", true);
 
-            final String bodyStr = body.toString();
+            String bodyStr = body.toString();
 
             HttpURLConnection conn = null;
             try {
@@ -946,7 +952,7 @@ public final class CaptionsFetcher {
 
                 if (hasCookies) {
                     conn.setRequestProperty("Cookie", cookies);
-                    final String sapisidHash = computeSapisidHash(cookies);
+                    String sapisidHash = computeSapisidHash(cookies);
                     if (sapisidHash != null) {
                         conn.setRequestProperty("Authorization", sapisidHash);
                     }
@@ -984,23 +990,23 @@ public final class CaptionsFetcher {
                 }
             }
         }
-        final java.util.Locale sys = java.util.Locale.getDefault();
-        final String sysLang = sys.getLanguage();
+        Locale sys = Locale.getDefault();
+        String sysLang = sys.getLanguage();
         if (!sysLang.isEmpty() && !langs.contains(sysLang)) {
             langs.add(sysLang);
         }
-        final String sysRegion = sys.getLanguage() + "-" + sys.getCountry();
+        String sysRegion = sys.getLanguage() + "-" + sys.getCountry();
         if (!sysRegion.equals(sysLang) && !langs.contains(sysRegion)) {
             langs.add(sysRegion);
         }
 
-        final String pot = (poToken != null && !poToken.isEmpty()) ? "&pot=" + poToken : "";
+        String pot = (poToken != null && !poToken.isEmpty()) ? "&pot=" + poToken : "";
         for (String lang : langs) {
             try {
-                final String url = TIMEDTEXT_URL + "?lang=" + lang + "&v=" + videoId
+                String url = TIMEDTEXT_URL + "?lang=" + lang + "&v=" + videoId
                         + "&kind=asr&fmt=json3" + pot;
-                final String json = fetchCaptionUrl(url);
-                final List<LyricsLine> lines = parseJson3(json);
+                String json = fetchCaptionUrl(url);
+                List<LyricsLine> lines = parseJson3(json);
                 if (!lines.isEmpty()) {
                     return new Lyrics(lines, Lyrics.CAPTIONS_PROVIDER, true, null, null, null, null, json, "json3", null);
                 }
@@ -1011,16 +1017,16 @@ public final class CaptionsFetcher {
     }
 
     private static List<LyricsLine> parseJson3(String json) throws Exception {
-        final JSONObject root = new JSONObject(json);
+        JSONObject root = new JSONObject(json);
         if (!root.has("events")) {
             return new ArrayList<>();
         }
 
-        final JSONArray events = root.getJSONArray("events");
-        final List<LyricsLine> lines = new ArrayList<>();
+        JSONArray events = root.getJSONArray("events");
+        List<LyricsLine> lines = new ArrayList<>();
 
         for (int i = 0; i < events.length(); i++) {
-            final JSONObject event = events.getJSONObject(i);
+            JSONObject event = events.getJSONObject(i);
             if (event.optInt("aAppend", 0) == 1) {
                 continue;
             }
@@ -1031,15 +1037,15 @@ public final class CaptionsFetcher {
             String text = "";
             long startTimeMs = event.optLong("tStartMs", 0);
 
-            final JSONArray segments = event.getJSONArray("segs");
+            JSONArray segments = event.getJSONArray("segs");
             for (int j = 0; j < segments.length(); j++) {
-                final JSONObject seg = segments.getJSONObject(j);
+                JSONObject seg = segments.getJSONObject(j);
                 if (seg.has("utf8")) {
                     text += seg.getString("utf8");
                 }
             }
 
-            final String trimmed = text.trim();
+            String trimmed = text.trim();
             if (trimmed.isEmpty()
                     || BRACKETS_PATTERN.matcher(trimmed).matches()
                     || PARENTHESES_PATTERN.matcher(trimmed).matches()) {
@@ -1060,7 +1066,7 @@ public final class CaptionsFetcher {
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestProperty("User-Agent", CAPTION_USER_AGENT);
 
-            final String cookies = getCookies();
+            String cookies = getCookies();
             if (cookies != null && !cookies.isEmpty()) {
                 conn.setRequestProperty("Cookie", cookies);
             }

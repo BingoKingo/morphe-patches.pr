@@ -78,9 +78,9 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
 
     private static Map<String, List<LyricsLine>> unmodifiableTranslations(
             Map<String, List<LyricsLine>> in) {
-        final Map<String, List<LyricsLine>> out = new HashMap<>(in.size());
+        Map<String, List<LyricsLine>> out = new HashMap<>(in.size());
         for (Map.Entry<String, List<LyricsLine>> entry : in.entrySet()) {
-            final List<LyricsLine> value = entry.getValue();
+            List<LyricsLine> value = entry.getValue();
             out.put(entry.getKey(), value == null ? null : Collections.unmodifiableList(value));
         }
         return Collections.unmodifiableMap(out);
@@ -147,11 +147,11 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
     public static List<LyricsLine> fixAnomalousWordTimestamps(List<LyricsLine> lines) {
         final int size = lines.size();
         if (size == 0) return lines;
-        final List<LyricsLine> out = new ArrayList<>(lines);
+        List<LyricsLine> out = new ArrayList<>(lines);
         for (int i = 0; i < size; i++) {
-            final LyricsLine line = out.get(i);
+            LyricsLine line = out.get(i);
             if (!line.hasWords()) continue;
-            final List<Word> words = line.words();
+            List<Word> words = line.words();
             final int count = words.size();
             if (count == 0) continue;
 
@@ -160,10 +160,10 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
 
             long prevEnd = lineStart != LyricsLine.NO_TIME ? lineStart : 0;
             boolean changed = false;
-            final Word[] fixed = new Word[count];
+            Word[] fixed = new Word[count];
 
             for (int j = 0; j < count; j++) {
-                final Word w = words.get(j);
+                Word w = words.get(j);
                 final boolean anomalous = (w.startMs() == 0 && lineStart > 0)
                         || (w.endMs() == 0 && w.startMs() > 0)
                         || (w.startMs() > 0 && w.startMs() == w.endMs())
@@ -177,7 +177,7 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
 
                 long nextStart = Long.MAX_VALUE;
                 for (int k = j + 1; k < count; k++) {
-                    final Word nw = words.get(k);
+                    Word nw = words.get(k);
                     if (nw.startMs() > 0 && nw.endMs() > nw.startMs()) {
                         nextStart = nw.startMs();
                         break;
@@ -216,13 +216,13 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
     public static List<LyricsLine> clampLastWordEnds(List<LyricsLine> lines) {
         final int size = lines.size();
         if (size == 0) return lines;
-        final List<LyricsLine> out = new ArrayList<>(lines);
+        List<LyricsLine> out = new ArrayList<>(lines);
         for (int i = 0; i < size; i++) {
-            final LyricsLine line = out.get(i);
+            LyricsLine line = out.get(i);
             if (!line.hasWords()) continue;
-            final List<Word> words = line.words();
+            List<Word> words = line.words();
             final int lastIdx = words.size() - 1;
-            final Word lastWord = words.get(lastIdx);
+            Word lastWord = words.get(lastIdx);
             long effectiveEnd = lastWord.endMs();
             if (i + 1 < size) {
                 final long nextStart = out.get(i + 1).startTimeMs();
@@ -236,7 +236,7 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
             }
             effectiveEnd = Math.max(effectiveEnd, lastWord.startMs() + 200);
             if (effectiveEnd != lastWord.endMs()) {
-                final List<Word> newWords = new ArrayList<>(words);
+                List<Word> newWords = new ArrayList<>(words);
                 newWords.set(lastIdx, new Word(lastWord.startMs(), effectiveEnd,
                         lastWord.text(), lastWord.romaji(), lastWord.endsWithSpace()));
                 out.set(i, new LyricsLine(line.startTimeMs(), line.endTimeMs(),

@@ -115,7 +115,7 @@ public final class LyricsPanelInstaller {
         }
 
         for (int i = panel.getChildCount() - 1; i >= 0; i--) {
-            final View child = panel.getChildAt(i);
+            View child = panel.getChildAt(i);
             if (child instanceof LyricsPanelView && child != existing) {
                 panel.removeViewAt(i);
             }
@@ -154,7 +154,7 @@ public final class LyricsPanelInstaller {
         if (activity == null) {
             return false;
         }
-        final TextView title = findForegroundTitle(activity.getWindow().getDecorView());
+        TextView title = findForegroundTitle(activity.getWindow().getDecorView());
         return title != null && !isLyricsTitle(title);
     }
 
@@ -228,7 +228,7 @@ public final class LyricsPanelInstaller {
             Logger.printException(() -> "App is missing " + PANEL_TITLE_ID);
             return null;
         }
-        final Rect rect = new Rect();
+        Rect rect = new Rect();
         return findForegroundTitle(root, titleId, rect);
     }
 
@@ -247,7 +247,7 @@ public final class LyricsPanelInstaller {
 
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) {
-                final TextView found = findForegroundTitle(group.getChildAt(i), titleId, rect);
+                TextView found = findForegroundTitle(group.getChildAt(i), titleId, rect);
                 if (found != null) {
                     result = found;
                 }
@@ -269,15 +269,15 @@ public final class LyricsPanelInstaller {
     }
 
     public static void enableLyricsButton() {
-        final Activity activity = Utils.getActivity();
+        Activity activity = Utils.getActivity();
         if (activity == null) {
             return;
         }
-        final String title = lyricsTitle();
+        String title = lyricsTitle();
         if (title == null) {
             return;
         }
-        final View root = activity.getWindow().getDecorView();
+        View root = activity.getWindow().getDecorView();
         for (long delay : ENABLE_BUTTON_DELAYS_MS) {
             Utils.runOnMainThreadDelayed(() -> enableLyricsButtonPass(root, title), delay);
         }
@@ -289,7 +289,7 @@ public final class LyricsPanelInstaller {
         if (root == null) {
             return;
         }
-        final String titleLower = title.toLowerCase(Locale.ROOT);
+        String titleLower = title.toLowerCase(Locale.ROOT);
         enableLyricsButtonPass(root, title, titleLower);
     }
 
@@ -298,10 +298,10 @@ public final class LyricsPanelInstaller {
             return false;
         }
         boolean matched = false;
-        final CharSequence description = view.getContentDescription();
+        CharSequence description = view.getContentDescription();
         if (description != null) {
-            final String desc = description.toString();
-            final String descLower = desc.toLowerCase(Locale.ROOT);
+            String desc = description.toString();
+            String descLower = desc.toLowerCase(Locale.ROOT);
             final boolean matches = title.equalsIgnoreCase(desc)
                     || descLower.contains(titleLower)
                     || descLower.contains("lyric");

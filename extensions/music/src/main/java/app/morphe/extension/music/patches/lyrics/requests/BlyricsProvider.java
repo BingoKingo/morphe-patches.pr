@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -33,7 +33,7 @@ public final class BlyricsProvider implements LyricsProvider {
             return null;
         }
 
-        final StringBuilder url = new StringBuilder(BASE_URL);
+        StringBuilder url = new StringBuilder(BASE_URL);
         url.append("?s=").append(LyricsRequests.encode(track.title()));
         url.append("&a=").append(LyricsRequests.encode(track.artist()));
         if (track.durationSeconds() > 0) {
@@ -46,12 +46,12 @@ public final class BlyricsProvider implements LyricsProvider {
         HttpURLConnection connection = null;
         try {
             connection = LyricsRequests.openConnection(url.toString());
-            if (connection.getResponseCode() != 200) {
+            if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
                 LyricsRequests.logFailure(name(), connection);
                 return null;
             }
-            final JSONObject root = Requester.parseJSONObject(connection);
-            final String ttml = LyricsRequests.optString(root, "ttml");
+            JSONObject root = Requester.parseJSONObject(connection);
+            String ttml = LyricsRequests.optString(root, "ttml");
             if (ttml == null) {
                 return null;
             }

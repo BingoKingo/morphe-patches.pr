@@ -11,7 +11,6 @@ import android.media.MediaMetadata;
 import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.SystemClock;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -22,7 +21,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionService;
@@ -36,24 +34,24 @@ import java.util.regex.Pattern;
 
 import app.morphe.extension.music.patches.album.PlayAlbumSongsPatch;
 import app.morphe.extension.music.patches.album.PlaylistRequest;
-import app.morphe.extension.music.patches.lyrics.requests.CharactersConverter;
+import app.morphe.extension.music.patches.lyrics.requests.AmllProvider;
+import app.morphe.extension.music.patches.lyrics.requests.AppleMusicProvider;
+import app.morphe.extension.music.patches.lyrics.requests.BinimumProvider;
+import app.morphe.extension.music.patches.lyrics.requests.BlyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.CaptionsFetcher;
+import app.morphe.extension.music.patches.lyrics.requests.CharactersConverter;
+import app.morphe.extension.music.patches.lyrics.requests.DeezerProvider;
 import app.morphe.extension.music.patches.lyrics.requests.KuGouProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LocalLyricsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.LrcLibProvider;
-import app.morphe.extension.music.patches.lyrics.requests.LyricallyAppleMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LunaProvider;
+import app.morphe.extension.music.patches.lyrics.requests.LyricallyAppleMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsProvider;
+import app.morphe.extension.music.patches.lyrics.requests.MusixmatchProvider;
 import app.morphe.extension.music.patches.lyrics.requests.NetEaseProvider;
 import app.morphe.extension.music.patches.lyrics.requests.QQProvider;
-import app.morphe.extension.music.patches.lyrics.requests.BinimumProvider;
-import app.morphe.extension.music.patches.lyrics.requests.BlyricsProvider;
-import app.morphe.extension.music.patches.lyrics.requests.MusixmatchProvider;
-import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
-import app.morphe.extension.music.patches.lyrics.requests.AmllProvider;
-import app.morphe.extension.music.patches.lyrics.requests.AppleMusicProvider;
-import app.morphe.extension.music.patches.lyrics.requests.DeezerProvider;
 import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
+import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
 import app.morphe.extension.shared.Utils;
@@ -68,7 +66,6 @@ import app.morphe.extension.shared.Utils;
  * accumulate. A seek or play/pause also re-anchors via {@link #onSetPlaybackState}.
  */
 public final class LyricsManager {
-
 
     public enum State {
         IDLE,
@@ -353,9 +350,9 @@ public final class LyricsManager {
             return;
         }
 
-        final String[] parsed = MetadataCleaner.parseTitleAndArtist(title);
-        final String cleanedTitle = parsed != null ? parsed[1] : MetadataCleaner.cleanTitle(title);
-        final String cleanedArtist = parsed != null ? parsed[0] : MetadataCleaner.cleanArtist(artist);
+        String[] parsed = MetadataCleaner.parseTitleAndArtist(title);
+        String cleanedTitle = parsed != null ? parsed[1] : MetadataCleaner.cleanTitle(title);
+        String cleanedArtist = parsed != null ? parsed[0] : MetadataCleaner.cleanArtist(artist);
         if (cleanedTitle.isEmpty() || cleanedArtist.isEmpty()) {
             return;
         }
@@ -409,13 +406,13 @@ public final class LyricsManager {
         if (uri == null) {
             return false;
         }
-        final String scheme = uri.getScheme();
+        String scheme = uri.getScheme();
         return "file".equals(scheme) || "content".equals(scheme);
     }
 
     @Nullable
     private static Uri parseMediaUri(@NonNull MediaMetadata metadata) {
-        final String uri = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_URI);
+        String uri = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_URI);
         return (uri != null) ? Uri.parse(uri) : null;
     }
 
@@ -441,7 +438,7 @@ public final class LyricsManager {
      */
     public void fetchNextCandidate() {
         Utils.verifyOnMainThread();
-        final TrackInfo track = currentTrack;
+        TrackInfo track = currentTrack;
         if (track == null) {
             return;
         }
@@ -452,7 +449,7 @@ public final class LyricsManager {
         }
 
         if (currentProviders == null) {
-            final String order = Settings.LYRICS_SOURCE.get();
+            String order = Settings.LYRICS_SOURCE.get();
             currentProviders = new ArrayList<>(providersInOrder(order));
             candidateCache = new java.util.HashMap<>();
         }
@@ -463,7 +460,7 @@ public final class LyricsManager {
             final int totalProviders = currentProviders.size();
 
             for (int attempt = 0; attempt < totalProviders; attempt++) {
-                final LyricsProvider provider = currentProviders.get(currentProviderIndex);
+                LyricsProvider provider = currentProviders.get(currentProviderIndex);
 
                 List<Lyrics> candidates = candidateCache.get(currentProviderIndex);
                 if (candidates == null && provider.hasCandidates()) {
@@ -482,9 +479,9 @@ public final class LyricsManager {
 
                 if (candidates != null && !candidates.isEmpty()
                         && currentCandidateIndex < candidates.size()) {
-                    final Lyrics candidate = candidates.get(currentCandidateIndex);
+                    Lyrics candidate = candidates.get(currentCandidateIndex);
                     if (isValidLyrics(candidate, track)) {
-                        final Lyrics toPublish = candidate;
+                        Lyrics toPublish = candidate;
                         Utils.runOnMainThread(() -> {
                             if (id != requestId) {
                                 return;
@@ -512,35 +509,35 @@ public final class LyricsManager {
     private void runProviderLookup(int id, TrackInfo track, @Nullable TrackInfo innertubeTrack) {
         // Local files take priority: read embedded LYRICS/LYRIC tags before hitting providers.
         if (Settings.LYRICS_USE_EMBEDDED.get()) {
-            final Uri embeddedUri = localUriFor(track);
+            Uri embeddedUri = localUriFor(track);
             if (embeddedUri != null) {
-                final Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
+                Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
                 if (embedded != null) {
                     LyricsCache.put(track, LyricsSource.LOCAL.name(), embedded);
-                    final Lyrics toPublish = embedded;
+                    Lyrics toPublish = embedded;
                     Utils.runOnMainThread(() -> publish(id, toPublish));
                     return;
                 }
             }
         }
 
-        final String order = Settings.LYRICS_SOURCE.get();
-        final List<LyricsProvider> providers = providersInOrder(order);
+        String order = Settings.LYRICS_SOURCE.get();
+        List<LyricsProvider> providers = providersInOrder(order);
 
         // A cached hit for any provider short-circuits the lookup. A cached miss is
         // ignored so a lower-priority provider with cached lyrics still gets a chance.
         // Check both localized and InnerTube metadata caches.
         for (LyricsProvider provider : providers) {
-            final Lyrics cached = LyricsCache.get(track, provider.name());
+            Lyrics cached = LyricsCache.get(track, provider.name());
             if (cached != null && cached != Lyrics.NOT_FOUND) {
-                final Lyrics toPublish = cached;
+                Lyrics toPublish = cached;
                 Utils.runOnMainThread(() -> publish(id, toPublish));
                 return;
             }
             if (innertubeTrack != null && !innertubeTrack.equals(track)) {
-                final Lyrics cachedIT = LyricsCache.get(innertubeTrack, provider.name());
+                Lyrics cachedIT = LyricsCache.get(innertubeTrack, provider.name());
                 if (cachedIT != null && cachedIT != Lyrics.NOT_FOUND) {
-                    final Lyrics toPublish = cachedIT;
+                    Lyrics toPublish = cachedIT;
                     LyricsCache.put(track, provider.name(), toPublish);
                     Utils.runOnMainThread(() -> publish(id, toPublish));
                     return;
@@ -557,7 +554,7 @@ public final class LyricsManager {
             return;
         }
 
-        final boolean[] failed = {false};
+        boolean[] failed = {false};
         Lyrics result = null;
 
         List<TrackInfo> variants = new ArrayList<>();
@@ -565,9 +562,9 @@ public final class LyricsManager {
         if (innertubeTrack != null && !innertubeTrack.equals(track)) {
             // Check cache for InnerTube metadata too.
             for (LyricsProvider provider : providers) {
-                final Lyrics cached = LyricsCache.get(innertubeTrack, provider.name());
+                Lyrics cached = LyricsCache.get(innertubeTrack, provider.name());
                 if (cached != null && cached != Lyrics.NOT_FOUND) {
-                    final Lyrics toPublish = cached;
+                    Lyrics toPublish = cached;
                     LyricsCache.put(track, provider.name(), toPublish);
                     Utils.runOnMainThread(() -> publish(id, toPublish));
                     return;
@@ -578,14 +575,14 @@ public final class LyricsManager {
         }
         variants.add(track);
         variants.addAll(CharactersConverter.variants(track));
-        final String[] splitArtists = MetadataCleaner.splitArtists(track.artist());
+        String[] splitArtists = MetadataCleaner.splitArtists(track.artist());
         for (String artist : splitArtists) {
             if (!artist.equals(track.artist())) {
                 variants.add(new TrackInfo(
                         track.title(), artist, track.album(), track.durationSeconds()));
             }
         }
-        final TrackInfo swapped = MetadataCleaner.swapTitleAndArtist(track, currentRawTitle);
+        TrackInfo swapped = MetadataCleaner.swapTitleAndArtist(track, currentRawTitle);
         if (swapped != null) {
             variants.add(swapped);
         }
@@ -593,7 +590,7 @@ public final class LyricsManager {
         result = fetchFromProviders(variants, failed, providers);
 
         if (isValidLyrics(result, track)) {
-            final Lyrics toPublish = result;
+            Lyrics toPublish = result;
             LyricsCache.put(track, result.providerName(), toPublish);
             if (innertubeTrack != null && !innertubeTrack.equals(track)) {
                 LyricsCache.put(innertubeTrack, result.providerName(), toPublish);
@@ -663,9 +660,9 @@ public final class LyricsManager {
 
     @Nullable
     private Lyrics fetchFromProviders(TrackInfo track, boolean[] failed, List<LyricsProvider> providers) {
-        final CompletionService<Lyrics> cs = new ExecutorCompletionService<>(executor);
-        final List<Future<Lyrics>> futures = new ArrayList<>(providers.size());
-        final AtomicBoolean threadFailed = new AtomicBoolean(false);
+        CompletionService<Lyrics> cs = new ExecutorCompletionService<>(executor);
+        List<Future<Lyrics>> futures = new ArrayList<>(providers.size());
+        AtomicBoolean threadFailed = new AtomicBoolean(false);
 
         for (LyricsProvider provider : providers) {
             futures.add(cs.submit(() -> {
@@ -703,7 +700,7 @@ public final class LyricsManager {
 
             completed++;
             try {
-                final Lyrics fetched = f.get();
+                Lyrics fetched = f.get();
                 if (!isValidLyrics(fetched, track)) {
                     continue;
                 }
@@ -744,9 +741,9 @@ public final class LyricsManager {
     private Lyrics fetchFromProviders(List<TrackInfo> variants,
                                       boolean[] failed,
                                       List<LyricsProvider> providers) {
-        final CompletionService<Lyrics> cs = new ExecutorCompletionService<>(executor);
-        final List<Future<Lyrics>> futures = new ArrayList<>(variants.size() * providers.size());
-        final AtomicBoolean threadFailed = new AtomicBoolean(false);
+        CompletionService<Lyrics> cs = new ExecutorCompletionService<>(executor);
+        List<Future<Lyrics>> futures = new ArrayList<>(variants.size() * providers.size());
+        AtomicBoolean threadFailed = new AtomicBoolean(false);
 
         for (TrackInfo track : variants) {
             for (LyricsProvider provider : providers) {
@@ -786,7 +783,7 @@ public final class LyricsManager {
 
             completed++;
             try {
-                final Lyrics fetched = f.get();
+                Lyrics fetched = f.get();
                 if (!isValidLyrics(fetched, null)) {
                     continue;
                 }
@@ -1234,7 +1231,7 @@ public final class LyricsManager {
         if (index < 0) {
             return "";
         }
-        final String text = currentLyrics.lines().get(index).text();
+        String text = currentLyrics.lines().get(index).text();
         return text == null ? "" : text;
     }
 

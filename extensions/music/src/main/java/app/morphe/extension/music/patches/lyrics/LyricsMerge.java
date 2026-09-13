@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -71,7 +71,7 @@ public final class LyricsMerge {
         if (lines == null || !hasText(lines)) {
             return null;
         }
-        final Map<String, List<LyricsLine>> map = new HashMap<>();
+        Map<String, List<LyricsLine>> map = new HashMap<>();
         map.put(lang, lines);
         return map;
     }

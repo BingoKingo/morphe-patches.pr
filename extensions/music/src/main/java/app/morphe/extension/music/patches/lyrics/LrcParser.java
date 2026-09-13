@@ -121,8 +121,8 @@ public final class LrcParser {
             }
 
             final long lineStartMs = Math.max(0, timestamps.get(0) + fileOffsetMs);
-            final BodyParse body = parseBody(line.substring(index), lineStartMs);
-            final String text = body.text.trim();
+            BodyParse body = parseBody(line.substring(index), lineStartMs);
+            String text = body.text.trim();
             if (!body.words.isEmpty()) {
                 for (long time : timestamps) {
                     lines.add(new LyricsLine(Math.max(0, time + fileOffsetMs), text, body.words));
@@ -158,11 +158,11 @@ public final class LrcParser {
             return new BodyParse(body, List.of());
         }
 
-        final List<Word> words = new ArrayList<>();
-        final StringBuilder full = new StringBuilder();
+        List<Word> words = new ArrayList<>();
+        StringBuilder full = new StringBuilder();
 
         long pendingStart = LyricsLine.NO_TIME;
-        final StringBuilder pending = new StringBuilder();
+        StringBuilder pending = new StringBuilder();
         String prefix = "";
         boolean hasToken = false;
 
@@ -186,7 +186,7 @@ public final class LrcParser {
                         prefix = pending.toString();
                         pendingStart = time;
                     } else {
-                        final String word = pending.toString();
+                        String word = pending.toString();
                         if (!word.trim().isEmpty()) {
                             words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
                         }
@@ -213,7 +213,7 @@ public final class LrcParser {
         }
 
         if (pendingStart != LyricsLine.NO_TIME) {
-            final String word = pending.toString();
+            String word = pending.toString();
             if (!word.trim().isEmpty()) {
                 words.add(new Word(pendingStart, LyricsLine.NO_TIME, word));
             }
@@ -329,7 +329,7 @@ public final class LrcParser {
      *
      * @return Time in milliseconds, or {@link LyricsLine#NO_TIME} if the tag is not a timestamp.
      */
-    private static long parseTimestamp( String tag) {
+    private static long parseTimestamp(String tag) {
         try {
             int colon = tag.indexOf(':');
             if (colon <= 0) {

@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -60,7 +60,7 @@ public final class LyricallyAppleMusicProvider implements LyricsProvider {
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
             final JSONArray results = root.optJSONArray("results");
             if (results == null || results.length() == 0) {
                 return null;
@@ -71,7 +71,7 @@ public final class LyricallyAppleMusicProvider implements LyricsProvider {
             String bestId = null;
 
             for (int i = 0; i < results.length(); i++) {
-                final JSONObject item = results.optJSONObject(i);
+                JSONObject item = results.optJSONObject(i);
                 if (item == null) {
                     continue;
                 }
@@ -112,7 +112,7 @@ public final class LyricallyAppleMusicProvider implements LyricsProvider {
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
             if (root == null) {
                 return null;
             }

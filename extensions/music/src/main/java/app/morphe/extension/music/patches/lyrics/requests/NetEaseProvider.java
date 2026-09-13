@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -312,7 +312,7 @@ public final class NetEaseProvider implements LyricsProvider {
         String form = "s=" + LyricsRequests.encode(keyword) + "&type=1&offset=0&limit=30";
         HttpURLConnection connection = LyricsRequests.postForm(
                 "https://music.163.com/api/cloudsearch/pc", form);
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure("NetEase", connection);
             return new ArrayList<>();
         }

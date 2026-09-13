@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -24,12 +24,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-import app.morphe.extension.music.settings.Settings;
-
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
+import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.shared.requests.Requester;
 
 public final class MusixmatchProvider implements LyricsProvider {
@@ -129,7 +128,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject root = Requester.parseJSONObject(connection);
             final int status = headerStatus(root);
             final String hint = headerHint(root);
             if (status == 401) {
@@ -141,13 +140,13 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject body = obj(obj(root, "message"), "body");
+            JSONObject body = obj(obj(root, "message"), "body");
             if (body != null) {
                 final String t = body.optString("user_token", null);
                 if (isUsableToken(t)) {
                     cachedToken = t;
                 }
-                final JSONObject appConfig = body.optJSONObject("app_config");
+                JSONObject appConfig = body.optJSONObject("app_config");
                 if (appConfig != null) {
                     final JSONArray langs = appConfig.optJSONArray("languages");
                     if (langs != null && langs.length() > 0) {
@@ -177,10 +176,10 @@ public final class MusixmatchProvider implements LyricsProvider {
                 if (httpCode != 200) {
                     return;
                 }
-                final JSONObject root = Requester.parseJSONObject(connection);
-                final JSONObject body = obj(obj(root, "message"), "body");
+                JSONObject root = Requester.parseJSONObject(connection);
+                JSONObject body = obj(obj(root, "message"), "body");
                 if (body == null) return;
-                final JSONObject appConfig = body.optJSONObject("app_config");
+                JSONObject appConfig = body.optJSONObject("app_config");
                 if (appConfig == null) return;
                 final JSONArray langs = appConfig.optJSONArray("languages");
                 if (langs == null || langs.length() == 0) return;
@@ -236,7 +235,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return java.util.Collections.emptyList();
             }
 
-            final JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject root = Requester.parseJSONObject(connection);
             final int status = headerStatus(root);
             final String hint = headerHint(root);
             if (status == 401) {
@@ -251,7 +250,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return java.util.Collections.emptyList();
             }
 
-            final JSONObject body = obj(obj(root, "message"), "body");
+            JSONObject body = obj(obj(root, "message"), "body");
             final JSONArray trackList = body != null ? body.optJSONArray("track_list") : null;
             if (trackList == null || trackList.length() == 0) {
                 return java.util.Collections.emptyList();
@@ -259,8 +258,8 @@ public final class MusixmatchProvider implements LyricsProvider {
 
             final List<Integer> result = new ArrayList<>();
             for (int i = 0; i < trackList.length(); i++) {
-                final JSONObject item = trackList.optJSONObject(i);
-                final JSONObject trackObj = item != null ? item.optJSONObject("track") : null;
+                JSONObject item = trackList.optJSONObject(i);
+                JSONObject trackObj = item != null ? item.optJSONObject("track") : null;
                 if (trackObj != null) {
                     final int id = trackObj.optInt("track_id", -1);
                     if (id > 0) {
@@ -294,7 +293,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject root = Requester.parseJSONObject(connection);
             final int status = headerStatus(root);
             final String hint = headerHint(root);
             if (status == 401) {
@@ -309,12 +308,12 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject body = obj(obj(root, "message"), "body");
-            final JSONObject subtitle = body != null ? body.optJSONObject("subtitle") : null;
+            JSONObject body = obj(obj(root, "message"), "body");
+            JSONObject subtitle = body != null ? body.optJSONObject("subtitle") : null;
             if (subtitle == null) {
                 return null;
             }
-            final JSONObject translated = subtitle.optJSONObject("subtitle_translated");
+            JSONObject translated = subtitle.optJSONObject("subtitle_translated");
             if (translated == null) {
                 return null;
             }
@@ -383,7 +382,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject root = Requester.parseJSONObject(connection);
             final int status = headerStatus(root);
             final String hint = headerHint(root);
             if (status == 401) {
@@ -398,9 +397,9 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return null;
             }
 
-            final JSONObject message = obj(root, "message");
-            final JSONObject messageBody = obj(message, "body");
-            final JSONObject macroCalls = messageBody != null
+            JSONObject message = obj(root, "message");
+            JSONObject messageBody = obj(message, "body");
+            JSONObject macroCalls = messageBody != null
                     ? messageBody.optJSONObject("macro_calls") : null;
             if (macroCalls == null) {
                 return null;
@@ -409,11 +408,11 @@ public final class MusixmatchProvider implements LyricsProvider {
             final String copyright = extractCopyright(macroCalls);
             final String sourceUrl = extractBacklinkUrl(macroCalls);
 
-            final JSONObject richMsg = obj(obj(macroCalls, "track.richsync.get"), "message");
-            final JSONObject richHeader = obj(richMsg, "header");
+            JSONObject richMsg = obj(obj(macroCalls, "track.richsync.get"), "message");
+            JSONObject richHeader = obj(richMsg, "header");
             final int richStatus = richHeader != null ? richHeader.optInt("status_code", 0) : 0;
             if (richHeader != null && richStatus == 200) {
-                final JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
+                JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
                 if (richBody != null) {
                     final String richBodyStr = richBody.optString("richsync_body", null);
                     if (richBodyStr != null && !richBodyStr.isEmpty()) {
@@ -422,16 +421,16 @@ public final class MusixmatchProvider implements LyricsProvider {
                 }
             }
 
-            final JSONObject subMsg = obj(obj(macroCalls, "track.subtitles.get"), "message");
-            final JSONObject subHeader = obj(subMsg, "header");
+            JSONObject subMsg = obj(obj(macroCalls, "track.subtitles.get"), "message");
+            JSONObject subHeader = obj(subMsg, "header");
             final int subStatus = subHeader != null ? subHeader.optInt("status_code", 0) : 0;
             if (subHeader != null && subStatus == 200) {
-                final JSONObject subBody = obj(subMsg, "body");
+                JSONObject subBody = obj(subMsg, "body");
                 final JSONArray subList = subBody != null
                         ? subBody.optJSONArray("subtitle_list") : null;
                 if (subList != null && subList.length() > 0) {
-                    final JSONObject subItem = subList.optJSONObject(0);
-                    final JSONObject subtitle = subItem != null
+                    JSONObject subItem = subList.optJSONObject(0);
+                    JSONObject subtitle = subItem != null
                             ? subItem.optJSONObject("subtitle") : null;
                     if (subtitle != null) {
                         final String subtitleBody = subtitle.optString("subtitle_body", null);
@@ -442,11 +441,11 @@ public final class MusixmatchProvider implements LyricsProvider {
                 }
             }
 
-            final JSONObject lyricsMsg = obj(obj(macroCalls, "track.lyrics.get"), "message");
-            final JSONObject lyricsHeader = obj(lyricsMsg, "header");
+            JSONObject lyricsMsg = obj(obj(macroCalls, "track.lyrics.get"), "message");
+            JSONObject lyricsHeader = obj(lyricsMsg, "header");
             final int lyricsStatus = lyricsHeader != null ? lyricsHeader.optInt("status_code", 0) : 0;
             if (lyricsHeader != null && lyricsStatus == 200) {
-                final JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
+                JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
                 if (lyricsBody != null) {
                     final String lyricsText = lyricsBody.optString("lyrics_body", null);
                     if (lyricsText != null && !lyricsText.isEmpty()) {
@@ -463,20 +462,20 @@ public final class MusixmatchProvider implements LyricsProvider {
 
     @Nullable
     private static String extractCopyright(JSONObject macro) {
-        final JSONObject lyricsMsg = obj(obj(macro, "track.lyrics.get"), "message");
-        final JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
+        JSONObject lyricsMsg = obj(obj(macro, "track.lyrics.get"), "message");
+        JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
         if (lyricsBody != null) {
             final String c = lyricsBody.optString("lyrics_copyright", null);
             if (c != null && !c.trim().isEmpty()) {
                 return c.trim();
             }
         }
-        final JSONObject subMsg = obj(obj(macro, "track.subtitles.get"), "message");
-        final JSONObject subBody = obj(subMsg, "body");
+        JSONObject subMsg = obj(obj(macro, "track.subtitles.get"), "message");
+        JSONObject subBody = obj(subMsg, "body");
         final JSONArray subList = subBody != null ? subBody.optJSONArray("subtitle_list") : null;
         if (subList != null && subList.length() > 0) {
-            final JSONObject subItem = subList.optJSONObject(0);
-            final JSONObject subtitle = subItem != null ? subItem.optJSONObject("subtitle") : null;
+            JSONObject subItem = subList.optJSONObject(0);
+            JSONObject subtitle = subItem != null ? subItem.optJSONObject("subtitle") : null;
             if (subtitle != null) {
                 final String c = subtitle.optString("lyrics_copyright", null);
                 if (c != null && !c.trim().isEmpty()) {
@@ -484,8 +483,8 @@ public final class MusixmatchProvider implements LyricsProvider {
                 }
             }
         }
-        final JSONObject richMsg = obj(obj(macro, "track.richsync.get"), "message");
-        final JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
+        JSONObject richMsg = obj(obj(macro, "track.richsync.get"), "message");
+        JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
         if (richBody != null) {
             final String c = richBody.optString("lyrics_copyright", null);
             if (c != null && !c.trim().isEmpty()) {
@@ -497,8 +496,8 @@ public final class MusixmatchProvider implements LyricsProvider {
 
     @Nullable
     private static String extractBacklinkUrl(JSONObject macro) {
-        final JSONObject lyricsMsg = obj(obj(macro, "track.lyrics.get"), "message");
-        final JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
+        JSONObject lyricsMsg = obj(obj(macro, "track.lyrics.get"), "message");
+        JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
         if (lyricsBody != null) {
             final String url = lyricsBody.optString("backlink_url", null);
             if (url != null && !url.isEmpty()) {
@@ -547,7 +546,7 @@ public final class MusixmatchProvider implements LyricsProvider {
         }
         final List<LyricsLine> result = new ArrayList<>();
         for (int i = 0; i < lines.length(); i++) {
-            final JSONObject line = lines.optJSONObject(i);
+            JSONObject line = lines.optJSONObject(i);
             if (line == null) {
                 continue;
             }
@@ -562,7 +561,7 @@ public final class MusixmatchProvider implements LyricsProvider {
             if (lArr != null && lArr.length() > 0) {
                 words = new ArrayList<>();
                 for (int j = 0; j < lArr.length(); j++) {
-                    final JSONObject w = lArr.optJSONObject(j);
+                    JSONObject w = lArr.optJSONObject(j);
                     if (w == null) {
                         continue;
                     }
@@ -576,7 +575,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                     long we;
                     final int nextIdx = j + 1;
                     if (nextIdx < lArr.length()) {
-                        final JSONObject nextW = lArr.optJSONObject(nextIdx);
+                        JSONObject nextW = lArr.optJSONObject(nextIdx);
                         if (nextW != null) {
                             final double nextOffset = nextW.optDouble("o", offset);
                             final long nextWs = (long) ((lineTs + nextOffset) * 1000);
@@ -627,11 +626,11 @@ public final class MusixmatchProvider implements LyricsProvider {
         }
         final List<LyricsLine> result = new ArrayList<>();
         for (int i = 0; i < lines.length(); i++) {
-            final JSONObject line = lines.optJSONObject(i);
+            JSONObject line = lines.optJSONObject(i);
             if (line == null) {
                 continue;
             }
-            final JSONObject time = line.optJSONObject("time");
+            JSONObject time = line.optJSONObject("time");
             final double total = time != null ? time.optDouble("total", 0) : 0;
             final long startMs = (long) (total * 1000);
             String text = line.optString("text", "♪");
@@ -679,13 +678,13 @@ public final class MusixmatchProvider implements LyricsProvider {
     }
 
     private static int headerStatus(JSONObject root) {
-        final JSONObject header = obj(obj(root, "message"), "header");
+        JSONObject header = obj(obj(root, "message"), "header");
         return header == null ? 200 : header.optInt("status_code", 200);
     }
 
     @Nullable
     private static String headerHint(JSONObject root) {
-        final JSONObject header = obj(obj(root, "message"), "header");
+        JSONObject header = obj(obj(root, "message"), "header");
         return header != null ? header.optString("hint", null) : null;
     }
 
@@ -720,7 +719,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 connection.disconnect();
                 return false;
             }
-            final JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject root = Requester.parseJSONObject(connection);
             final int status = headerStatus(root);
             final String hint = headerHint(root);
             connection.disconnect();

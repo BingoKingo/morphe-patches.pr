@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -61,17 +61,17 @@ public final class MiniPlayerLyrics {
         if (original == null) {
             return;
         }
-        final String title = original.getString(MediaMetadata.METADATA_KEY_TITLE);
-        final String artist = original.getString(MediaMetadata.METADATA_KEY_ARTIST);
+        String title = original.getString(MediaMetadata.METADATA_KEY_TITLE);
+        String artist = original.getString(MediaMetadata.METADATA_KEY_ARTIST);
         if (title == null || title.isBlank() || artist == null || artist.isBlank()) {
             return;
         }
-        final String[] parsed = MetadataCleaner.parseTitleAndArtist(title);
+        String[] parsed = MetadataCleaner.parseTitleAndArtist(title);
         displayTitle = parsed != null ? parsed[1] : MetadataCleaner.cleanTitle(title);
         displayArtist = parsed != null ? parsed[0] : MetadataCleaner.cleanArtist(artist);
 
         android.net.Uri mediaUri = null;
-        final String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
+        String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
         if (uriString != null) {
             mediaUri = android.net.Uri.parse(uriString);
         }
@@ -105,7 +105,7 @@ public final class MiniPlayerLyrics {
         titleRef = new WeakReference<>(title);
         subtitleRef = new WeakReference<>(subtitle);
 
-        final TrackInfo current = LyricsManager.getInstance().getCurrentTrack();
+        TrackInfo current = LyricsManager.getInstance().getCurrentTrack();
         if (current != null) {
             displayTitle = current.title();
             displayArtist = current.artist();
@@ -128,16 +128,16 @@ public final class MiniPlayerLyrics {
             return;
         }
 
-        final TextView title = titleRef != null ? titleRef.get() : null;
-        final TextView subtitle = subtitleRef != null ? subtitleRef.get() : null;
+        TextView title = titleRef != null ? titleRef.get() : null;
+        TextView subtitle = subtitleRef != null ? subtitleRef.get() : null;
         if (title == null || subtitle == null) {
             ticker.stop();
             LyricsManager.getInstance().removeListener(lyricsListener);
             return;
         }
 
-        final LyricsManager manager = LyricsManager.getInstance();
-        final TrackInfo track = manager.getCurrentTrack();
+        LyricsManager manager = LyricsManager.getInstance();
+        TrackInfo track = manager.getCurrentTrack();
         if (track == null) {
             ticker.schedule();
             return;
@@ -148,28 +148,28 @@ public final class MiniPlayerLyrics {
                 && Objects.equals(track.artist(), displayArtist);
 
         if (synced) {
-            final String line = manager.getCurrentLineText();
-            final String newTitle = (line == null || line.isEmpty()) ? track.title() : line;
-            final String actualTitle = title.getText() != null ? title.getText().toString() : null;
+            String line = manager.getCurrentLineText();
+            String newTitle = (line == null || line.isEmpty()) ? track.title() : line;
+            String actualTitle = title.getText() != null ? title.getText().toString() : null;
             if (!newTitle.equals(actualTitle)) {
                 title.setText(newTitle);
             }
-            final String newSubtitle;
+            String newSubtitle;
             if (Settings.LYRICS_DISPLAY_ARTIST_FIRST.get()) {
                 newSubtitle = track.artist() + " - " + track.title();
             } else {
                 newSubtitle = track.title() + " - " + track.artist();
             }
-            final String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
+            String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
             if (!newSubtitle.equals(actualSubtitle)) {
                 subtitle.setText(newSubtitle);
             }
         } else {
-            final String actualTitle = title.getText() != null ? title.getText().toString() : null;
+            String actualTitle = title.getText() != null ? title.getText().toString() : null;
             if (!track.title().equals(actualTitle)) {
                 title.setText(track.title());
             }
-            final String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
+            String actualSubtitle = subtitle.getText() != null ? subtitle.getText().toString() : null;
             if (!track.artist().equals(actualSubtitle)) {
                 subtitle.setText(track.artist());
             }

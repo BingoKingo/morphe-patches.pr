@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -20,7 +20,6 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -211,7 +210,7 @@ public final class QQProvider implements LyricsProvider {
         payload.put("req_0", req0);
 
         HttpURLConnection connection = LyricsRequests.postJson(MUSICU_URL, payload.toString());
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure("QQ", connection);
             return new ArrayList<>();
         }
@@ -318,7 +317,7 @@ public final class QQProvider implements LyricsProvider {
         payload.put("req_0", req0);
 
         HttpURLConnection connection = LyricsRequests.postJson(MUSICU_URL, payload.toString());
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure("QQ", connection);
             return null;
         }

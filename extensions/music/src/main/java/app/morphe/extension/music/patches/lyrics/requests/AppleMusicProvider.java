@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -64,7 +64,7 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
-        final String userToken = Settings.APPLE_MUSIC_TOKEN.get();
+        String userToken = Settings.APPLE_MUSIC_TOKEN.get();
         if (userToken.isEmpty()) {
             return null;
         }
@@ -85,10 +85,10 @@ public final class AppleMusicProvider implements LyricsProvider {
             }
         }
 
-        final String storefront = cachedStorefront != null ? cachedStorefront : "us";
-        final String language = cachedLanguage != null ? cachedLanguage : "en-US";
+        String storefront = cachedStorefront != null ? cachedStorefront : "us";
+        String language = cachedLanguage != null ? cachedLanguage : "en-US";
 
-        final String songId = searchSong(track, userToken, storefront);
+        String songId = searchSong(track, userToken, storefront);
         if (songId == null) {
             return null;
         }
@@ -98,7 +98,7 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Override
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
-        final String userToken = Settings.APPLE_MUSIC_TOKEN.get();
+        String userToken = Settings.APPLE_MUSIC_TOKEN.get();
         if (userToken.isEmpty()) {
             return new ArrayList<>();
         }
@@ -119,10 +119,10 @@ public final class AppleMusicProvider implements LyricsProvider {
             }
         }
 
-        final String storefront = cachedStorefront != null ? cachedStorefront : "us";
-        final String language = cachedLanguage != null ? cachedLanguage : "en-US";
+        String storefront = cachedStorefront != null ? cachedStorefront : "us";
+        String language = cachedLanguage != null ? cachedLanguage : "en-US";
 
-        final List<String> songIds = searchAllSongs(track, userToken, storefront);
+        List<String> songIds = searchAllSongs(track, userToken, storefront);
         if (songIds.isEmpty()) {
             return new ArrayList<>();
         }
@@ -146,33 +146,33 @@ public final class AppleMusicProvider implements LyricsProvider {
     private List<String> searchAllSongs(TrackInfo track, String userToken, String storefront) {
         HttpURLConnection connection = null;
         try {
-            final String term = LyricsRequests.encode(track.title() + " " + track.artist());
-            final String url = API_BASE + storefront + "/search?term=" + term
+            String term = LyricsRequests.encode(track.title() + " " + track.artist());
+            String url = API_BASE + storefront + "/search?term=" + term
                     + "&types=songs&limit=5";
             connection = openApi(url, userToken);
             final int code = connection.getResponseCode();
             if (code != 200) {
                 return new ArrayList<>();
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONObject results = root.optJSONObject("results");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONObject results = root.optJSONObject("results");
             if (results == null) {
                 return new ArrayList<>();
             }
-            final JSONObject songs = results.optJSONObject("songs");
+            JSONObject songs = results.optJSONObject("songs");
             if (songs == null) {
                 return new ArrayList<>();
             }
-            final JSONArray items = songs.optJSONArray("data");
+            JSONArray items = songs.optJSONArray("data");
             if (items == null || items.length() == 0) {
                 return new ArrayList<>();
             }
 
             List<String> ids = new ArrayList<>();
             for (int i = 0; i < items.length(); i++) {
-                final JSONObject item = items.optJSONObject(i);
+                JSONObject item = items.optJSONObject(i);
                 if (item != null) {
-                    final String id = item.optString("id", null);
+                    String id = item.optString("id", null);
                     if (id != null) {
                         ids.add(id);
                     }
@@ -205,8 +205,8 @@ public final class AppleMusicProvider implements LyricsProvider {
             if (code != 200) {
                 return false;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONArray data = root.optJSONArray("data");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONArray data = root.optJSONArray("data");
             return data != null && data.length() > 0;
         } catch (Exception ex) {
             return false;
@@ -220,20 +220,20 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     private static String fetchDevToken() {
         try {
-            final HttpURLConnection browseConn = LyricsRequests.openConnection(BROWSE_URL);
+            HttpURLConnection browseConn = LyricsRequests.openConnection(BROWSE_URL);
             browseConn.setRequestProperty("User-Agent", BROWSER_USER_AGENT);
             final int browseCode = browseConn.getResponseCode();
             if (browseCode != 200) {
                 return null;
             }
-            final String html = LyricsRequests.parseGzipString(browseConn);
+            String html = LyricsRequests.parseGzipString(browseConn);
 
-            final Matcher jsMatcher = JS_BUNDLE.matcher(html);
+            Matcher jsMatcher = JS_BUNDLE.matcher(html);
             if (jsMatcher.find()) {
-                final String jsPath = jsMatcher.group(0);
-                final String js = fetchJsBundle(BROWSE_URL + jsPath);
+                String jsPath = jsMatcher.group(0);
+                String js = fetchJsBundle(BROWSE_URL + jsPath);
                 if (js != null) {
-                    final String token = extractJwt(js);
+                    String token = extractJwt(js);
                     if (token != null) {
                         return token;
                     }
@@ -249,7 +249,7 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     private static String fetchJsBundle(String jsUrl) {
         try {
-            final HttpURLConnection jsConn = LyricsRequests.openConnection(jsUrl);
+            HttpURLConnection jsConn = LyricsRequests.openConnection(jsUrl);
             jsConn.setRequestProperty("User-Agent", BROWSER_USER_AGENT);
             return LyricsRequests.parseGzipString(jsConn);
         } catch (IOException ex) {
@@ -262,7 +262,7 @@ public final class AppleMusicProvider implements LyricsProvider {
         if (text == null) {
             return null;
         }
-        final Matcher m = JWT.matcher(text);
+        Matcher m = JWT.matcher(text);
         return m.find() ? m.group(0) : null;
     }
 
@@ -272,15 +272,15 @@ public final class AppleMusicProvider implements LyricsProvider {
             connection = openApi("https://amp-api.music.apple.com/v1/me/storefront", userToken);
             final int code = connection.getResponseCode();
             if (code == 200) {
-                final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-                final JSONArray data = root.optJSONArray("data");
+                JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+                JSONArray data = root.optJSONArray("data");
                 if (data != null && data.length() > 0) {
-                    final JSONObject storefront = data.optJSONObject(0);
+                    JSONObject storefront = data.optJSONObject(0);
                     if (storefront != null) {
                         cachedStorefront = LyricsRequests.optString(storefront, "id");
-                        final JSONObject attributes = storefront.optJSONObject("attributes");
+                        JSONObject attributes = storefront.optJSONObject("attributes");
                         if (attributes != null) {
-                            final String lang = LyricsRequests.optString(attributes, "defaultLanguageTag");
+                            String lang = LyricsRequests.optString(attributes, "defaultLanguageTag");
                             if (lang != null) {
                                 cachedLanguage = lang;
                             }
@@ -296,15 +296,15 @@ public final class AppleMusicProvider implements LyricsProvider {
         }
 
         if (cachedStorefront == null) {
-            final Locale sysLocale = Locale.getDefault();
-            final String country = sysLocale.getCountry();
+            Locale sysLocale = Locale.getDefault();
+            String country = sysLocale.getCountry();
             if (country != null && !country.isEmpty()) {
                 cachedStorefront = country.toLowerCase(Locale.ROOT);
             } else {
                 cachedStorefront = "us";
             }
             if (cachedLanguage == null) {
-                final String lang = sysLocale.getLanguage();
+                String lang = sysLocale.getLanguage();
                 if (lang != null && !lang.isEmpty()) {
                     cachedLanguage = lang;
                 }
@@ -313,29 +313,29 @@ public final class AppleMusicProvider implements LyricsProvider {
 
         fetchAllSupportedLanguages(userToken);
 
-        final Locale deviceLocale = Locale.getDefault();
+        Locale deviceLocale = Locale.getDefault();
         cachedTranslationParam = matchSupportedLanguage(deviceLocale);
     }
 
     private void fetchAllSupportedLanguages(String userToken) {
-        final java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>();
+        java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>();
         HttpURLConnection connection = null;
         try {
             connection = openApi("https://amp-api.music.apple.com/v1/storefronts", userToken);
             final int code = connection.getResponseCode();
             if (code == 200) {
-                final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-                final JSONArray data = root.optJSONArray("data");
+                JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+                JSONArray data = root.optJSONArray("data");
                 if (data != null) {
                     for (int i = 0; i < data.length(); i++) {
-                        final JSONObject sf = data.optJSONObject(i);
+                        JSONObject sf = data.optJSONObject(i);
                         if (sf == null) continue;
-                        final JSONObject attrs = sf.optJSONObject("attributes");
+                        JSONObject attrs = sf.optJSONObject("attributes");
                         if (attrs == null) continue;
-                        final JSONArray tags = attrs.optJSONArray("supportedLanguageTags");
+                        JSONArray tags = attrs.optJSONArray("supportedLanguageTags");
                         if (tags == null) continue;
                         for (int j = 0; j < tags.length(); j++) {
-                            final String tag = tags.optString(j, null);
+                            String tag = tags.optString(j, null);
                             if (tag != null && !tag.isEmpty()) {
                                 merged.add(tag);
                             }
@@ -359,14 +359,14 @@ public final class AppleMusicProvider implements LyricsProvider {
         if (locale == null || cachedSupportedLanguages == null) {
             return null;
         }
-        final String lang = locale.getLanguage();
-        final String country = locale.getCountry();
+        String lang = locale.getLanguage();
+        String country = locale.getCountry();
         if (lang == null || lang.isEmpty()) {
             return null;
         }
-        final String prefix = lang + "-";
+        String prefix = lang + "-";
         String languageMatch = null;
-        for (final String tag : cachedSupportedLanguages) {
+        for (String tag : cachedSupportedLanguages) {
             if (tag.startsWith(prefix) || tag.equals(lang)) {
                 if (country != null && !country.isEmpty() && tag.contains(country)) {
                     return tag;
@@ -383,43 +383,43 @@ public final class AppleMusicProvider implements LyricsProvider {
     private String searchSong(TrackInfo track, String userToken, String storefront) {
         HttpURLConnection connection = null;
         try {
-            final String term = LyricsRequests.encode(track.title() + " " + track.artist());
-            final String url = API_BASE + storefront + "/search?term=" + term
+            String term = LyricsRequests.encode(track.title() + " " + track.artist());
+            String url = API_BASE + storefront + "/search?term=" + term
                     + "&types=songs&limit=5";
             connection = openApi(url, userToken);
             final int code = connection.getResponseCode();
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONObject results = root.optJSONObject("results");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONObject results = root.optJSONObject("results");
             if (results == null) {
                 return null;
             }
-            final JSONObject songs = results.optJSONObject("songs");
+            JSONObject songs = results.optJSONObject("songs");
             if (songs == null) {
                 return null;
             }
-            final JSONArray items = songs.optJSONArray("data");
+            JSONArray items = songs.optJSONArray("data");
             if (items == null || items.length() == 0) {
                 return null;
             }
 
-            final String title = track.title().toLowerCase().trim();
-            final String artist = track.artist().toLowerCase().trim();
+            String title = track.title().toLowerCase().trim();
+            String artist = track.artist().toLowerCase().trim();
             String bestId = null;
             for (int i = 0; i < items.length(); i++) {
-                final JSONObject item = items.optJSONObject(i);
+                JSONObject item = items.optJSONObject(i);
                 if (item == null) {
                     continue;
                 }
-                final JSONObject attributes = item.optJSONObject("attributes");
+                JSONObject attributes = item.optJSONObject("attributes");
                 if (attributes == null) {
                     continue;
                 }
-                final String itemTitle = attributes.optString("name", "");
-                final String itemArtist = attributes.optString("artistName", "");
-                final String itemId = item.optString("id", null);
+                String itemTitle = attributes.optString("name", "");
+                String itemArtist = attributes.optString("artistName", "");
+                String itemId = item.optString("id", null);
                 if (bestId == null) {
                     bestId = itemId;
                 }
@@ -440,18 +440,18 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics fetchLyrics(String userToken, String storefront, String language, String songId) {
-        final String sourceUrl = "https://music.apple.com/song/" + songId;
+        String sourceUrl = "https://music.apple.com/song/" + songId;
 
-        final Lyrics syllableResult = fetchLyricsSyllable(userToken, storefront, language, songId, sourceUrl);
+        Lyrics syllableResult = fetchLyricsSyllable(userToken, storefront, language, songId, sourceUrl);
         final int syllableRank = rankOfLyrics(syllableResult);
 
-        final Lyrics dedicatedResult = fetchLyricsDedicated(userToken, storefront, language, songId, sourceUrl);
+        Lyrics dedicatedResult = fetchLyricsDedicated(userToken, storefront, language, songId, sourceUrl);
         final int dedicatedRank = rankOfLyrics(dedicatedResult);
 
-        final Lyrics includeResult = fetchLyricsInclude(userToken, storefront, language, songId, sourceUrl);
+        Lyrics includeResult = fetchLyricsInclude(userToken, storefront, language, songId, sourceUrl);
         final int includeRank = rankOfLyrics(includeResult);
 
-        final Lyrics best = syllableRank >= dedicatedRank && syllableRank >= includeRank
+        Lyrics best = syllableRank >= dedicatedRank && syllableRank >= includeRank
                 ? syllableResult
                 : dedicatedRank >= includeRank ? dedicatedResult : includeResult;
         return best;
@@ -480,9 +480,9 @@ public final class AppleMusicProvider implements LyricsProvider {
                                        String songId, String sourceUrl) {
         HttpURLConnection connection = null;
         try {
-            final String translationParam = cachedTranslationParam != null
+            String translationParam = cachedTranslationParam != null
                     ? cachedTranslationParam : language;
-            final String url = API_BASE + storefront + "/songs/" + songId
+            String url = API_BASE + storefront + "/songs/" + songId
                     + "/syllable-lyrics?l=" + LyricsRequests.encode(translationParam)
                     + "&extend=ttmlLocalizations";
             connection = openApi(url, userToken);
@@ -490,16 +490,16 @@ public final class AppleMusicProvider implements LyricsProvider {
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONArray data = root.optJSONArray("data");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONArray data = root.optJSONArray("data");
             if (data == null || data.length() == 0) {
                 return null;
             }
-            final JSONObject song = data.optJSONObject(0);
+            JSONObject song = data.optJSONObject(0);
             if (song == null) {
                 return null;
             }
-            final JSONObject attributes = song.optJSONObject("attributes");
+            JSONObject attributes = song.optJSONObject("attributes");
             if (attributes == null) {
                 return null;
             }
@@ -525,25 +525,25 @@ public final class AppleMusicProvider implements LyricsProvider {
                                          String songId, String sourceUrl) {
         HttpURLConnection connection = null;
         try {
-            final String translationParam = cachedTranslationParam != null
+            String translationParam = cachedTranslationParam != null
                     ? cachedTranslationParam : language;
-            final String url = API_BASE + storefront + "/songs/" + songId
+            String url = API_BASE + storefront + "/songs/" + songId
                     + "/lyrics?l=" + LyricsRequests.encode(translationParam) + "&extend=ttmlLocalizations";
             connection = openApi(url, userToken);
             final int code = connection.getResponseCode();
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONArray data = root.optJSONArray("data");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONArray data = root.optJSONArray("data");
             if (data == null || data.length() == 0) {
                 return null;
             }
-            final JSONObject song = data.optJSONObject(0);
+            JSONObject song = data.optJSONObject(0);
             if (song == null) {
                 return null;
             }
-            final JSONObject attributes = song.optJSONObject("attributes");
+            JSONObject attributes = song.optJSONObject("attributes");
             if (attributes == null) {
                 return null;
             }
@@ -569,36 +569,36 @@ public final class AppleMusicProvider implements LyricsProvider {
                                        String songId, String sourceUrl) {
         HttpURLConnection connection = null;
         try {
-            final String translationParam = cachedTranslationParam != null
+            String translationParam = cachedTranslationParam != null
                     ? cachedTranslationParam : language;
-            final String url = API_BASE + storefront + "/songs/" + songId
+            String url = API_BASE + storefront + "/songs/" + songId
                     + "?include[songs]=albums,lyrics,syllable-lyrics&l=" + LyricsRequests.encode(translationParam);
             connection = openApi(url, userToken);
             final int code = connection.getResponseCode();
             if (code != 200) {
                 return null;
             }
-            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-            final JSONArray data = root.optJSONArray("data");
+            JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            JSONArray data = root.optJSONArray("data");
             if (data == null || data.length() == 0) {
                 return null;
             }
-            final JSONObject song = data.optJSONObject(0);
+            JSONObject song = data.optJSONObject(0);
             if (song == null) {
                 return null;
             }
-            final JSONObject relationships = song.optJSONObject("relationships");
+            JSONObject relationships = song.optJSONObject("relationships");
             if (relationships == null) {
                 return null;
             }
             String ttml = null;
-            final JSONObject syllableLyrics = relationships.optJSONObject("syllable-lyrics");
+            JSONObject syllableLyrics = relationships.optJSONObject("syllable-lyrics");
             if (syllableLyrics != null) {
-                final JSONArray syllableData = syllableLyrics.optJSONArray("data");
+                JSONArray syllableData = syllableLyrics.optJSONArray("data");
                 if (syllableData != null && syllableData.length() > 0) {
-                    final JSONObject syllable = syllableData.optJSONObject(0);
+                    JSONObject syllable = syllableData.optJSONObject(0);
                     if (syllable != null) {
-                        final JSONObject syllableAttrs = syllable.optJSONObject("attributes");
+                        JSONObject syllableAttrs = syllable.optJSONObject("attributes");
                         if (syllableAttrs != null) {
                             ttml = LyricsRequests.optString(syllableAttrs, "ttmlLocalizations");
                             if (ttml == null || ttml.isEmpty()) {
@@ -609,13 +609,13 @@ public final class AppleMusicProvider implements LyricsProvider {
                 }
             }
             if (ttml == null || ttml.isEmpty()) {
-                final JSONObject lyrics = relationships.optJSONObject("lyrics");
+                JSONObject lyrics = relationships.optJSONObject("lyrics");
                 if (lyrics != null) {
-                    final JSONArray lyricsData = lyrics.optJSONArray("data");
+                    JSONArray lyricsData = lyrics.optJSONArray("data");
                     if (lyricsData != null && lyricsData.length() > 0) {
-                        final JSONObject lyric = lyricsData.optJSONObject(0);
+                        JSONObject lyric = lyricsData.optJSONObject(0);
                         if (lyric != null) {
-                            final JSONObject lyricAttrs = lyric.optJSONObject("attributes");
+                            JSONObject lyricAttrs = lyric.optJSONObject("attributes");
                             if (lyricAttrs != null) {
                                 ttml = LyricsRequests.optString(lyricAttrs, "ttmlLocalizations");
                                 if (ttml == null || ttml.isEmpty()) {
@@ -640,8 +640,8 @@ public final class AppleMusicProvider implements LyricsProvider {
     }
 
     private static HttpURLConnection openApi(String url, String userToken) throws IOException {
-        final HttpURLConnection connection = LyricsRequests.openConnection(url);
-        final String language = cachedLanguage != null ? cachedLanguage : "en-US";
+        HttpURLConnection connection = LyricsRequests.openConnection(url);
+        String language = cachedLanguage != null ? cachedLanguage : "en-US";
         connection.setRequestProperty("User-Agent", BROWSER_USER_AGENT);
         connection.setRequestProperty("Authorization", "Bearer " + cachedDevToken);
         connection.setRequestProperty("media-user-token", userToken);

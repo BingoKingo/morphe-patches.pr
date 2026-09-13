@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -13,10 +13,9 @@ import android.media.session.MediaSession;
 import androidx.annotation.Nullable;
 
 import java.lang.ref.WeakReference;
+import java.util.Objects;
 
 import app.morphe.extension.music.settings.Settings;
-
-import java.util.Objects;
 
 /**
  * Mirrors the currently sung lyric line into the MediaSession title so it shows on the
@@ -77,7 +76,7 @@ public final class LockScreenLyrics {
         }
 
         android.net.Uri mediaUri = null;
-        final String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
+        String uriString = original.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI);
         if (uriString != null) {
             mediaUri = android.net.Uri.parse(uriString);
         }
@@ -95,7 +94,7 @@ public final class LockScreenLyrics {
             return;
         }
 
-        final MediaSession session = sessionRef.get();
+        MediaSession session = sessionRef.get();
         if (session == null) {
             // The session was released; wait for the next metadata update.
             ticker.stop();
@@ -103,7 +102,7 @@ public final class LockScreenLyrics {
             return;
         }
 
-        final String newTitle = getCurrentLine();
+        String newTitle = getCurrentLine();
         if (!needsRepush && newTitle.equals(lastPushedTitle)) {
             ticker.schedule();
             return;
@@ -117,23 +116,23 @@ public final class LockScreenLyrics {
     }
 
     private static boolean lyricsMatch() {
-        final LyricsManager manager = LyricsManager.getInstance();
-        final TrackInfo track = manager.getCurrentTrack();
+        LyricsManager manager = LyricsManager.getInstance();
+        TrackInfo track = manager.getCurrentTrack();
         if (track == null) {
             return false;
         }
         // The manager stores cleaned metadata, while realTitle/realArtist are raw, so both
         // sides must be normalized before comparing.
-        final String cleanedTitle = MetadataCleaner.cleanTitle(realTitle);
-        final String cleanedArtist = MetadataCleaner.cleanArtist(realArtist);
+        String cleanedTitle = MetadataCleaner.cleanTitle(realTitle);
+        String cleanedArtist = MetadataCleaner.cleanArtist(realArtist);
         return Objects.equals(track.title(), cleanedTitle)
                 && Objects.equals(track.artist(), cleanedArtist)
                 && manager.areLyricsAvailable();
     }
 
     private static String getCurrentLine() {
-        final LyricsManager manager = LyricsManager.getInstance();
-        final String line = lyricsMatch() ? manager.getCurrentLineText() : null;
+        LyricsManager manager = LyricsManager.getInstance();
+        String line = lyricsMatch() ? manager.getCurrentLineText() : null;
         if (line == null || line.isEmpty()) {
             return realTitle == null ? "" : realTitle;
         }
@@ -141,13 +140,13 @@ public final class LockScreenLyrics {
     }
 
     private static MediaMetadata buildMetadata(MediaMetadata original, String title) {
-        final MediaMetadata.Builder builder = new MediaMetadata.Builder(original);
+        MediaMetadata.Builder builder = new MediaMetadata.Builder(original);
         if (title != null) {
             builder.putString(MediaMetadata.METADATA_KEY_TITLE, title);
         }
-        final String artist = realArtist == null ? "" : realArtist;
+        String artist = realArtist == null ? "" : realArtist;
         if (lyricsMatch() && realTitle != null && !realTitle.isEmpty()) {
-            final String display;
+            String display;
             if (Settings.LYRICS_DISPLAY_ARTIST_FIRST.get()) {
                 display = artist + " - " + realTitle;
             } else {

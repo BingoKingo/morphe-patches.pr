@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -92,8 +92,8 @@ public final class UnisonProvider implements LyricsProvider {
                 LyricsRequests.logFailure(name(), connection);
                 return null;
             }
-            final JSONObject root = Requester.parseJSONObject(connection);
-            final JSONObject data = root.optJSONObject("data");
+            JSONObject root = Requester.parseJSONObject(connection);
+            JSONObject data = root.optJSONObject("data");
             if (data == null) {
                 return null;
             }

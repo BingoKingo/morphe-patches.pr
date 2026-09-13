@@ -1,6 +1,7 @@
 /*
  * Copyright 2026 Morphe.
  * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -8,6 +9,8 @@
 package app.morphe.extension.music.patches.lyrics.requests;
 
 import androidx.annotation.Nullable;
+
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -24,11 +27,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.GZIPInputStream;
 
-import org.json.JSONObject;
-
+import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
-import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.shared.requests.Requester;
 
 /**

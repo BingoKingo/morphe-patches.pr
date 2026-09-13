@@ -1,6 +1,7 @@
 /*
  * Copyright 2026 Morphe.
  * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -14,10 +15,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
-
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 import app.morphe.extension.music.patches.lyrics.LrcParser;
@@ -72,7 +71,7 @@ public final class LrcLibProvider implements LyricsProvider {
         String url = BASE_URL + "search?track_name=" + LyricsRequests.encode(track.title())
                 + "&artist_name=" + LyricsRequests.encode(track.artist());
         HttpURLConnection connection = LyricsRequests.openConnection(url);
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             return results;
         }
 
@@ -132,7 +131,7 @@ public final class LrcLibProvider implements LyricsProvider {
                 + "&artist_name=" + LyricsRequests.encode(track.artist());
 
         HttpURLConnection connection = LyricsRequests.openConnection(url);
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure(name(), connection);
             return null;
         }

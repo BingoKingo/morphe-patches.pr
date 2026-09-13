@@ -36,30 +36,30 @@ public final class LyricsTranslator {
 
     @Nullable
     private static List<String> embeddedTranslation(Lyrics lyrics, String target, int lineCount) {
-        final Map<String, List<LyricsLine>> byLang = lyrics.translations();
+        Map<String, List<LyricsLine>> byLang = lyrics.translations();
         if (byLang == null || byLang.isEmpty()) {
             return null;
         }
-        final String targetLang = primarySubtag(target);
+        String targetLang = primarySubtag(target);
         for (Map.Entry<String, List<LyricsLine>> entry : byLang.entrySet()) {
             if (!primarySubtag(entry.getKey()).equals(targetLang)) {
                 continue;
             }
-            final List<LyricsLine> lines = entry.getValue();
+            List<LyricsLine> lines = entry.getValue();
             if (lines == null || lines.size() != lineCount || !LyricsMerge.hasText(lines)) {
                 continue;
             }
-            final List<String> out = new ArrayList<>(lines.size());
+            List<String> out = new ArrayList<>(lines.size());
             for (LyricsLine line : lines) {
-                final String text = line.text();
+                String text = line.text();
                 out.add(text == null ? "" : text);
             }
-            final List<LyricsLine> allLines = lyrics.lines();
+            List<LyricsLine> allLines = lyrics.lines();
             for (int i = 0; i < out.size() && i < allLines.size(); i++) {
                 if (allLines.get(i).isBG()) {
                     for (int j = i - 1; j >= 0; j--) {
                         if (!allLines.get(j).isBG() && j < out.size()) {
-                            final String parentTrans = out.get(j);
+                            String parentTrans = out.get(j);
                             if (parentTrans != null && !parentTrans.isEmpty()) {
                                 out.set(i, parentTrans);
                             }
@@ -89,9 +89,9 @@ public final class LyricsTranslator {
             lines.add(line.text());
         }
 
-        final String language = deviceLanguage();
+        String language = deviceLanguage();
 
-        final List<String> embedded = embeddedTranslation(lyrics, language, lines.size());
+        List<String> embedded = embeddedTranslation(lyrics, language, lines.size());
         if (embedded != null) {
             Utils.runOnMainThread(() -> callback.onTranslated(embedded, false));
             return;
@@ -106,7 +106,7 @@ public final class LyricsTranslator {
                 }
             }
 
-            final List<String> result = translated;
+            List<String> result = translated;
             Utils.runOnMainThread(() -> callback.onTranslated(result, result != null));
         });
     }

@@ -101,7 +101,7 @@ final class MetadataCleaner {
     }
 
     private static int indexOfFirstSeparator(String artist) {
-        final String[] separators = {" & ", ", ", " x ", " X ", " feat. ", " ft. ", " с ", " 和 "};
+        String[] separators = {" & ", ", ", " x ", " X ", " feat. ", " ft. ", " с ", " 和 "};
         int result = -1;
         for (String separator : separators) {
             int index = artist.indexOf(separator);

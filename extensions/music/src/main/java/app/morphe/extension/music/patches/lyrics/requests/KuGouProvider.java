@@ -1,6 +1,7 @@
 /*
  * Copyright 2026 Morphe.
  * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -19,13 +20,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-
 import java.net.HttpURLConnection;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -87,7 +85,7 @@ public final class KuGouProvider implements LyricsProvider {
 
         String searchUrl = SEARCH_URL + LyricsRequests.encode(hash);
         HttpURLConnection searchConnection = LyricsRequests.openConnection(searchUrl);
-        if (searchConnection.getResponseCode() != 200) {
+        if (searchConnection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure(name(), searchConnection);
             return null;
         }
@@ -111,7 +109,7 @@ public final class KuGouProvider implements LyricsProvider {
 
         String downloadUrl = DOWNLOAD_URL + "&id=" + LyricsRequests.encode(candidateId) + "&accesskey=" + LyricsRequests.encode(accessKey);
         HttpURLConnection downloadConnection = LyricsRequests.openConnection(downloadUrl);
-        if (downloadConnection.getResponseCode() != 200) {
+        if (downloadConnection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure(name(), downloadConnection);
             return null;
         }
@@ -148,7 +146,7 @@ public final class KuGouProvider implements LyricsProvider {
         Map<String, List<LyricsLine>> translations =
                 LyricsMerge.singleLanguageTranslations(translation, "zh");
 
-        final List<LyricsLine> attachedRomanization =
+        List<LyricsLine> attachedRomanization =
                 isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
 
         String sourceUrl = "https://www.kugou.com/song/" + id + ".html";
@@ -170,7 +168,7 @@ public final class KuGouProvider implements LyricsProvider {
 
         String searchUrl = SEARCH_URL + LyricsRequests.encode(hash);
         HttpURLConnection searchConnection = LyricsRequests.openConnection(searchUrl);
-        if (searchConnection.getResponseCode() != 200) {
+        if (searchConnection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             return new ArrayList<>();
         }
 
@@ -211,7 +209,7 @@ public final class KuGouProvider implements LyricsProvider {
 
         String downloadUrl = DOWNLOAD_URL + "&id=" + LyricsRequests.encode(id) + "&accesskey=" + LyricsRequests.encode(accessKey);
         HttpURLConnection downloadConnection = LyricsRequests.openConnection(downloadUrl);
-        if (downloadConnection.getResponseCode() != 200) {
+        if (downloadConnection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             return null;
         }
 
@@ -246,7 +244,7 @@ public final class KuGouProvider implements LyricsProvider {
         Map<String, List<LyricsLine>> translations =
                 LyricsMerge.singleLanguageTranslations(translation, "zh");
 
-        final List<LyricsLine> attachedRomanization =
+        List<LyricsLine> attachedRomanization =
                 isChineseLanguage() && LyricsMerge.hasText(romanization) ? romanization : null;
 
         return new Lyrics(lines, name(), true, attachedRomanization, translations, null,
@@ -262,7 +260,7 @@ public final class KuGouProvider implements LyricsProvider {
         String keyword = track.artist() + " " + track.title();
         String url = SONG_SEARCH_URL + "&keyword=" + LyricsRequests.encode(keyword);
         HttpURLConnection connection = LyricsRequests.openConnection(url);
-        if (connection.getResponseCode() != 200) {
+        if (connection.getResponseCode() != Requester.HTTP_STATUS_CODE_SUCCESS) {
             LyricsRequests.logFailure("KuGou", connection);
             return null;
         }

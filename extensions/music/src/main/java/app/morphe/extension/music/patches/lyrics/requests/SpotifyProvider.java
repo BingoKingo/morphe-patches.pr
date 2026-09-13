@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -93,7 +93,7 @@ public final class SpotifyProvider implements LyricsProvider {
         }
 
         final String sourceUrl = "https://open.spotify.com/track/" + trackId;
-        final JSONObject lyricsResponse = fetchLyrics(spDc, trackId);
+        JSONObject lyricsResponse = fetchLyrics(spDc, trackId);
         if (lyricsResponse == null) {
             return null;
         }
@@ -200,22 +200,22 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private String parseSearchResult(String json) {
         try {
-            final JSONObject root = new JSONObject(json);
-            final JSONObject data = root.optJSONObject("data");
+            JSONObject root = new JSONObject(json);
+            JSONObject data = root.optJSONObject("data");
             if (data == null) return null;
 
-            final JSONObject searchV2 = data.optJSONObject("searchV2");
+            JSONObject searchV2 = data.optJSONObject("searchV2");
             if (searchV2 == null) return null;
 
             JSONArray items = null;
-            final JSONObject tracks = searchV2.optJSONObject("tracks");
+            JSONObject tracks = searchV2.optJSONObject("tracks");
             if (tracks != null) {
                 items = tracks.optJSONArray("items");
             }
             if (items == null || items.length() == 0) {
-                final JSONObject search = data.optJSONObject("search");
+                JSONObject search = data.optJSONObject("search");
                 if (search != null) {
-                    final JSONObject searchTracks = search.optJSONObject("tracks");
+                    JSONObject searchTracks = search.optJSONObject("tracks");
                     if (searchTracks != null) {
                         items = searchTracks.optJSONArray("items");
                     }
@@ -234,11 +234,11 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private String extractTrackId(JSONArray items) {
         for (int i = 0; i < items.length(); i++) {
-            final JSONObject itemWrapper = items.optJSONObject(i);
+            JSONObject itemWrapper = items.optJSONObject(i);
             if (itemWrapper == null) continue;
 
-            final JSONObject dataNode = itemWrapper.optJSONObject("data");
-            final JSONObject node = dataNode != null ? dataNode : itemWrapper;
+            JSONObject dataNode = itemWrapper.optJSONObject("data");
+            JSONObject node = dataNode != null ? dataNode : itemWrapper;
 
             String id = node.optString("id", null);
             if (id == null || id.isEmpty()) {
@@ -280,7 +280,7 @@ public final class SpotifyProvider implements LyricsProvider {
 
     @Nullable
     private Lyrics parseLyrics(JSONObject response, String rawJson, @Nullable String sourceUrl) {
-        final JSONObject lyricsObj = response.optJSONObject("lyrics");
+        JSONObject lyricsObj = response.optJSONObject("lyrics");
         if (lyricsObj == null) {
             return null;
         }
@@ -305,7 +305,7 @@ public final class SpotifyProvider implements LyricsProvider {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
-            final JSONObject lineObj = linesArr.optJSONObject(i);
+            JSONObject lineObj = linesArr.optJSONObject(i);
             if (lineObj == null) {
                 continue;
             }
@@ -349,7 +349,7 @@ public final class SpotifyProvider implements LyricsProvider {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
-            final JSONObject lineObj = linesArr.optJSONObject(i);
+            JSONObject lineObj = linesArr.optJSONObject(i);
             if (lineObj == null) {
                 continue;
             }
@@ -389,7 +389,7 @@ public final class SpotifyProvider implements LyricsProvider {
         int charOffset = 0;
 
         for (int j = 0; j < syllablesArr.length(); j++) {
-            final JSONObject syllable = syllablesArr.optJSONObject(j);
+            JSONObject syllable = syllablesArr.optJSONObject(j);
             if (syllable == null) {
                 continue;
             }
@@ -424,7 +424,7 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     private static long peekNextStartTime(JSONArray linesArr, int index, long fallback) {
-        final JSONObject next = linesArr.optJSONObject(index);
+        JSONObject next = linesArr.optJSONObject(index);
         if (next != null) {
             final long nextStart = parseStartTimeMs(next);
             if (nextStart > 0) {
@@ -439,7 +439,7 @@ public final class SpotifyProvider implements LyricsProvider {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
-            final JSONObject lineObj = linesArr.optJSONObject(i);
+            JSONObject lineObj = linesArr.optJSONObject(i);
             if (lineObj == null) {
                 continue;
             }
@@ -494,7 +494,7 @@ public final class SpotifyProvider implements LyricsProvider {
             }
 
             final String body = parseBody(connection);
-            final JSONObject json = new JSONObject(body);
+            JSONObject json = new JSONObject(body);
             final String token = json.optString("accessToken", "");
             if (token.isBlank()) {
                 return null;
@@ -531,7 +531,7 @@ public final class SpotifyProvider implements LyricsProvider {
             }
 
             final String deviceId = UUID.randomUUID().toString();
-            final JSONObject jsSdkData = new JSONObject()
+            JSONObject jsSdkData = new JSONObject()
                     .put("device_brand", "unknown")
                     .put("device_model", "unknown")
                     .put("os", "linux")
@@ -539,12 +539,12 @@ public final class SpotifyProvider implements LyricsProvider {
                     .put("device_id", deviceId)
                     .put("device_type", "computer");
 
-            final JSONObject clientData = new JSONObject()
+            JSONObject clientData = new JSONObject()
                     .put("client_version", CLIENT_VERSION)
                     .put("client_id", clientId)
                     .put("js_sdk_data", jsSdkData);
 
-            final JSONObject requestBody = new JSONObject()
+            JSONObject requestBody = new JSONObject()
                     .put("client_data", clientData);
 
             final HttpURLConnection connection = (HttpURLConnection)
@@ -573,8 +573,8 @@ public final class SpotifyProvider implements LyricsProvider {
             }
 
             final String body = parseBody(connection);
-            final JSONObject json = new JSONObject(body);
-            final JSONObject grantedToken = json.optJSONObject("granted_token");
+            JSONObject json = new JSONObject(body);
+            JSONObject grantedToken = json.optJSONObject("granted_token");
             if (grantedToken == null) {
                 connection.disconnect();
                 return null;
@@ -612,7 +612,7 @@ public final class SpotifyProvider implements LyricsProvider {
             final int code = connection.getResponseCode();
             if (code == 200) {
                 final String body = parseBody(connection);
-                final JSONObject json = new JSONObject(body);
+                JSONObject json = new JSONObject(body);
                 final long serverTime = json.optLong("serverTime", 0);
                 if (serverTime > 0) {
                     return serverTime * 1000;
@@ -633,7 +633,7 @@ public final class SpotifyProvider implements LyricsProvider {
         try {
             final String body = fetchUrlWithRetry(SECRETS_URL, 2);
             if (body != null) {
-                final JSONObject secrets = new JSONObject(body);
+                JSONObject secrets = new JSONObject(body);
 
                 int newestVersion = -1;
                 Iterator<String> keys = secrets.keys();

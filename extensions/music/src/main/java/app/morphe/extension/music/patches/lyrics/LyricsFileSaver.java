@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Morphe.
- * https://github.com/MorpheApp/morphe-patches/pull/2269
+ * https://github.com/MorpheApp/morphe-patches/pull/2625
  *
  * See the included NOTICE file for GPLv3 Section 7 terms that apply to this code.
  */
@@ -30,7 +30,6 @@ import app.morphe.extension.shared.ResourceUtils;
  */
 public final class LyricsFileSaver {
 
-
     private LyricsFileSaver() {
     }
 
@@ -38,12 +37,12 @@ public final class LyricsFileSaver {
     public static String save(Context context, TrackInfo track, Lyrics lyrics) {
         String content = lyrics.rawFormat();
         String formatType = lyrics.formatType();
-        
+
         if (content == null || content.isEmpty()) {
             if (lyrics.lines() == null || lyrics.lines().isEmpty()) {
                 return null;
             }
-            
+
             if ("krc".equals(formatType)) {
                 content = rebuildKrc(lyrics.lines());
             } else if ("lrc".equals(formatType)) {
@@ -53,19 +52,19 @@ public final class LyricsFileSaver {
                 formatType = "txt";
             }
         }
-        
+
         if (formatType == null || formatType.isEmpty()) {
             formatType = "txt";
         }
 
-        final String fileName = sanitizeFileName(track.artist() + " - " + track.title())
+        String fileName = sanitizeFileName(track.artist() + " - " + track.title())
                 + "." + formatType;
 
-        final ContentResolver resolver = context.getContentResolver();
-        final ContentValues values = new ContentValues();
+        ContentResolver resolver = context.getContentResolver();
+        ContentValues values = new ContentValues();
         values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
         values.put(MediaStore.Downloads.MIME_TYPE, getMimeType(formatType));
-        final String directoryName = ResourceUtils.getString("morphe_custom_branding_name_entry_2");
+        String directoryName = ResourceUtils.getString("morphe_custom_branding_name_entry_2");
         values.put(MediaStore.Downloads.RELATIVE_PATH,
                 Environment.DIRECTORY_DOWNLOADS + "/" + directoryName);
 
@@ -73,7 +72,7 @@ public final class LyricsFileSaver {
             values.put(MediaStore.Downloads.IS_PENDING, 1);
         }
 
-        final Uri insertUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        Uri insertUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
         if (insertUri == null) {
             return null;
         }
