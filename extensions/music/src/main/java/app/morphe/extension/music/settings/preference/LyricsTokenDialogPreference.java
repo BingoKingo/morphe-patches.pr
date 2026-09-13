@@ -53,13 +53,12 @@ public class LyricsTokenDialogPreference extends Preference {
     private final String toastInvalidRes;
     private final StringSetting setting;
     private final String getTokenUrl;
-    private final String getTokenUrlLogTag;
     private final boolean multiline;
     private final TokenValidator validator;
 
     private LyricsTokenDialogPreference(Context context, String titleRes, String instructionRes,
                                         String hintRes, String toastSavedRes, String toastClearedRes, String toastInvalidRes,
-                                        StringSetting setting, String getTokenUrl, String getTokenUrlLogTag,
+                                        StringSetting setting, String getTokenUrl,
                                         boolean multiline, TokenValidator validator) {
         super(context);
         this.titleRes = titleRes;
@@ -70,7 +69,6 @@ public class LyricsTokenDialogPreference extends Preference {
         this.toastInvalidRes = toastInvalidRes;
         this.setting = setting;
         this.getTokenUrl = getTokenUrl;
-        this.getTokenUrlLogTag = getTokenUrlLogTag;
         this.multiline = multiline;
         this.validator = validator;
         setSelectable(true);
@@ -89,7 +87,6 @@ public class LyricsTokenDialogPreference extends Preference {
                 "morphe_music_apple_music_token_toast_invalid",
                 Settings.APPLE_MUSIC_TOKEN,
                 "https://music.apple.com",
-                "AppleMusicTokenPreference",
                 false,
                 APPLE_VALIDATOR);
     }
@@ -104,7 +101,6 @@ public class LyricsTokenDialogPreference extends Preference {
                 "morphe_music_spotify_token_toast_invalid",
                 Settings.SPOTIFY_TOKEN,
                 "https://open.spotify.com",
-                "SpotifyTokenPreference",
                 false,
                 SpotifyProvider::validateToken);
     }
@@ -119,7 +115,6 @@ public class LyricsTokenDialogPreference extends Preference {
                 "morphe_music_youtube_cookies_toast_invalid",
                 Settings.LYRICS_CAPTION_COOKIES,
                 "https://youtube.com",
-                "YouTubeCookiesPreference",
                 true,
                 CaptionsFetcher::validateYouTubeCookies);
     }
@@ -134,7 +129,6 @@ public class LyricsTokenDialogPreference extends Preference {
                 "morphe_music_deezer_arl_toast_invalid",
                 Settings.DEEZER_ARL,
                 "https://www.deezer.com",
-                "DeezerArlPreference",
                 false,
                 DeezerProvider::validateArl);
     }
@@ -149,7 +143,6 @@ public class LyricsTokenDialogPreference extends Preference {
                 "morphe_music_musixmatch_token_toast_invalid",
                 Settings.MUSIXMATCH_TOKEN,
                 "https://www.musixmatch.com",
-                "MusixmatchTokenPreference",
                 false,
                 MusixmatchProvider::validateToken);
     }

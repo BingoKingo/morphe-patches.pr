@@ -139,7 +139,6 @@ public final class TextTranslator {
                                              @NonNull String url,
                                              boolean romanize) throws Exception {
         Utils.verifyOffMainThread();
-        final long startTime = System.currentTimeMillis();
 
         StringBuilder joined = new StringBuilder(100 * lines.size());
         for (String line : lines) {
@@ -150,7 +149,7 @@ public final class TextTranslator {
             joined.append(line);
         }
 
-        final String body = "q=" + URLEncoder.encode(joined.toString(), StandardCharsets.UTF_8.name());
+        String body = "q=" + URLEncoder.encode(joined.toString(), "UTF-8");
 
         Exception lastFailure = null;
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -158,7 +157,6 @@ public final class TextTranslator {
                 sleepQuietly(INITIAL_BACKOFF_MILLISECONDS * attempt);
             }
 
-            final int attemptNumber = attempt + 1;
             HttpURLConnection connection = null;
             try {
                 connection = Requester.openConnection(url);
@@ -169,7 +167,6 @@ public final class TextTranslator {
                 connection.setRequestProperty("User-Agent", "Mozilla/5.0");
                 connection.setDoOutput(true);
 
-                //noinspection CharsetObjectCanBeUsed
                 byte[] payload = body.getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(payload.length);
                 try (OutputStream stream = connection.getOutputStream()) {
@@ -187,10 +184,10 @@ public final class TextTranslator {
                         if (romanize) {
                             // The romanization lives at index 3, falling back to index 2.
                             String romanized = sentence.optString(3);
-                            if (romanized.isEmpty() || romanized.equals("null")) {
+                            if (romanized.isEmpty() || "null".equals(romanized)) {
                                 romanized = sentence.optString(2);
                             }
-                            if (romanized.equals("null")) {
+                            if ("null".equals(romanized)) {
                                 romanized = "";
                             }
                             result.append(romanized);

@@ -98,15 +98,16 @@ public final class LyricsFileSaver {
     }
 
     private static String rebuildKrc(List<LyricsLine> lines) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(50 * lines.size());
         for (LyricsLine line : lines) {
-            long lineDuration = line.endTimeMs() - line.startTimeMs();
+            final long lineDuration = line.endTimeMs() - line.startTimeMs();
             sb.append('[').append(line.startTimeMs()).append(',').append(lineDuration).append(']');
-            if (line.words() != null && !line.words().isEmpty()) {
-                for (int i = 0; i < line.words().size(); i++) {
-                    Word word = line.words().get(i);
-                    long offset = word.startMs() - line.startTimeMs();
-                    long wordDuration = word.endMs() - word.startMs();
+            List<Word> words = line.words();
+            if (words != null && !words.isEmpty()) {
+                for (int i = 0, size = words.size(); i < size; i++) {
+                    Word word = words.get(i);
+                    final long offset = word.startMs() - line.startTimeMs();
+                    final long wordDuration = word.endMs() - word.startMs();
                     sb.append('<').append(offset).append(',').append(wordDuration).append(",0>").append(word.text());
                 }
             } else {
@@ -118,12 +119,12 @@ public final class LyricsFileSaver {
     }
 
     private static String rebuildLrc(List<LyricsLine> lines) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(50 * lines.size());
         for (LyricsLine line : lines) {
-            long totalMs = line.startTimeMs();
-            long min = totalMs / 60000;
-            long sec = (totalMs % 60000) / 1000;
-            long ms = totalMs % 1000;
+            final long totalMs = line.startTimeMs();
+            final long min = totalMs / 60000;
+            final long sec = (totalMs % 60000) / 1000;
+            final long ms = totalMs % 1000;
             sb.append('[')
               .append(String.format(Locale.US, "%02d:%02d.%02d", min, sec, ms / 10))
               .append(']')
@@ -134,8 +135,8 @@ public final class LyricsFileSaver {
     }
 
     private static String rebuildPlainText(List<LyricsLine> lines) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.size(); i++) {
+        StringBuilder sb = new StringBuilder(50 * lines.size());
+        for (int i = 0, size = lines.size(); i < size; i++) {
             if (i > 0) sb.append('\n');
             sb.append(lines.get(i).text());
         }
@@ -148,33 +149,12 @@ public final class LyricsFileSaver {
     }
 
     private static String getMimeType(String formatType) {
-        switch (formatType) {
-            case "lrc":
-                return "application/octet-stream";
-            case "krc":
-                return "application/octet-stream";
-            case "yrc":
-                return "application/octet-stream";
-            case "qrc":
-                return "application/octet-stream";
-            case "ttml":
-                return "application/ttml+xml";
-            case "lyricsfile.yaml":
-                return "text/yaml";
-            case "json":
-                return "application/json";
-            case "json3":
-                return "application/octet-stream";
-            case "mxm.json":
-                return "application/json";
-            case "sp.json":
-                return "application/json";
-            case "plain":
-                return "text/plain";
-            case "txt":
-                return "text/plain";
-            default:
-                return "application/octet-stream";
-        }
+        return switch (formatType) {
+            case "ttml" -> "application/ttml+xml";
+            case "lyricsfile.yaml" -> "text/yaml";
+            case "json", "mxm.json", "sp.json" -> "application/json";
+            case "plain", "txt" -> "text/plain";
+            default -> "application/octet-stream";
+        };
     }
 }

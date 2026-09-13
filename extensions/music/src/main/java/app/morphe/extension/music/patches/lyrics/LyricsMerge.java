@@ -31,12 +31,6 @@ public final class LyricsMerge {
     }
 
     /**
-     * @param original  The displayed lyrics lines, in playback order.
-     * @param auxiliary The auxiliary lines (romanization), time sorted, or {@code null}.
-     * @return One line per original line, carrying the matched auxiliary text. The start time
-     * of each entry is the original line's, so the romanization stays pinned above it.
-     */
-    /**
      * @return {@code true} when at least one line carries non-empty auxiliary text.
      */
     public static boolean hasText(@Nullable List<LyricsLine> lines) {
@@ -68,7 +62,7 @@ public final class LyricsMerge {
     @Nullable
     public static Map<String, List<LyricsLine>> singleLanguageTranslations(
             @Nullable List<LyricsLine> lines, String lang) {
-        if (lines == null || !hasText(lines)) {
+        if (!hasText(lines)) {
             return null;
         }
         Map<String, List<LyricsLine>> map = new HashMap<>();
@@ -78,8 +72,7 @@ public final class LyricsMerge {
 
     @Nullable
     static List<String> mapLinesOnline(List<String> lines,
-                                       Function<List<String>, List<String>> batch,
-                                       String what, String verb) {
+                                       Function<List<String>, List<String>> batch) {
         if (!Utils.isNetworkConnected()) {
             return null;
         }
@@ -130,7 +123,7 @@ public final class LyricsMerge {
         int auxIdx = 0;
         final int auxCount = sorted.size();
 
-        for (int i = 0; i < original.size(); i++) {
+        for (int i = 0, size = original.size(); i < size; i++) {
             LyricsLine orig = original.get(i);
 
             if (orig.isBG()) {
@@ -138,8 +131,8 @@ public final class LyricsMerge {
                 continue;
             }
 
-            long winStart = orig.startTimeMs();
-            long winEnd = (i < original.size() - 1)
+            final long winStart = orig.startTimeMs();
+            final long winEnd = (i < original.size() - 1)
                     ? original.get(i + 1).startTimeMs()
                     : Long.MAX_VALUE;
 

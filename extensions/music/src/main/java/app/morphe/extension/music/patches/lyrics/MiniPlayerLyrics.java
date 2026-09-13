@@ -31,18 +31,16 @@ import app.morphe.extension.shared.ResourceUtils;
  */
 public final class MiniPlayerLyrics {
 
-    private static volatile int titleId;
-    private static volatile int subtitleId;
-    @Nullable
-    private static volatile WeakReference<TextView> titleRef;
-    @Nullable
-    private static volatile WeakReference<TextView> subtitleRef;
+    private static WeakReference<TextView> titleRef = new WeakReference<>(null);
+    private static WeakReference<TextView> subtitleRef = new WeakReference<>(null);
+    private static int titleId;
+    private static int subtitleId;
 
     /** Track the system is currently displaying, captured from {@link MediaSession} metadata. */
     @Nullable
-    private static volatile String displayTitle;
+    private static String displayTitle;
     @Nullable
-    private static volatile String displayArtist;
+    private static String displayArtist;
 
     /** Drives the periodic check that mirrors the current line into the mini player. */
     private static final LyricsTicker ticker = new LyricsTicker(MiniPlayerLyrics::tick);
@@ -128,8 +126,8 @@ public final class MiniPlayerLyrics {
             return;
         }
 
-        TextView title = titleRef != null ? titleRef.get() : null;
-        TextView subtitle = subtitleRef != null ? subtitleRef.get() : null;
+        TextView title = titleRef.get();
+        TextView subtitle = subtitleRef.get();
         if (title == null || subtitle == null) {
             ticker.stop();
             LyricsManager.getInstance().removeListener(lyricsListener);
@@ -149,7 +147,7 @@ public final class MiniPlayerLyrics {
 
         if (synced) {
             String line = manager.getCurrentLineText();
-            String newTitle = (line == null || line.isEmpty()) ? track.title() : line;
+            String newTitle = line.isEmpty() ? track.title() : line;
             String actualTitle = title.getText() != null ? title.getText().toString() : null;
             if (!newTitle.equals(actualTitle)) {
                 title.setText(newTitle);

@@ -54,6 +54,7 @@ import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
+import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
 /**
@@ -470,6 +471,7 @@ public final class LyricsManager {
                             candidates = new ArrayList<>(candidates.subList(0, 5));
                         }
                     } catch (Exception ex) {
+                        Logger.printDebug(() -> "Could not fetch candidates", ex);
                     }
                     if (candidates == null) {
                         candidates = new ArrayList<>();
@@ -481,12 +483,11 @@ public final class LyricsManager {
                         && currentCandidateIndex < candidates.size()) {
                     Lyrics candidate = candidates.get(currentCandidateIndex);
                     if (isValidLyrics(candidate, track)) {
-                        Lyrics toPublish = candidate;
                         Utils.runOnMainThread(() -> {
                             if (id != requestId) {
                                 return;
                             }
-                            publish(id, toPublish);
+                            publish(id, candidate);
                         });
                         currentCandidateIndex++;
                         return;
@@ -514,8 +515,7 @@ public final class LyricsManager {
                 Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
                 if (embedded != null) {
                     LyricsCache.put(track, LyricsSource.LOCAL.name(), embedded);
-                    Lyrics toPublish = embedded;
-                    Utils.runOnMainThread(() -> publish(id, toPublish));
+                    Utils.runOnMainThread(() -> publish(id, embedded));
                     return;
                 }
             }
@@ -530,16 +530,14 @@ public final class LyricsManager {
         for (LyricsProvider provider : providers) {
             Lyrics cached = LyricsCache.get(track, provider.name());
             if (cached != null && cached != Lyrics.NOT_FOUND) {
-                Lyrics toPublish = cached;
-                Utils.runOnMainThread(() -> publish(id, toPublish));
+                Utils.runOnMainThread(() -> publish(id, cached));
                 return;
             }
             if (innertubeTrack != null && !innertubeTrack.equals(track)) {
                 Lyrics cachedIT = LyricsCache.get(innertubeTrack, provider.name());
                 if (cachedIT != null && cachedIT != Lyrics.NOT_FOUND) {
-                    Lyrics toPublish = cachedIT;
-                    LyricsCache.put(track, provider.name(), toPublish);
-                    Utils.runOnMainThread(() -> publish(id, toPublish));
+                    LyricsCache.put(track, provider.name(), cachedIT);
+                    Utils.runOnMainThread(() -> publish(id, cachedIT));
                     return;
                 }
             }
@@ -564,9 +562,8 @@ public final class LyricsManager {
             for (LyricsProvider provider : providers) {
                 Lyrics cached = LyricsCache.get(innertubeTrack, provider.name());
                 if (cached != null && cached != Lyrics.NOT_FOUND) {
-                    Lyrics toPublish = cached;
-                    LyricsCache.put(track, provider.name(), toPublish);
-                    Utils.runOnMainThread(() -> publish(id, toPublish));
+                    LyricsCache.put(track, provider.name(), cached);
+                    Utils.runOnMainThread(() -> publish(id, cached));
                     return;
                 }
             }
@@ -659,85 +656,6 @@ public final class LyricsManager {
     }
 
     @Nullable
-    private Lyrics fetchFromProviders(TrackInfo track, boolean[] failed, List<LyricsProvider> providers) {
-        CompletionService<Lyrics> cs = new ExecutorCompletionService<>(executor);
-        List<Future<Lyrics>> futures = new ArrayList<>(providers.size());
-        AtomicBoolean threadFailed = new AtomicBoolean(false);
-
-        for (LyricsProvider provider : providers) {
-            futures.add(cs.submit(() -> {
-                try {
-                    return provider.fetch(track);
-                } catch (Exception ex) {
-                    threadFailed.set(true);
-                    return null;
-                }
-            }));
-        }
-
-        final boolean wordSync = Settings.LYRICS_WORD_SYNC.get();
-        Lyrics bestResult = null;
-        int bestRank = wordSync ? -1 : -2;
-        int completed = 0;
-        long deadline = System.currentTimeMillis() + 15_000;
-
-        while (completed < futures.size()) {
-            long remaining = deadline - System.currentTimeMillis();
-            if (remaining <= 0) {
-                break;
-            }
-
-            Future<Lyrics> f;
-            try {
-                f = cs.poll(remaining, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-            if (f == null) {
-                break;
-            }
-
-            completed++;
-            try {
-                Lyrics fetched = f.get();
-                if (!isValidLyrics(fetched, track)) {
-                    continue;
-                }
-                final int rank = rankOf(fetched);
-                if (wordSync) {
-                    if (rank > bestRank) {
-                        bestRank = rank;
-                        bestResult = fetched;
-                    }
-                    if (rank == 2) {
-                        break; // word-synced is the best possible tier
-                    }
-                } else {
-                    final int effectiveRank = rank == 2 ? -1 : rank;
-                    if (effectiveRank > bestRank) {
-                        bestRank = effectiveRank;
-                        bestResult = fetched;
-                    }
-                    if (effectiveRank == 1) {
-                        break; // line-synced is the best preferred tier
-                    }
-                }
-            } catch (Exception e) {
-            }
-        }
-
-        for (Future<Lyrics> f : futures) {
-            if (!f.isDone()) {
-                f.cancel(true);
-            }
-        }
-
-        failed[0] = threadFailed.get();
-        return bestResult;
-    }
-
-    @Nullable
     private Lyrics fetchFromProviders(List<TrackInfo> variants,
                                       boolean[] failed,
                                       List<LyricsProvider> providers) {
@@ -762,7 +680,7 @@ public final class LyricsManager {
         Lyrics bestResult = null;
         int bestRank = wordSync ? -1 : -2;
         int completed = 0;
-        long deadline = System.currentTimeMillis() + 8_000;
+        final long deadline = System.currentTimeMillis() + 8_000;
 
         while (completed < futures.size()) {
             long remaining = deadline - System.currentTimeMillis();
@@ -806,7 +724,8 @@ public final class LyricsManager {
                         break;
                     }
                 }
-            } catch (Exception e) {
+            } catch (Exception ex) {
+                Logger.printDebug(() -> "Could not fetch lyrics", ex);
             }
         }
 
@@ -903,9 +822,9 @@ public final class LyricsManager {
         for (int i = 0; i < size; i++) {
             LyricsLine line = original.get(i);
             String text = line.text().trim();
-            boolean inStartBlock = i <= startBlockEnd;
-            boolean inEndBlock = i >= endBlockStart;
-            boolean shouldFilter = inStartBlock || inEndBlock;
+            final boolean inStartBlock = i <= startBlockEnd;
+            final boolean inEndBlock = i >= endBlockStart;
+            final boolean shouldFilter = inStartBlock || inEndBlock;
 
             if (shouldFilter) {
                 if (!text.isEmpty()) {
@@ -963,7 +882,7 @@ public final class LyricsManager {
         if (map == null || map.isEmpty()) {
             return map;
         }
-        Map<String, List<LyricsLine>> result = new HashMap<>(map.size());
+        Map<String, List<LyricsLine>> result = new HashMap<>(2 * map.size());
         for (Map.Entry<String, List<LyricsLine>> entry : map.entrySet()) {
             result.put(entry.getKey(), filterAlignedList(entry.getValue(), kept));
         }
@@ -1122,18 +1041,18 @@ public final class LyricsManager {
         if (dashIdx <= 0 || dashIdx >= text.length() - 1) {
             return false;
         }
-        List<String> leftVariants = CharactersConverter.variants(text.substring(0, dashIdx).trim());
-        List<String> rightVariants = CharactersConverter.variants(text.substring(dashIdx + 1).trim());
         List<String> artistVariants = CharactersConverter.variants(artist.trim());
-        List<String> titleVariants = CharactersConverter.variants(title.trim());
-        if (artistVariants.isEmpty() || titleVariants.isEmpty()) {
+        if (artistVariants.isEmpty()) {
             return false;
         }
-        boolean leftMatchesArtist = containsAnyVariant(leftVariants, artistVariants);
-        boolean rightMatchesTitle = containsAnyVariant(rightVariants, titleVariants);
-        boolean leftMatchesTitle = containsAnyVariant(leftVariants, titleVariants);
-        boolean rightMatchesArtist = containsAnyVariant(rightVariants, artistVariants);
-        return (leftMatchesArtist && rightMatchesTitle) || (leftMatchesTitle && rightMatchesArtist);
+        List<String> titleVariants = CharactersConverter.variants(title.trim());
+        if (titleVariants.isEmpty()) {
+            return false;
+        }
+        List<String> leftVariants = CharactersConverter.variants(text.substring(0, dashIdx).trim());
+        List<String> rightVariants = CharactersConverter.variants(text.substring(dashIdx + 1).trim());
+        return (containsAnyVariant(leftVariants, artistVariants) && containsAnyVariant(rightVariants, titleVariants))
+                || (containsAnyVariant(leftVariants, titleVariants) && containsAnyVariant(rightVariants, artistVariants));
     }
 
     private static boolean containsAnyVariant(List<String> haystacks, List<String> needles) {
@@ -1149,7 +1068,7 @@ public final class LyricsManager {
 
     private static int countChar(String text, char c) {
         int count = 0;
-        for (int i = 0; i < text.length(); i++) {
+        for (int i = 0, length = text.length(); i < length; i++) {
             if (text.charAt(i) == c) {
                 count++;
             }
@@ -1262,7 +1181,7 @@ public final class LyricsManager {
     @NonNull
     private static List<String> enabledProviderIds(String order) {
         List<String> result = new ArrayList<>();
-        if (order == null || order.isEmpty() || !order.contains(",")) {
+        if (order == null || !order.contains(",")) {
             order = Settings.DEFAULT_LYRICS_ORDER;
         }
         for (String raw : order.split(",")) {
@@ -1300,24 +1219,24 @@ public final class LyricsManager {
 
     @Nullable
     private static LyricsProvider providerFor(String id) {
-        switch (id) {
-            case "Captions": return new CaptionsFetcher.CaptionsProvider();
-            case "LRCLIB": return new LrcLibProvider();
-            case "LyricallyApple": return new LyricallyAppleMusicProvider();
-            case "Spotify": return new SpotifyProvider();
-            case "QQ": return new QQProvider();
-            case "KuGou": return new KuGouProvider();
-            case "Luna": return new LunaProvider();
-            case "NetEase": return new NetEaseProvider();
-            case "BiniLyrics": return new BinimumProvider();
-            case "bLyrics": return new BlyricsProvider();
-            case "Musixmatch": return new MusixmatchProvider();
-            case "Unison": return new UnisonProvider();
-            case "AMLL": return new AmllProvider();
-            case "Apple": return new AppleMusicProvider();
-            case "Deezer": return new DeezerProvider();
-            default: return null;
-        }
+        return switch (id) {
+            case "Captions" -> new CaptionsFetcher.CaptionsProvider();
+            case "LRCLIB" -> new LrcLibProvider();
+            case "LyricallyApple" -> new LyricallyAppleMusicProvider();
+            case "Spotify" -> new SpotifyProvider();
+            case "QQ" -> new QQProvider();
+            case "KuGou" -> new KuGouProvider();
+            case "Luna" -> new LunaProvider();
+            case "NetEase" -> new NetEaseProvider();
+            case "BiniLyrics" -> new BinimumProvider();
+            case "bLyrics" -> new BlyricsProvider();
+            case "Musixmatch" -> new MusixmatchProvider();
+            case "Unison" -> new UnisonProvider();
+            case "AMLL" -> new AmllProvider();
+            case "Apple" -> new AppleMusicProvider();
+            case "Deezer" -> new DeezerProvider();
+            default -> null;
+        };
     }
 
     /**

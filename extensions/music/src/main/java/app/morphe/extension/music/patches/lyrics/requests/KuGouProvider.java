@@ -528,6 +528,7 @@ public final class KuGouProvider implements LyricsProvider {
         for (int i = 0; i < entry.length(); i++) {
             String part = entry.optString(i, "").trim();
             if (!part.isEmpty()) {
+                //noinspection SizeReplaceableByIsEmpty
                 if (builder.length() > 0) {
                     builder.append(' ');
                 }

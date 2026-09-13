@@ -806,6 +806,7 @@ public final class CaptionsFetcher {
             if (eq > 0) {
                 String key = entry.substring(0, eq).trim();
                 if (COOKIE_KEYS.contains(key)) {
+                    //noinspection SizeReplaceableByIsEmpty
                     if (sb.length() > 0) sb.append("; ");
                     sb.append(entry);
                 }

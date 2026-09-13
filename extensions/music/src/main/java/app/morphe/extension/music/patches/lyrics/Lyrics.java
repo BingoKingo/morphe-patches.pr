@@ -78,7 +78,7 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
 
     private static Map<String, List<LyricsLine>> unmodifiableTranslations(
             Map<String, List<LyricsLine>> in) {
-        Map<String, List<LyricsLine>> out = new HashMap<>(in.size());
+        Map<String, List<LyricsLine>> out = new HashMap<>(2 * in.size());
         for (Map.Entry<String, List<LyricsLine>> entry : in.entrySet()) {
             List<LyricsLine> value = entry.getValue();
             out.put(entry.getKey(), value == null ? null : Collections.unmodifiableList(value));
@@ -170,7 +170,7 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
                         || (w.startMs() > 0 && w.startMs() < lineStart - 500);
 
                 if (!anomalous) {
-                    prevEnd = w.endMs() > w.startMs() ? w.endMs() : w.startMs();
+                    prevEnd = Math.max(w.endMs(), w.startMs());
                     fixed[j] = w;
                     continue;
                 }

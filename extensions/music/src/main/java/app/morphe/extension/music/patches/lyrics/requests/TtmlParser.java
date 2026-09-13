@@ -1013,6 +1013,7 @@ final class TtmlParser {
                     }
                 } else if ("x-bg".equals(role)) {
                     // Save previous BG section if any
+                    //noinspection SizeReplaceableByIsEmpty
                     if (inBg && (!bgWords.isEmpty() || bgFullText.length() > 0)) {
                         String prevBgText = normalizeText(bgFullText.toString());
                         if (!prevBgText.isBlank()) {
@@ -1123,12 +1124,14 @@ final class TtmlParser {
                                 rBegin = rubyTags.get(0).startMs;
                                 rEnd = rubyTags.get(rubyTags.size() - 1).endMs;
                             }
-                            final StringBuilder rRoma = new StringBuilder();
+                            StringBuilder rRoma = new StringBuilder();
                             for (RomajiSyllable rs : rubyTags) {
+                                //noinspection SizeReplaceableByIsEmpty
                                 if (rRoma.length() > 0) rRoma.append(' ');
                                 rRoma.append(rs.text);
                             }
-                            final String romaji = rRoma.length() > 0 ? rRoma.toString() : null;
+                            //noinspection SizeReplaceableByIsEmpty
+                            String romaji = rRoma.length() > 0 ? rRoma.toString() : null;
 
                             fullText.append(baseText);
                             words.add(new Word(rBegin, rEnd, baseText, romaji, false));
@@ -1269,6 +1272,7 @@ final class TtmlParser {
         }
 
         // Save final BG section
+        //noinspection SizeReplaceableByIsEmpty
         if (inBg && (!bgWords.isEmpty() || bgFullText.length() > 0)) {
             String bgText = normalizeText(bgFullText.toString());
             if (!bgText.isBlank()) {
@@ -1391,13 +1395,15 @@ final class TtmlParser {
         }
         if (hasPerWord) {
             for (int i = 0; i < words.size(); i++) {
-                final Word w = words.get(i);
-                final String r = w.romaji();
+                Word w = words.get(i);
+                String r = w.romaji();
                 if (r != null && !r.isEmpty()) {
+                    //noinspection SizeReplaceableByIsEmpty
                     if (perWord.length() > 0) perWord.append(' ');
                     perWord.append(r);
                 }
             }
+            //noinspection SizeReplaceableByIsEmpty
             if (perWord.length() > 0) {
                 return perWord.toString();
             }
@@ -1407,6 +1413,7 @@ final class TtmlParser {
             final StringBuilder sb = new StringBuilder();
             for (RomajiSyllable s : sidecar) {
                 if (s.text.isEmpty()) continue;
+                //noinspection SizeReplaceableByIsEmpty
                 if (sb.length() > 0) sb.append(' ');
                 sb.append(s.text);
             }
@@ -1454,6 +1461,7 @@ final class TtmlParser {
             final StringBuilder sb = new StringBuilder();
             for (Word w : alignedWords) {
                 if (w.romaji() != null && !w.romaji().isEmpty()) {
+                    //noinspection SizeReplaceableByIsEmpty
                     if (sb.length() > 0) sb.append(' ');
                     sb.append(w.romaji());
                 }

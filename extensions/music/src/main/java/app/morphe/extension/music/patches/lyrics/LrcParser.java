@@ -142,14 +142,7 @@ public final class LrcParser {
         return lines;
     }
 
-    private static final class BodyParse {
-        final String text;
-        final List<Word> words;
-
-        BodyParse(String text, List<Word> words) {
-            this.text = text;
-            this.words = words;
-        }
+    private record BodyParse(String text, List<Word> words) {
     }
 
     private static BodyParse parseBody(String body, long lineStartMs) {

@@ -14,12 +14,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class LyricsfileParser {
+public final class LyricsFileParser {
 
     private static final String REQUIRED_VERSION = "1.0";
     private static final String[] CREDIT_META_KEYS = {"title", "artist", "album"};
 
-    private LyricsfileParser() {
+    private LyricsFileParser() {
     }
 
     @Nullable
@@ -40,10 +40,9 @@ public final class LyricsfileParser {
 
         Cursor cursor = new Cursor();
         Object root = readValue(lines, cursor, 0);
-        if (!(root instanceof Map)) {
+        if (!(root instanceof Map<?, ?> top)) {
             return null;
         }
-        Map<?, ?> top = (Map<?, ?>) root;
 
         // FIXME: require version to be exactly "1.0" once all files migrate
         // Object versionValue = top.get("version");
@@ -54,8 +53,7 @@ public final class LyricsfileParser {
         List<String> creditLines = new ArrayList<>();
         boolean instrumental = false;
         Object metaObject = top.get("metadata");
-        if (metaObject instanceof Map) {
-            Map<?, ?> metadata = (Map<?, ?>) metaObject;
+        if (metaObject instanceof Map<?, ?> metadata) {
             Object instrumentalValue = metadata.get("instrumental");
             if (instrumentalValue instanceof Boolean) {
                 instrumental = (Boolean) instrumentalValue;
@@ -84,13 +82,17 @@ public final class LyricsfileParser {
         List<String> creditLinesOut = creditLines.isEmpty() ? null : creditLines;
 
         if (instrumental) {
-            return parsedLines.isEmpty() ? Lyrics.NOT_FOUND : new Lyrics(parsedLines, providerName, true, null, null, null, creditLinesOut, yaml, "lyricsfile.yaml", null);
+            return parsedLines.isEmpty()
+                    ? Lyrics.NOT_FOUND
+                    : new Lyrics(parsedLines, providerName, true, null,
+                    null, null, creditLinesOut, yaml, "lyricsfile.yaml", null);
         }
 
         boolean synced = parsedLines.stream()
                 .anyMatch(line -> line.startTimeMs() != LyricsLine.NO_TIME);
         if (synced) {
-            return new Lyrics(parsedLines, providerName, true, null, null, null, creditLinesOut, yaml, "lyricsfile.yaml", null);
+            return new Lyrics(parsedLines, providerName, true, null,
+                    null, null, creditLinesOut, yaml, "lyricsfile.yaml", null);
         }
 
         Object plainObject = top.get("plain");
@@ -105,10 +107,9 @@ public final class LyricsfileParser {
 
     @Nullable
     private static LyricsLine toLine(Object item) {
-        if (!(item instanceof Map)) {
+        if (!(item instanceof Map<?, ?> map)) {
             return null;
         }
-        Map<?, ?> map = (Map<?, ?>) item;
 
         Object textObject = map.get("text");
         String text = textObject instanceof String ? (String) textObject : "";
@@ -117,10 +118,9 @@ public final class LyricsfileParser {
         Object wordsObject = map.get("words");
         if (wordsObject instanceof List) {
             for (Object wordObject : (List<?>) wordsObject) {
-                if (!(wordObject instanceof Map)) {
+                if (!(wordObject instanceof Map<?, ?> wordMap)) {
                     continue;
                 }
-                Map<?, ?> wordMap = (Map<?, ?>) wordObject;
                 Object wordText = wordMap.get("text");
                 String wordString = wordText instanceof String ? (String) wordText : "";
                 long start = asLong(wordMap.get("start_ms"));
@@ -136,6 +136,7 @@ public final class LyricsfileParser {
                 if (wordText.isEmpty()) {
                     continue;
                 }
+                //noinspection SizeReplaceableByIsEmpty
                 if (builder.length() > 0) {
                     builder.append(' ');
                 }
@@ -272,6 +273,7 @@ public final class LyricsfileParser {
             if (indentOf(line) <= indent) {
                 break;
             }
+            //noinspection SizeReplaceableByIsEmpty
             if (builder.length() > 0) {
                 builder.append('\n');
             }

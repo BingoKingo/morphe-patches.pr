@@ -270,6 +270,7 @@ public final class QQProvider implements LyricsProvider {
             }
             String name = singer.optString("name", "");
             if (!name.isEmpty()) {
+                //noinspection SizeReplaceableByIsEmpty
                 if (builder.length() > 0) {
                     builder.append('/');
                 }

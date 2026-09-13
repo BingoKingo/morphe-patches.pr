@@ -10,19 +10,15 @@ package app.morphe.extension.music.patches.lyrics;
 import android.os.Handler;
 import android.os.Looper;
 
-import androidx.annotation.NonNull;
-
 final class LyricsTicker {
 
     /** How often to check whether the current lyric line changed. */
     private static final long TICK_INTERVAL_MS = 300;
 
-    @NonNull
     private final Handler handler = new Handler(Looper.getMainLooper());
-    @NonNull
     private final Runnable task;
 
-    LyricsTicker(@NonNull Runnable task) {
+    LyricsTicker(Runnable task) {
         this.task = task;
     }
 

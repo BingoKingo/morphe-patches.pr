@@ -203,6 +203,7 @@ public final class NetEaseProvider implements LyricsProvider {
             if (trimmed.startsWith("{")) {
                 continue;
             }
+            //noinspection SizeReplaceableByIsEmpty
             if (builder.length() > 0) {
                 builder.append('\n');
             }
@@ -371,6 +372,7 @@ public final class NetEaseProvider implements LyricsProvider {
             }
             String name = artist.optString("name", "");
             if (!name.isEmpty()) {
+                //noinspection SizeReplaceableByIsEmpty
                 if (builder.length() > 0) {
                     builder.append('/');
                 }
@@ -556,6 +558,7 @@ public final class NetEaseProvider implements LyricsProvider {
     private static String cookieHeader() {
         StringBuilder builder = new StringBuilder();
         for (Map.Entry<String, String> entry : cookieJar.entrySet()) {
+            //noinspection SizeReplaceableByIsEmpty
             if (builder.length() > 0) {
                 builder.append("; ");
             }
@@ -626,6 +629,7 @@ public final class NetEaseProvider implements LyricsProvider {
                 if (trimmed.isEmpty()) {
                     continue;
                 }
+                //noinspection SizeReplaceableByIsEmpty
                 if (full.length() > 0 && needsSpaceBetween(full.toString(), trimmed)) {
                     full.append(' ');
                 }

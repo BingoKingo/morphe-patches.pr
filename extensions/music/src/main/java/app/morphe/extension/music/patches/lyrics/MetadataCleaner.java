@@ -10,11 +10,12 @@ package app.morphe.extension.music.patches.lyrics;
 import androidx.annotation.Nullable;
 
 import app.morphe.extension.music.patches.lyrics.requests.CharactersConverter;
+import app.morphe.extension.music.settings.Settings;
 
 /**
  * Normalizes YouTube Music metadata into what a lyrics database expects.
  *
- * <p>All cleanup is driven by the user-configured {@link app.morphe.extension.music.settings.Settings#LYRICS_CUSTOM_REGEX}.
+ * <p>All cleanup is driven by the user-configured {@link Settings#LYRICS_CUSTOM_REGEX}.
  * When the regex is blank no filtering is applied.
  */
 final class MetadataCleaner {
@@ -26,7 +27,7 @@ final class MetadataCleaner {
         if (title == null) {
             return "";
         }
-        return collapseWhitespace(applyRegex(title, app.morphe.extension.music.settings.Settings.LYRICS_CUSTOM_REGEX.get()));
+        return collapseWhitespace(applyRegex(title, Settings.LYRICS_CUSTOM_REGEX.get()));
     }
 
     static String cleanArtist(@Nullable String artist) {
@@ -41,14 +42,14 @@ final class MetadataCleaner {
         if (separator > 0) {
             clean = clean.substring(0, separator);
         }
-        return collapseWhitespace(applyRegex(clean, app.morphe.extension.music.settings.Settings.LYRICS_CUSTOM_REGEX.get()));
+        return collapseWhitespace(applyRegex(clean, Settings.LYRICS_CUSTOM_REGEX.get()));
     }
 
     static String cleanAlbum(@Nullable String album) {
         if (album == null) {
             return "";
         }
-        return collapseWhitespace(applyRegex(album, app.morphe.extension.music.settings.Settings.LYRICS_CUSTOM_REGEX.get()));
+        return collapseWhitespace(applyRegex(album, Settings.LYRICS_CUSTOM_REGEX.get()));
     }
 
     static String applyRegex(String input, String regex) {

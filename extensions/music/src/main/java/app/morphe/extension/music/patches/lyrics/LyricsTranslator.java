@@ -49,6 +49,7 @@ public final class LyricsTranslator {
             if (lines == null || lines.size() != lineCount || !LyricsMerge.hasText(lines)) {
                 continue;
             }
+            //noinspection ExtractMethodRecommender
             List<String> out = new ArrayList<>(lines.size());
             for (LyricsLine line : lines) {
                 String text = line.text();
@@ -120,6 +121,6 @@ public final class LyricsTranslator {
                     } catch (Exception ex) {
                         throw new RuntimeException(ex);
                     }
-                }, "translation", "translate");
+                });
     }
 }

@@ -13,6 +13,7 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Context;
 import android.preference.Preference;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.DragEvent;
 import android.view.Gravity;
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.Set;
 
 import app.morphe.extension.music.settings.Settings;
+import app.morphe.extension.shared.settings.StringSetting;
 import app.morphe.extension.shared.theme.ThemeUtils;
 import app.morphe.extension.shared.ui.Dim;
 
@@ -63,7 +65,7 @@ public final class LyricsOrderedListPreference extends Preference {
     }
 
     private static String providerLabel(String id) {
-        final String label = PROVIDER_LABELS.get(id);
+        String label = PROVIDER_LABELS.get(id);
         return label != null ? label : id;
     }
 
@@ -144,7 +146,7 @@ public final class LyricsOrderedListPreference extends Preference {
     @Override
     public View getView(View convertView, ViewGroup parent) {
         loadItems();
-        final Context context = getContext();
+        Context context = getContext();
         final int fg = ThemeUtils.getAppForegroundColor();
 
         LinearLayout root = new LinearLayout(context);
@@ -159,7 +161,7 @@ public final class LyricsOrderedListPreference extends Preference {
         });
 
         CharSequence title = getTitle();
-        if (title != null && title.length() > 0) {
+        if (!TextUtils.isEmpty(title)) {
             TextView titleView = new TextView(context);
             titleView.setText(title);
             titleView.setTextSize(16);
@@ -169,7 +171,7 @@ public final class LyricsOrderedListPreference extends Preference {
         }
 
         CharSequence summary = getSummary();
-        if (summary != null && summary.length() > 0) {
+        if (!TextUtils.isEmpty(summary)) {
             TextView summaryView = new TextView(context);
             summaryView.setText(summary);
             summaryView.setTextSize(13);
@@ -190,17 +192,22 @@ public final class LyricsOrderedListPreference extends Preference {
     }
 
     private static boolean isTokenRequired(String id) {
-        return (id.equals("Captions") && Settings.LYRICS_CAPTION_COOKIES.get().isBlank())
-                || (id.equals("Apple") && Settings.APPLE_MUSIC_TOKEN.get().isBlank())
-                || (id.equals("Spotify") && Settings.SPOTIFY_TOKEN.get().isBlank())
-                || (id.equals("Deezer") && Settings.DEEZER_ARL.get().isBlank())
-                || (id.equals("Musixmatch") && Settings.MUSIXMATCH_TOKEN.get().isBlank());
+        StringSetting setting = switch (id) {
+            case "Captions" -> Settings.LYRICS_CAPTION_COOKIES;
+            case "Apple" -> Settings.APPLE_MUSIC_TOKEN;
+            case "Spotify" -> Settings.SPOTIFY_TOKEN;
+            case "Deezer" -> Settings.DEEZER_ARL;
+            case "Musixmatch" -> Settings.MUSIXMATCH_TOKEN;
+            default -> null;
+        };
+        return setting != null && setting.get().isBlank();
     }
 
     private static boolean hasTokenDialog(String id) {
-        return id.equals("Captions") || id.equals("Apple")
-                || id.equals("Spotify") || id.equals("Deezer")
-                || id.equals("Musixmatch");
+        return switch (id) {
+            case "Captions", "Apple", "Spotify", "Deezer", "Musixmatch" -> true;
+            default -> false;
+        };
     }
 
     private void showTokenDialogFor(String id, Runnable onTokenSaved) {
@@ -228,7 +235,7 @@ public final class LyricsOrderedListPreference extends Preference {
     }
 
     private View createRow(Item item, int itemsIndex) {
-        final Context context = getContext();
+        Context context = getContext();
         final int fg = ThemeUtils.getAppForegroundColor();
         final boolean locked = !isEnabled();
 
@@ -240,7 +247,7 @@ public final class LyricsOrderedListPreference extends Preference {
         row.setTag(itemsIndex);
 
         TextView grip = new TextView(context);
-        grip.setText("\u283F");
+        grip.setText("⠿");
         grip.setTextSize(20);
         grip.setTypeface(android.graphics.Typeface.DEFAULT);
         grip.setTextColor(withAlpha(fg, locked ? 0x44 : 0xAA));
@@ -337,17 +344,17 @@ public final class LyricsOrderedListPreference extends Preference {
         if (from == to || from < 0 || to < 0) {
             return;
         }
-        final Item moved = items.remove(from);
+        Item moved = items.remove(from);
         items.add(from < to ? to - 1 : to, moved);
         dragReordered = true;
     }
 
     private void loadItems() {
         items.clear();
-        final String stored = Settings.LYRICS_SOURCE.get();
-        final Set<String> seen = new HashSet<>();
+        String stored = Settings.LYRICS_SOURCE.get();
+        Set<String> seen = new HashSet<>();
 
-        if (stored != null && stored.contains(",")) {
+        if (stored.contains(",")) {
             for (String raw : stored.split(",")) {
                 String token = raw.trim();
                 if (token.isEmpty()) {
@@ -393,6 +400,7 @@ public final class LyricsOrderedListPreference extends Preference {
         }
         StringBuilder sb = new StringBuilder();
         for (Item item : items) {
+            //noinspection SizeReplaceableByIsEmpty
             if (sb.length() > 0) {
                 sb.append(',');
             }
@@ -414,7 +422,7 @@ public final class LyricsOrderedListPreference extends Preference {
         if (enabled.isEmpty()) {
             setSummary(str("morphe_music_lyrics_source_all_disabled"));
         } else {
-            setSummary(android.text.TextUtils.join(" > ", enabled));
+            setSummary(TextUtils.join(" > ", enabled));
         }
     }
 }

@@ -217,7 +217,7 @@ public final class DeezerProvider implements LyricsProvider {
 
             if (syncJson != null && syncJson.length() > 0) {
                 return parseSyncedLyrics(syncJson, trackId, rawFormat);
-            } else if (lyricsText != null && !lyricsText.isEmpty()) {
+            } else if (!lyricsText.isEmpty()) {
                 return parsePlainText(lyricsText, trackId, rawFormat);
             }
 

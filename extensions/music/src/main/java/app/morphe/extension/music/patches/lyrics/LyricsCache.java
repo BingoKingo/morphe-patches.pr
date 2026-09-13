@@ -22,16 +22,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
-import app.morphe.extension.music.patches.lyrics.LyricsLine;
-import app.morphe.extension.music.patches.lyrics.LyricsMerge;
 
 /**
  * Two level lyrics cache: an in memory map for the current session,
  * and a disk cache so that replaying a track needs no network.
  */
 final class LyricsCache {
-
 
     private static final int MEMORY_ENTRIES = 200;
 
@@ -45,25 +43,14 @@ final class LyricsCache {
     private static final String HEADER_SONGWRITERS = "#songwriters=";
     private static final String NOT_FOUND_MARKER = "#notfound";
 
-    private static final Map<String, Lyrics> memoryCache =
-            new ConcurrentHashMap<>(MEMORY_ENTRIES);
+    private static final Map<String, Lyrics> memoryCache = new ConcurrentHashMap<>(MEMORY_ENTRIES);
 
     private LyricsCache() {
     }
 
     @Nullable
     static Lyrics get(TrackInfo track, String source) {
-        String key = key(track, source);
-        Lyrics cached = memoryCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-
-        Lyrics fromDisk = readFromDisk(key);
-        if (fromDisk != null) {
-            memoryCache.put(key, fromDisk);
-        }
-        return fromDisk;
+        return memoryCache.computeIfAbsent(key(track, source), LyricsCache::readFromDisk);
     }
 
     static void put(TrackInfo track, String source, Lyrics lyrics) {
@@ -110,6 +97,7 @@ final class LyricsCache {
             Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
             trimDiskCache();
         } catch (IOException ex) {
+            Logger.printInfo(() -> "Could not write translation", ex);
         }
     }
 

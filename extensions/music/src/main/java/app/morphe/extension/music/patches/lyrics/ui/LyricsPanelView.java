@@ -410,7 +410,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                 // to another engagement panel gives no lyrics state change to react to,
                 // so the wanted state is reapplied on every tick rather than on changes.
                 syncOverlay();
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                Logger.printDebug(() -> "Could not update lyrics panel view", ex);
             }
             handler.postDelayed(this, TICK_INTERVAL_MILLISECONDS);
         }
@@ -1613,6 +1614,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             // Reserve padding for the label only when one is actually shown, otherwise
             // the reserved space pushes the icon to the left of the pill.
             CharSequence currentText = button.getText();
+            //noinspection SizeReplaceableByIsEmpty
             button.setCompoundDrawablePadding(
                     currentText != null && currentText.length() > 0 ? Dim.dp8 : 0);
         }

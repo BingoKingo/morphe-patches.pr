@@ -346,22 +346,22 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private Lyrics parseSyllableLines(JSONArray linesArr, String rawJson,
                                        @Nullable String sourceUrl) {
-        final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
+        List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
-        for (int i = 0; i < linesArr.length(); i++) {
+        for (int i = 0, length = linesArr.length(); i < length; i++) {
             JSONObject lineObj = linesArr.optJSONObject(i);
             if (lineObj == null) {
                 continue;
             }
 
             final long startTimeMs = parseStartTimeMs(lineObj);
-            final String text = lineObj.optString("words", "").trim();
+            String text = lineObj.optString("words", "").trim();
             if (text.isEmpty()) {
                 continue;
             }
 
-            final JSONArray syllablesArr = lineObj.optJSONArray("syllables");
-            final List<Word> words;
+            JSONArray syllablesArr = lineObj.optJSONArray("syllables");
+            List<Word> words;
             if (syllablesArr != null && syllablesArr.length() > 0) {
                 words = parseSyllables(syllablesArr, text);
             } else {
