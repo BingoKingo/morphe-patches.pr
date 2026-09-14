@@ -17,7 +17,6 @@ import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,14 +43,15 @@ import app.morphe.extension.music.patches.lyrics.requests.DeezerProvider;
 import app.morphe.extension.music.patches.lyrics.requests.KuGouProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LocalLyricsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.LrcLibProvider;
+import app.morphe.extension.music.patches.lyrics.requests.LyricifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LunaProvider;
-import app.morphe.extension.music.patches.lyrics.requests.LyricallyAppleMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.MusixmatchProvider;
 import app.morphe.extension.music.patches.lyrics.requests.NetEaseProvider;
 import app.morphe.extension.music.patches.lyrics.requests.QQProvider;
 import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
+import app.morphe.extension.music.patches.lyrics.requests.YTMusicProvider;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.shared.VideoInformation;
 import app.morphe.extension.shared.Logger;
@@ -87,9 +87,6 @@ public final class LyricsManager {
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     private final List<Listener> listeners = new ArrayList<>(2);
-
-    private static final Lyrics EMPTY_CAPTIONS =
-            new Lyrics(Collections.emptyList(), Lyrics.CAPTIONS_PROVIDER, true);
 
     private static final int MAX_ARTIST_SONG_LINE_LENGTH = 80;
 
@@ -143,11 +140,11 @@ public final class LyricsManager {
         VideoInformation.addVideoIdListener(videoId -> reloadCurrentTrack());
     }
 
-    private int currentProviderIndex;
-    private int currentCandidateIndex;
-    private List<LyricsProvider> currentProviders;
-    private int currentCandidateRequestId;
-    private java.util.Map<Integer, List<Lyrics>> candidateCache;
+    private volatile int currentProviderIndex;
+    private volatile int currentCandidateIndex;
+    private volatile List<LyricsProvider> currentProviders;
+    private volatile int currentCandidateRequestId;
+    private volatile java.util.Map<Integer, List<Lyrics>> candidateCache;
 
     public static LyricsManager getInstance() {
         return INSTANCE;
@@ -615,34 +612,6 @@ public final class LyricsManager {
     }
 
     /**
-     * A track is local (not a streamed YouTube video) when the media session already exposes a
-     * local file/content URI, or when no video id is known. Streamed videos always carry a video
-     * id, so an empty id is the reliable "local song" signal used elsewhere (subtitles, Unison).
-     */
-    private boolean isLocalTrack() {
-        if (isLocalUri(currentMediaUri)) {
-            return true;
-        }
-        // The video id is set on the main thread and may not have settled yet when this runs on the
-        // executor. Wait briefly so a streamed video's id can appear (proving it is not local) and
-        // so a local song (id stays empty) is not mistaken for a video. Mirrors CaptionsFetcher.
-        for (int i = 0; i < 3; i++) {
-            if (VideoInformation.getVideoId().isEmpty()) {
-                return true;
-            }
-            if (i < 2) {
-                try {
-                    Thread.sleep(150);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
      * Resolves the file URI used to read embedded lyrics: prefer a known local URI, otherwise look
      * the on-device file up in the MediaStore by title/artist/duration.
      */
@@ -824,7 +793,7 @@ public final class LyricsManager {
             String text = line.text().trim();
             final boolean inStartBlock = i <= startBlockEnd;
             final boolean inEndBlock = i >= endBlockStart;
-            final boolean shouldFilter = inStartBlock || inEndBlock;
+            final boolean shouldFilter = (inStartBlock || inEndBlock) && isCredit[i];
 
             if (shouldFilter) {
                 if (!text.isEmpty()) {
@@ -1160,6 +1129,10 @@ public final class LyricsManager {
                 && !currentLyrics.isEmpty();
     }
 
+    public boolean areLyricsSynced() {
+        return currentLyrics != null && currentLyrics.synced() && !currentLyrics.isEmpty();
+    }
+
     @NonNull
     private static List<LyricsProvider> providersInOrder(String order) {
         List<LyricsProvider> providers = new ArrayList<>(PROVIDER_ORDER.size());
@@ -1174,9 +1147,9 @@ public final class LyricsManager {
 
     /** Canonical provider ids, in the default priority order. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
-            "Captions", "LRCLIB", "LyricallyApple", "QQ", "NetEase", "KuGou",
+            "YTMusic", "Captions", "LRCLIB", "QQ", "NetEase", "KuGou",
             "Luna", "bLyrics", "BiniLyrics",
-            "Unison", "AMLL", "Apple", "Musixmatch", "Spotify", "Deezer");
+            "Unison", "AMLL", "Lyricify", "Apple", "Musixmatch", "Spotify", "Deezer");
 
     @NonNull
     private static List<String> enabledProviderIds(String order) {
@@ -1211,38 +1184,30 @@ public final class LyricsManager {
                 result.add(token);
             }
         }
-        if (result.isEmpty()) {
-            result.addAll(PROVIDER_ORDER);
-        }
         return result;
     }
 
     @Nullable
     private static LyricsProvider providerFor(String id) {
         return switch (id) {
+            case "YTMusic" -> new YTMusicProvider();
             case "Captions" -> new CaptionsFetcher.CaptionsProvider();
             case "LRCLIB" -> new LrcLibProvider();
-            case "LyricallyApple" -> new LyricallyAppleMusicProvider();
-            case "Spotify" -> new SpotifyProvider();
             case "QQ" -> new QQProvider();
+            case "NetEase" -> new NetEaseProvider();
             case "KuGou" -> new KuGouProvider();
             case "Luna" -> new LunaProvider();
-            case "NetEase" -> new NetEaseProvider();
-            case "BiniLyrics" -> new BinimumProvider();
             case "bLyrics" -> new BlyricsProvider();
-            case "Musixmatch" -> new MusixmatchProvider();
+            case "BiniLyrics" -> new BinimumProvider();
             case "Unison" -> new UnisonProvider();
             case "AMLL" -> new AmllProvider();
             case "Apple" -> new AppleMusicProvider();
+            case "Spotify" -> new SpotifyProvider();
+            case "Lyricify" -> new LyricifyProvider();
+            case "Musixmatch" -> new MusixmatchProvider();
             case "Deezer" -> new DeezerProvider();
             default -> null;
         };
     }
 
-    /**
-     * Maps a lyrics (content) timeline position to the player video time.
-     */
-    public long toVideoTime(long contentMs) {
-        return contentMs;
-    }
 }

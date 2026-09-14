@@ -127,7 +127,7 @@ public final class LockScreenLyrics {
         String cleanedArtist = MetadataCleaner.cleanArtist(realArtist);
         return Objects.equals(track.title(), cleanedTitle)
                 && Objects.equals(track.artist(), cleanedArtist)
-                && manager.areLyricsAvailable();
+                && manager.areLyricsSynced();
     }
 
     private static String getCurrentLine() {

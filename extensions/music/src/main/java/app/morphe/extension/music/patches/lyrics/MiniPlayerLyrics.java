@@ -141,7 +141,7 @@ public final class MiniPlayerLyrics {
             return;
         }
 
-        final boolean synced = manager.areLyricsAvailable()
+        final boolean synced = manager.areLyricsSynced()
                 && Objects.equals(track.title(), displayTitle)
                 && Objects.equals(track.artist(), displayArtist);
 

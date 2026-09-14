@@ -29,6 +29,8 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     private static final String BROWSE_URL = "https://music.apple.com";
     private static final String API_BASE = "https://amp-api.music.apple.com/v1/catalog/";
+    private static final String LYRICALLY_BASE = "https://lyrics.paxsenix.org";
+    private static final String ITUNES_SEARCH = "https://itunes.apple.com/search";
 
     private static final String BROWSER_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -66,7 +68,7 @@ public final class AppleMusicProvider implements LyricsProvider {
     public Lyrics fetch(TrackInfo track) throws Exception {
         String userToken = Settings.APPLE_MUSIC_TOKEN.get();
         if (userToken.isEmpty()) {
-            return null;
+            return fetchViaLyrically(track);
         }
 
         synchronized (TOKEN_LOCK) {
@@ -78,7 +80,7 @@ public final class AppleMusicProvider implements LyricsProvider {
                 cachedSupportedLanguages = null;
             }
             if (cachedDevToken == null) {
-                return null;
+                return fetchViaLyrically(track);
             }
             if (cachedStorefront == null) {
                 resolveStorefront(userToken);
@@ -100,7 +102,12 @@ public final class AppleMusicProvider implements LyricsProvider {
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
         String userToken = Settings.APPLE_MUSIC_TOKEN.get();
         if (userToken.isEmpty()) {
-            return new ArrayList<>();
+            final Lyrics single = fetchViaLyrically(track);
+            final List<Lyrics> results = new ArrayList<>();
+            if (single != null) {
+                results.add(single);
+            }
+            return results;
         }
 
         synchronized (TOKEN_LOCK) {
@@ -112,7 +119,12 @@ public final class AppleMusicProvider implements LyricsProvider {
                 cachedSupportedLanguages = null;
             }
             if (cachedDevToken == null) {
-                return new ArrayList<>();
+                final Lyrics single = fetchViaLyrically(track);
+                final List<Lyrics> fallback = new ArrayList<>();
+                if (single != null) {
+                    fallback.add(single);
+                }
+                return fallback;
             }
             if (cachedStorefront == null) {
                 resolveStorefront(userToken);
@@ -653,5 +665,130 @@ public final class AppleMusicProvider implements LyricsProvider {
         connection.setRequestProperty("accept-language", language + ",en;q=0.9");
         connection.setRequestProperty("Cookie", "media-user-token=" + userToken);
         return connection;
+    }
+
+    // ── Lyrically fallback (no Apple Music token required) ──────────────
+
+    @Nullable
+    private Lyrics fetchViaLyrically(TrackInfo track) {
+        if (track.title().isEmpty() || track.artist().isEmpty()) {
+            return null;
+        }
+        try {
+            final String trackId = searchItunes(track);
+            if (trackId == null) {
+                return null;
+            }
+            final String ttml = fetchLyricly(trackId);
+            if (ttml == null) {
+                return null;
+            }
+            final String sourceUrl = "https://music.apple.com/song/" + trackId;
+            return TtmlParser.ttmlToLyrics(ttml, "Apple (via Lyrically)", sourceUrl);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    @Nullable
+    private static String searchItunes(TrackInfo track) {
+        HttpURLConnection connection = null;
+        try {
+            final String term = LyricsRequests.encode(track.title() + " " + track.artist());
+            final String url = ITUNES_SEARCH + "?term=" + term + "&entity=song&limit=5";
+            connection = LyricsRequests.openConnection(url);
+            final int code = connection.getResponseCode();
+            if (code != 200) {
+                return null;
+            }
+            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            final JSONArray results = root.optJSONArray("results");
+            if (results == null || results.length() == 0) {
+                return null;
+            }
+
+            final String title = track.title().toLowerCase().trim();
+            final String artist = track.artist().toLowerCase().trim();
+            String bestId = null;
+
+            for (int i = 0; i < results.length(); i++) {
+                final JSONObject item = results.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                final String itemTitle = item.optString("trackName", "");
+                final String itemArtist = item.optString("artistName", "");
+                final long itemId = item.optLong("trackId", 0);
+                if (itemId == 0) {
+                    continue;
+                }
+                if (bestId == null) {
+                    bestId = String.valueOf(itemId);
+                }
+                if (itemTitle.toLowerCase().contains(title)
+                        && itemArtist.toLowerCase().contains(artist)) {
+                    bestId = String.valueOf(itemId);
+                    break;
+                }
+            }
+            return bestId;
+        } catch (Exception ex) {
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    @Nullable
+    private static String fetchLyricly(String trackId) {
+        final String baseUrl = LYRICALLY_BASE
+                + "/apple-music/lyrics?id=" + trackId;
+        final String result = fetchLyriclyFromUrl(baseUrl);
+        if (result != null) {
+            return result;
+        }
+        return fetchLyriclyFromUrl(baseUrl + "&skip_cache=true");
+    }
+
+    @Nullable
+    private static String fetchLyriclyFromUrl(String url) {
+        HttpURLConnection connection = null;
+        try {
+            connection = LyricsRequests.openConnection(url);
+            connection.setRequestProperty("Accept", "application/json");
+            final int code = connection.getResponseCode();
+            if (code != 200) {
+                return null;
+            }
+            final JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
+            if (root == null) {
+                return null;
+            }
+
+            final String ttmlContent = root.optString("ttmlContent", "");
+            if (!ttmlContent.isEmpty()) {
+                return ttmlContent;
+            }
+
+            final String elrcMulti = root.optString("elrcMultiPerson", "");
+            if (!elrcMulti.isEmpty()) {
+                return elrcMulti;
+            }
+
+            final String elrc = root.optString("elrc", "");
+            if (!elrc.isEmpty()) {
+                return elrc;
+            }
+
+            return null;
+        } catch (Exception ex) {
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 }

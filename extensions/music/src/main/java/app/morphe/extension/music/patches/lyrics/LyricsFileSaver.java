@@ -47,6 +47,10 @@ public final class LyricsFileSaver {
                 content = rebuildKrc(lyrics.lines());
             } else if ("lrc".equals(formatType)) {
                 content = rebuildLrc(lyrics.lines());
+            } else if ("lyl".equals(formatType)) {
+                content = rebuildLyricifyLines(lyrics.lines());
+            } else if ("lys".equals(formatType)) {
+                content = rebuildLyricifySyllable(lyrics.lines());
             } else {
                 content = rebuildPlainText(lyrics.lines());
                 formatType = "txt";
@@ -134,6 +138,41 @@ public final class LyricsFileSaver {
         return sb.toString();
     }
 
+    private static String rebuildLyricifyLines(List<LyricsLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[type:LyricifyLines]\n");
+        for (LyricsLine line : lines) {
+            sb.append('[').append(line.startTimeMs())
+              .append(',').append(line.endTimeMs())
+              .append(']').append(line.text())
+              .append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static String rebuildLyricifySyllable(List<LyricsLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[from:AppleSyllable]\n");
+        for (int i = 0; i < lines.size(); i++) {
+            LyricsLine line = lines.get(i);
+            sb.append('[').append(i + 1).append(']');
+            if (line.hasWords()) {
+                List<Word> words = line.words();
+                for (int j = 0; j < words.size(); j++) {
+                    Word word = words.get(j);
+                    long durMs = word.endMs() - word.startMs();
+                    sb.append(word.text())
+                      .append('(').append(word.startMs())
+                      .append(',').append(durMs).append(')');
+                }
+            } else {
+                sb.append(line.text());
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
     private static String rebuildPlainText(List<LyricsLine> lines) {
         StringBuilder sb = new StringBuilder(50 * lines.size());
         for (int i = 0, size = lines.size(); i < size; i++) {
@@ -152,8 +191,9 @@ public final class LyricsFileSaver {
         return switch (formatType) {
             case "ttml" -> "application/ttml+xml";
             case "lyricsfile.yaml" -> "text/yaml";
-            case "json", "mxm.json", "sp.json" -> "application/json";
+            case "json", "mxm.json", "sp.json", "dzr.json", "ytm.json" -> "application/json";
             case "plain", "txt" -> "text/plain";
+            case "json3", "lyl", "lys", "lrc", "krc", "yrc", "qrc" -> "application/octet-stream";
             default -> "application/octet-stream";
         };
     }

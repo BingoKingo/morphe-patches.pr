@@ -189,7 +189,6 @@ public final class SpotifyProvider implements LyricsProvider {
                 continue;
             }
 
-            final String errorBody = parseErrorBody(connection);
             connection.disconnect();
             return null;
         }
@@ -286,22 +285,25 @@ public final class SpotifyProvider implements LyricsProvider {
         }
 
         final String syncType = lyricsObj.optString("syncType", "UNSYNCED");
+        final String provider = lyricsObj.optString("provider", null);
+        final String providerName = (provider != null && !provider.isEmpty())
+                ? name() + " (via " + provider + ")" : name();
         final JSONArray linesArr = lyricsObj.optJSONArray("lines");
         if (linesArr == null || linesArr.length() == 0) {
             return null;
         }
 
         if ("SYLLABLE_SYNCED".equals(syncType)) {
-            return parseSyllableLines(linesArr, rawJson, sourceUrl);
+            return parseSyllableLines(linesArr, providerName, rawJson, sourceUrl);
         } else if (!"UNSYNCED".equals(syncType)) {
-            return parseSyncedLines(linesArr, rawJson, sourceUrl);
+            return parseSyncedLines(linesArr, providerName, rawJson, sourceUrl);
         } else {
-            return parsePlainLines(linesArr, rawJson, sourceUrl);
+            return parsePlainLines(linesArr, providerName, rawJson, sourceUrl);
         }
     }
 
     @Nullable
-    private Lyrics parseSyncedLines(JSONArray linesArr, String rawJson, @Nullable String sourceUrl) {
+    private Lyrics parseSyncedLines(JSONArray linesArr, String providerName, String rawJson, @Nullable String sourceUrl) {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
@@ -322,7 +324,7 @@ public final class SpotifyProvider implements LyricsProvider {
         if (lines.isEmpty()) {
             return null;
         }
-        return new Lyrics(lines, name(), true, null, null, null, null, rawJson, "sp.json", sourceUrl);
+        return new Lyrics(lines, providerName, true, null, null, null, null, rawJson, "sp.json", sourceUrl);
     }
 
     private static List<Word> distributeWords(String[] tokens, long startMs, long durationMs) {
@@ -344,8 +346,8 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     @Nullable
-    private Lyrics parseSyllableLines(JSONArray linesArr, String rawJson,
-                                       @Nullable String sourceUrl) {
+    private Lyrics parseSyllableLines(JSONArray linesArr, String providerName,
+                                       String rawJson, @Nullable String sourceUrl) {
         List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0, length = linesArr.length(); i < length; i++) {
@@ -381,7 +383,7 @@ public final class SpotifyProvider implements LyricsProvider {
         if (lines.isEmpty()) {
             return null;
         }
-        return new Lyrics(lines, name(), true, null, null, null, null, rawJson, "sp.json", sourceUrl);
+        return new Lyrics(lines, providerName, true, null, null, null, null, rawJson, "sp.json", sourceUrl);
     }
 
     private static List<Word> parseSyllables(JSONArray syllablesArr, String lineText) {
@@ -435,7 +437,8 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     @Nullable
-    private Lyrics parsePlainLines(JSONArray linesArr, String rawJson, @Nullable String sourceUrl) {
+    private Lyrics parsePlainLines(JSONArray linesArr, String providerName,
+                                    String rawJson, @Nullable String sourceUrl) {
         final List<LyricsLine> lines = new ArrayList<>(linesArr.length());
 
         for (int i = 0; i < linesArr.length(); i++) {
@@ -454,7 +457,7 @@ public final class SpotifyProvider implements LyricsProvider {
         if (lines.isEmpty()) {
             return null;
         }
-        return new Lyrics(lines, name(), false, null, null, null, null, rawJson, "sp.json", sourceUrl);
+        return new Lyrics(lines, providerName, false, null, null, null, null, rawJson, "sp.json", sourceUrl);
     }
 
     @Nullable
@@ -463,6 +466,7 @@ public final class SpotifyProvider implements LyricsProvider {
             return cachedAccessToken;
         }
 
+        HttpURLConnection connection = null;
         try {
             ensureTotpSecrets();
 
@@ -476,7 +480,7 @@ public final class SpotifyProvider implements LyricsProvider {
                     + "&totpVer=" + cachedTotpVersion
                     + "&totpServer=" + totpValue;
 
-            final HttpURLConnection connection = (HttpURLConnection)
+            connection = (HttpURLConnection)
                     new java.net.URL(url).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
@@ -489,7 +493,6 @@ public final class SpotifyProvider implements LyricsProvider {
 
             final int code = connection.getResponseCode();
             if (code != 200) {
-                final String errorBody = parseErrorBody(connection);
                 return null;
             }
 
@@ -509,6 +512,8 @@ public final class SpotifyProvider implements LyricsProvider {
             return cachedAccessToken;
         } catch (Exception ex) {
             return null;
+        } finally {
+            if (connection != null) connection.disconnect();
         }
     }
 
@@ -567,7 +572,6 @@ public final class SpotifyProvider implements LyricsProvider {
 
             final int code = connection.getResponseCode();
             if (code != 200) {
-                final String errorBody = parseErrorBody(connection);
                 connection.disconnect();
                 return null;
             }
@@ -598,8 +602,9 @@ public final class SpotifyProvider implements LyricsProvider {
     }
 
     private long getServerTime(String spDc) {
+        HttpURLConnection connection = null;
         try {
-            final HttpURLConnection connection = (HttpURLConnection)
+            connection = (HttpURLConnection)
                     new java.net.URL(SERVER_TIME_URL).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
@@ -619,6 +624,8 @@ public final class SpotifyProvider implements LyricsProvider {
                 }
             }
         } catch (Exception ex) {
+        } finally {
+            if (connection != null) connection.disconnect();
         }
         return System.currentTimeMillis();
     }
@@ -711,8 +718,9 @@ public final class SpotifyProvider implements LyricsProvider {
     @Nullable
     private static String fetchUrlWithRetry(String url, int maxRetries) {
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            HttpURLConnection connection = null;
             try {
-                final HttpURLConnection connection = (HttpURLConnection)
+                connection = (HttpURLConnection)
                         new java.net.URL(url).openConnection();
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(5000);
@@ -724,6 +732,8 @@ public final class SpotifyProvider implements LyricsProvider {
                     return parseBody(connection);
                 }
             } catch (IOException ex) {
+            } finally {
+                if (connection != null) connection.disconnect();
             }
             if (attempt < maxRetries) {
                 try {
@@ -765,21 +775,6 @@ public final class SpotifyProvider implements LyricsProvider {
                 sb.append(line).append('\n');
             }
             return sb.toString();
-        }
-    }
-
-    @Nullable
-    private static String parseErrorBody(HttpURLConnection connection) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
-            final StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append('\n');
-            }
-            return sb.toString();
-        } catch (Exception ex) {
-            return null;
         }
     }
 

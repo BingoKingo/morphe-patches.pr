@@ -55,11 +55,13 @@ public class LyricsTokenDialogPreference extends Preference {
     private final String getTokenUrl;
     private final boolean multiline;
     private final TokenValidator validator;
+    private final String belowHintRes;
 
     private LyricsTokenDialogPreference(Context context, String titleRes, String instructionRes,
                                         String hintRes, String toastSavedRes, String toastClearedRes, String toastInvalidRes,
                                         StringSetting setting, String getTokenUrl,
-                                        boolean multiline, TokenValidator validator) {
+                                        boolean multiline, TokenValidator validator,
+                                        String belowHintRes) {
         super(context);
         this.titleRes = titleRes;
         this.instructionRes = instructionRes;
@@ -71,6 +73,7 @@ public class LyricsTokenDialogPreference extends Preference {
         this.getTokenUrl = getTokenUrl;
         this.multiline = multiline;
         this.validator = validator;
+        this.belowHintRes = belowHintRes;
         setSelectable(true);
         setPersistent(false);
     }
@@ -88,7 +91,8 @@ public class LyricsTokenDialogPreference extends Preference {
                 Settings.APPLE_MUSIC_TOKEN,
                 "https://music.apple.com",
                 false,
-                APPLE_VALIDATOR);
+                APPLE_VALIDATOR,
+                "morphe_music_apple_token_optional_hint");
     }
 
     public static LyricsTokenDialogPreference spotify(Context context) {
@@ -102,7 +106,8 @@ public class LyricsTokenDialogPreference extends Preference {
                 Settings.SPOTIFY_TOKEN,
                 "https://open.spotify.com",
                 false,
-                SpotifyProvider::validateToken);
+                SpotifyProvider::validateToken,
+                null);
     }
 
     public static LyricsTokenDialogPreference youtube(Context context) {
@@ -116,7 +121,8 @@ public class LyricsTokenDialogPreference extends Preference {
                 Settings.LYRICS_CAPTION_COOKIES,
                 "https://youtube.com",
                 true,
-                CaptionsFetcher::validateYouTubeCookies);
+                CaptionsFetcher::validateYouTubeCookies,
+                null);
     }
 
     public static LyricsTokenDialogPreference deezer(Context context) {
@@ -130,7 +136,8 @@ public class LyricsTokenDialogPreference extends Preference {
                 Settings.DEEZER_ARL,
                 "https://www.deezer.com",
                 false,
-                DeezerProvider::validateArl);
+                DeezerProvider::validateArl,
+                null);
     }
 
     public static LyricsTokenDialogPreference musixmatch(Context context) {
@@ -144,7 +151,8 @@ public class LyricsTokenDialogPreference extends Preference {
                 Settings.MUSIXMATCH_TOKEN,
                 "https://www.musixmatch.com",
                 false,
-                MusixmatchProvider::validateToken);
+                MusixmatchProvider::validateToken,
+                null);
     }
 
     @Override
@@ -185,6 +193,18 @@ public class LyricsTokenDialogPreference extends Preference {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        if (belowHintRes != null) {
+            TextView belowHint = new TextView(context);
+            belowHint.setText(str(belowHintRes));
+            belowHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            belowHint.setTextColor(ThemeUtils.getAppForegroundColor() & 0xAAFFFFFF);
+            LinearLayout.LayoutParams belowHintParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            belowHintParams.topMargin = Dim.dp8;
+            content.addView(belowHint, belowHintParams);
+        }
+
         TextView status = new TextView(context);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         status.setTextColor(ThemeUtils.getAppForegroundColor());
@@ -210,12 +230,13 @@ public class LyricsTokenDialogPreference extends Preference {
                         Utils.runOnBackgroundThread(() -> {
                             boolean valid = validator.validate(token);
                             Utils.runOnMainThread(() -> {
-                                if (valid) {
-                                    setting.save(token);
-                                    Utils.showToastShort(str(toastSavedRes));
-                                } else {
+                                if (!valid) {
                                     Utils.showToastShort(str(toastInvalidRes));
+                                    if (onDismissed != null) onDismissed.run();
+                                    return;
                                 }
+                                setting.save(token);
+                                Utils.showToastShort(str(toastSavedRes));
                                 if (onDismissed != null) onDismissed.run();
                             });
                         });
