@@ -25,7 +25,6 @@ import java.security.spec.ECGenParameterSpec;
 import java.util.List;
 import java.util.Locale;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;

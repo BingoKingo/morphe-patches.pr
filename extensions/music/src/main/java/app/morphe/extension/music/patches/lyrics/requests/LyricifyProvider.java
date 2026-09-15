@@ -13,7 +13,6 @@ import androidx.annotation.Nullable;
 
 import org.json.JSONObject;
 
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
@@ -24,7 +23,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
-import java.util.zip.GZIPInputStream;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
@@ -186,11 +184,7 @@ public final class LyricifyProvider implements LyricsProvider {
 
             final int code = connection.getResponseCode();
             if (code == 200) {
-                String responseBody = readPlainBody(connection);
-                if (responseBody == null || responseBody.isEmpty()) {
-                    responseBody = readGzipBody(connection);
-                }
-                connection.disconnect();
+                final String responseBody = LyricsRequests.parseGzipString(connection);
                 if (responseBody == null || responseBody.isEmpty()) {
                     return null;
                 }
@@ -201,8 +195,6 @@ public final class LyricifyProvider implements LyricsProvider {
                 }
                 return null;
             }
-
-            connection.disconnect();
         } catch (Exception e) {
         } finally {
             if (connection != null) connection.disconnect();
@@ -222,40 +214,5 @@ public final class LyricifyProvider implements LyricsProvider {
     private static String base64NoWrap(String input) {
         return Base64.encodeToString(
                 input.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
-    }
-
-    @Nullable
-    private static String readGzipBody(HttpURLConnection conn) {
-        try {
-            final InputStream raw = conn.getInputStream();
-            final InputStream in = new GZIPInputStream(raw);
-            final byte[] buf = new byte[4096];
-            final StringBuilder sb = new StringBuilder();
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-            }
-            in.close();
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    @Nullable
-    private static String readPlainBody(HttpURLConnection conn) {
-        try {
-            final InputStream in = conn.getInputStream();
-            final byte[] buf = new byte[4096];
-            final StringBuilder sb = new StringBuilder();
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-            }
-            in.close();
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
     }
 }

@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
+import app.morphe.extension.music.patches.lyrics.requests.LrcParser;
 
 /**
  * Two level lyrics cache: an in memory map for the current session,

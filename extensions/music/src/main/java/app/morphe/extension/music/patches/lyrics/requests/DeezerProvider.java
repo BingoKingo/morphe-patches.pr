@@ -15,9 +15,11 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
@@ -68,21 +70,21 @@ public final class DeezerProvider implements LyricsProvider {
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
         String arl = getArl();
         if (arl == null || arl.isEmpty()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         Session session = getSession(arl);
         if (session == null) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         JSONArray searchResults = searchTracks(track);
         if (searchResults == null || searchResults.length() == 0) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         List<Lyrics> results = new ArrayList<>();
-        for (int i = 0; i < searchResults.length() && results.size() < 5; i++) {
+        for (int i = 0; i < searchResults.length() && results.size() < LyricsRequests.MAX_CANDIDATES; i++) {
             JSONObject item = searchResults.optJSONObject(i);
             if (item == null) continue;
 
@@ -121,11 +123,15 @@ public final class DeezerProvider implements LyricsProvider {
                     + "&api_version=1.0"
                     + "&api_token=";
 
-            HttpURLConnection connection = postConnection(url, "{}", arl, null);
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Cookie", "arl=" + arl);
+            headers.put("Accept", "application/json");
+
+            HttpURLConnection connection = LyricsRequests.postJson(url, "{}", headers);
             if (connection == null) return null;
 
             String sid = null;
-            for (java.util.Map.Entry<String, java.util.List<String>> entry : connection.getHeaderFields().entrySet()) {
+            for (Map.Entry<String, List<String>> entry : connection.getHeaderFields().entrySet()) {
                 if ("Set-Cookie".equalsIgnoreCase(entry.getKey())) {
                     for (String cookie : entry.getValue()) {
                         if (cookie.startsWith("sid=")) {
@@ -170,7 +176,13 @@ public final class DeezerProvider implements LyricsProvider {
                 + "&limit=10"
                 + "&output=json";
 
-        HttpURLConnection connection = openConnection(url);
+        HttpURLConnection connection;
+        try {
+            connection = LyricsRequests.openConnection(url, 10000, 15000,
+                    Map.of("Accept", "application/json"));
+        } catch (IOException ignored) {
+            return null;
+        }
         if (connection == null) return null;
 
         try {
@@ -197,7 +209,20 @@ public final class DeezerProvider implements LyricsProvider {
 
         String body = "{\"sng_id\":" + trackId + "}";
 
-        HttpURLConnection connection = postConnection(url, body, arl, session.sid);
+        String cookie = "arl=" + arl;
+        if (session.sid != null && !session.sid.isEmpty()) {
+            cookie += "; sid=" + session.sid;
+        }
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Cookie", cookie);
+        headers.put("Accept", "application/json");
+
+        HttpURLConnection connection;
+        try {
+            connection = LyricsRequests.postJson(url, body, headers);
+        } catch (IOException ignored) {
+            return null;
+        }
         if (connection == null) return null;
 
         try {
@@ -262,58 +287,12 @@ public final class DeezerProvider implements LyricsProvider {
                 rawFormat, "dzr.json", sourceUrl);
     }
 
-    @Nullable
-    private static HttpURLConnection openConnection(String url) {
-        try {
-            HttpURLConnection connection = (HttpURLConnection) new java.net.URL(url).openConnection();
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(15000);
-            return connection;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    @Nullable
-    private static HttpURLConnection postConnection(String url, String body, String arl, @Nullable String sid) {
-        try {
-            HttpURLConnection connection = (HttpURLConnection) new java.net.URL(url).openConnection();
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            String cookie = "arl=" + arl;
-            if (sid != null && !sid.isEmpty()) {
-                cookie += "; sid=" + sid;
-            }
-            connection.setRequestProperty("Cookie", cookie);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(15000);
-            connection.setDoOutput(true);
-            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(bytes.length);
-            try (java.io.OutputStream output = connection.getOutputStream()) {
-                output.write(bytes);
-            }
-            return connection;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
     public static boolean validateArl(String arl) {
         if (arl == null || arl.isBlank() || "null".equals(arl)) return false;
         try {
-            HttpURLConnection connection = (HttpURLConnection)
-                    new URL("https://api.deezer.com/user/me").openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(5000);
-            connection.setReadTimeout(8000);
-            connection.setRequestProperty("User-Agent", LyricsRequests.userAgent());
-            connection.setRequestProperty("Cookie", "arl=" + arl);
+            HttpURLConnection connection = LyricsRequests.openConnection(
+                    "https://api.deezer.com/user/me", 5000, 8000,
+                    Map.of("Cookie", "arl=" + arl));
             final int code = connection.getResponseCode();
             connection.disconnect();
             return code == 200;

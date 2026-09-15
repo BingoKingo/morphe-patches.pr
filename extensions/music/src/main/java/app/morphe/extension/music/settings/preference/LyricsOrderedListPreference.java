@@ -56,9 +56,10 @@ public final class LyricsOrderedListPreference extends Preference {
     static {
         PROVIDER_LABELS.put("YTMusic", "YouTube Music");
         PROVIDER_LABELS.put("Captions", "YouTube Captions (Auto) *");
+        PROVIDER_LABELS.put("Apple", "Apple Music");
         PROVIDER_LABELS.put("Luna", "Soda (Luna)");
         PROVIDER_LABELS.put("bLyrics", "BetterLyrics (bLyrics)");
-        PROVIDER_LABELS.put("Apple", "Apple Music");
+        PROVIDER_LABELS.put("BiniLyrics", "BiniLyrics (Binimum)");
         PROVIDER_LABELS.put("Musixmatch", "Musixmatch *");
         PROVIDER_LABELS.put("Spotify", "Spotify *");
         PROVIDER_LABELS.put("Deezer", "Deezer *");
@@ -194,7 +195,6 @@ public final class LyricsOrderedListPreference extends Preference {
     private static boolean isTokenRequired(String id) {
         StringSetting setting = switch (id) {
             case "Captions" -> Settings.LYRICS_CAPTION_COOKIES;
-            case "Apple" -> Settings.APPLE_MUSIC_TOKEN;
             case "Spotify" -> Settings.SPOTIFY_TOKEN;
             case "Deezer" -> Settings.DEEZER_ARL;
             case "Musixmatch" -> Settings.MUSIXMATCH_TOKEN;

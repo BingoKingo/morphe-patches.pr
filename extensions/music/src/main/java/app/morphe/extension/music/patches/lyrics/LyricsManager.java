@@ -208,17 +208,8 @@ public final class LyricsManager {
         }
         long result = position - Settings.LYRICS_OFFSET_MS.get();
 
-        // Position smoothing: reject implausible forward jumps.
-        // Normal 120ms tick advances ~120ms at 1x speed.
-        // Backward jumps are real seeks — accept immediately.
-        // Reject forward jumps > 60s (likely garbage, real seeks ≤ 60s).
-        if (result > 0 && smoothedPosition >= 0) {
-            final long delta = result - smoothedPosition;
-            if (delta < 0) {
-                smoothedPosition = result;
-            } else if (delta > 60_000) {
-                return smoothedPosition;
-            }
+        if (result > 0 && smoothedPosition >= 0 && result < smoothedPosition) {
+            smoothedPosition = result;
         }
         if (result > 0) {
             smoothedPosition = result;
@@ -783,7 +774,17 @@ public final class LyricsManager {
             }
         }
 
-        // Second pass: only filter credit lines at start/end boundary blocks
+        boolean filterFirstLine = false;
+        if (startBlockEnd >= 1 && !isCredit[0]) {
+            filterFirstLine = true;
+            for (int i = 1; i <= startBlockEnd; i++) {
+                if (!isCredit[i]) {
+                    filterFirstLine = false;
+                    break;
+                }
+            }
+        }
+
         boolean[] kept = new boolean[size];
         List<String> creditLines = new ArrayList<>();
         List<LyricsLine> filteredLines = new ArrayList<>(size);
@@ -793,7 +794,8 @@ public final class LyricsManager {
             String text = line.text().trim();
             final boolean inStartBlock = i <= startBlockEnd;
             final boolean inEndBlock = i >= endBlockStart;
-            final boolean shouldFilter = (inStartBlock || inEndBlock) && isCredit[i];
+            final boolean shouldFilter = (inStartBlock || inEndBlock) && isCredit[i]
+                    || (inStartBlock && i == 0 && filterFirstLine);
 
             if (shouldFilter) {
                 if (!text.isEmpty()) {

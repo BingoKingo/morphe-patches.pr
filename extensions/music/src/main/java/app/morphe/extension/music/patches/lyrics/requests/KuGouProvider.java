@@ -31,7 +31,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.InflaterInputStream;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
@@ -54,11 +53,7 @@ public final class KuGouProvider implements LyricsProvider {
             64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, (byte) 206, (byte) 210, 110, 105
     };
 
-    private static final Pattern KRC_META = Pattern.compile("^\\[(\\w+):([^\\]]*)]$");
     private static final Pattern KRC_LINE = Pattern.compile("^\\[(\\d+),(\\d+)](.*)");
-
-    private static final java.util.Set<String> LRC_CREDIT_META_KEYS =
-            java.util.Set.of("ti", "ar", "al", "au");
 
     @Override
     public String name() {
@@ -131,7 +126,7 @@ public final class KuGouProvider implements LyricsProvider {
         } else {
             // Some tracks only expose plain LRC even when KRC is requested.
             rawFormat = new String(raw, StandardCharsets.UTF_8);
-            List<String> metadataCreditLines = extractLrcMetadata(rawFormat);
+            List<String> metadataCreditLines = LrcParser.extractCreditMetadata(rawFormat);
             krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), metadataCreditLines, null, null);
             formatType = "lrc";
         }
@@ -180,7 +175,7 @@ public final class KuGouProvider implements LyricsProvider {
 
         List<Lyrics> results = new ArrayList<>();
         for (int i = 0; i < candidates.length(); i++) {
-            if (results.size() >= 5) {
+            if (results.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
             JSONObject candidate = candidates.optJSONObject(i);
@@ -229,7 +224,7 @@ public final class KuGouProvider implements LyricsProvider {
             formatType = "krc";
         } else {
             rawFormat = new String(raw, StandardCharsets.UTF_8);
-            List<String> metadataCreditLines = extractLrcMetadata(rawFormat);
+            List<String> metadataCreditLines = LrcParser.extractCreditMetadata(rawFormat);
             krcResult = new KrcResult(LrcParser.parseSynced(rawFormat), metadataCreditLines, null, null);
             formatType = "lrc";
         }
@@ -272,8 +267,6 @@ public final class KuGouProvider implements LyricsProvider {
             return null;
         }
 
-        String wantedTitle = track.title().toLowerCase(Locale.ROOT);
-        String wantedArtist = track.artist().toLowerCase(Locale.ROOT);
         String bestHash = null;
         String bestId = null;
         int bestScore = -1;
@@ -287,21 +280,10 @@ public final class KuGouProvider implements LyricsProvider {
                 continue;
             }
 
-            String title = item.optString("songname", "").toLowerCase(Locale.ROOT);
-            String artist = item.optString("singername", "").toLowerCase(Locale.ROOT);
-            int score = 0;
-            if (!title.isEmpty() && (title.contains(wantedTitle) || wantedTitle.contains(title))) {
-                score += 2;
-            }
-            if (!artist.isEmpty() && artist.contains(wantedArtist)) {
-                score += 2;
-            }
-            if (track.durationSeconds() > 0) {
-                int duration = item.optInt("duration", 0);
-                if (duration > 0 && Math.abs(duration - track.durationSeconds()) <= 5) {
-                    score += 2;
-                }
-            }
+            String title = item.optString("songname", "");
+            String artist = item.optString("singername", "");
+            int score = LyricsRequests.scoreTrackCandidate(title, artist,
+                    item.optInt("duration", 0), track);
             if (score > bestScore) {
                 bestScore = score;
                 bestHash = hash;
@@ -384,7 +366,7 @@ public final class KuGouProvider implements LyricsProvider {
                 continue;
             }
 
-            Matcher meta = KRC_META.matcher(line);
+            Matcher meta = LrcParser.LRC_META.matcher(line);
             if (meta.matches()) {
                 String name = meta.group(1).toLowerCase(Locale.ROOT);
                 if (name.equals("offset")) {
@@ -395,7 +377,7 @@ public final class KuGouProvider implements LyricsProvider {
                 } else if (name.equals("language")) {
                     languageTag = meta.group(2);
                 } else {
-                    if (LRC_CREDIT_META_KEYS.contains(name)) {
+                    if (LrcParser.CREDIT_META_KEYS.contains(name)) {
                         String value = meta.group(2).trim();
                         if (!value.isEmpty()) {
                             creditLines.add(meta.group(1) + ":" + value);
@@ -410,27 +392,6 @@ public final class KuGouProvider implements LyricsProvider {
         return new KrcResult(lines, creditLines,
                 auxiliary == null ? null : auxiliary.romanization,
                 auxiliary == null ? null : auxiliary.translation);
-    }
-
-    private static List<String> extractLrcMetadata(String lrc) {
-        List<String> creditLines = new ArrayList<>();
-        if (lrc == null || lrc.isEmpty()) {
-            return creditLines;
-        }
-        for (String rawLine : lrc.split("\\r?\\n")) {
-            String line = rawLine.trim();
-            Matcher meta = KRC_META.matcher(line);
-            if (meta.matches()) {
-                String name = meta.group(1).toLowerCase(Locale.ROOT);
-                if (!name.equals("offset") && LRC_CREDIT_META_KEYS.contains(name)) {
-                    String value = meta.group(2).trim();
-                    if (!value.isEmpty()) {
-                        creditLines.add(meta.group(1) + ":" + value);
-                    }
-                }
-            }
-        }
-        return creditLines;
     }
 
     @Nullable

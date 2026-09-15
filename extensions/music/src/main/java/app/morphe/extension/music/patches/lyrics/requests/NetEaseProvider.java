@@ -24,13 +24,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
@@ -103,7 +101,7 @@ public final class NetEaseProvider implements LyricsProvider {
         List<JSONObject> songs = searchAll(keyword, track);
         List<Lyrics> results = new ArrayList<>();
         for (JSONObject song : songs) {
-            if (results.size() >= 5) {
+            if (results.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
             if (song == null || !song.has("id")) {
@@ -259,25 +257,11 @@ public final class NetEaseProvider implements LyricsProvider {
     }
 
     private static int scoreCandidate(JSONObject song, TrackInfo track) {
-        String title = song.optString("name", "").toLowerCase(Locale.ROOT);
-        String artist = song.optString("artist", "").toLowerCase(Locale.ROOT);
-        String wantedTitle = track.title().toLowerCase(Locale.ROOT);
-        String wantedArtist = track.artist().toLowerCase(Locale.ROOT);
-
-        int score = 0;
-        if (!title.isEmpty() && (title.contains(wantedTitle) || wantedTitle.contains(title))) {
-            score += 2;
-        }
-        if (!artist.isEmpty() && artist.contains(wantedArtist)) {
-            score += 2;
-        }
-        if (track.durationSeconds() > 0) {
-            long duration = song.optLong("duration", 0);
-            if (duration > 0 && Math.abs(duration / 1000 - track.durationSeconds()) <= 5) {
-                score += 2;
-            }
-        }
-        return score;
+        String title = song.optString("name", "");
+        String artist = song.optString("artist", "");
+        long durationMs = song.optLong("duration", 0);
+        return LyricsRequests.scoreTrackCandidate(title, artist,
+                durationMs > 0 ? durationMs / 1000 : 0, track);
     }
 
     private static List<JSONObject> searchByEapi(String keyword) throws IOException, JSONException {

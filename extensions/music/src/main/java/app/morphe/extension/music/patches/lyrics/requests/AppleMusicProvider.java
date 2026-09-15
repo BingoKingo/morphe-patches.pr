@@ -53,6 +53,36 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     private static String[] cachedSupportedLanguages;
 
+    private record ResolvedContext(String userToken, String storefront, String language) {}
+
+    @Nullable
+    private ResolvedContext resolveContext(TrackInfo track) throws Exception {
+        String userToken = Settings.APPLE_MUSIC_TOKEN.get();
+        if (userToken.isEmpty()) {
+            return null;
+        }
+
+        synchronized (TOKEN_LOCK) {
+            if (cachedDevToken == null) {
+                cachedDevToken = fetchDevToken();
+                cachedStorefront = null;
+                cachedLanguage = null;
+                cachedTranslationParam = null;
+                cachedSupportedLanguages = null;
+            }
+            if (cachedDevToken == null) {
+                return null;
+            }
+            if (cachedStorefront == null) {
+                resolveStorefront(userToken);
+            }
+        }
+
+        String storefront = cachedStorefront != null ? cachedStorefront : "us";
+        String language = cachedLanguage != null ? cachedLanguage : "en-US";
+        return new ResolvedContext(userToken, storefront, language);
+    }
+
     @Override
     public String name() {
         return "Apple";
@@ -66,42 +96,23 @@ public final class AppleMusicProvider implements LyricsProvider {
     @Nullable
     @Override
     public Lyrics fetch(TrackInfo track) throws Exception {
-        String userToken = Settings.APPLE_MUSIC_TOKEN.get();
-        if (userToken.isEmpty()) {
+        final ResolvedContext ctx = resolveContext(track);
+        if (ctx == null) {
             return fetchViaLyrically(track);
         }
 
-        synchronized (TOKEN_LOCK) {
-            if (cachedDevToken == null) {
-                cachedDevToken = fetchDevToken();
-                cachedStorefront = null;
-                cachedLanguage = null;
-                cachedTranslationParam = null;
-                cachedSupportedLanguages = null;
-            }
-            if (cachedDevToken == null) {
-                return fetchViaLyrically(track);
-            }
-            if (cachedStorefront == null) {
-                resolveStorefront(userToken);
-            }
-        }
-
-        String storefront = cachedStorefront != null ? cachedStorefront : "us";
-        String language = cachedLanguage != null ? cachedLanguage : "en-US";
-
-        String songId = searchSong(track, userToken, storefront);
+        String songId = searchSong(track, ctx.userToken, ctx.storefront);
         if (songId == null) {
             return null;
         }
 
-        return fetchLyrics(userToken, storefront, language, songId);
+        return fetchLyrics(ctx.userToken, ctx.storefront, ctx.language, songId);
     }
 
     @Override
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
-        String userToken = Settings.APPLE_MUSIC_TOKEN.get();
-        if (userToken.isEmpty()) {
+        final ResolvedContext ctx = resolveContext(track);
+        if (ctx == null) {
             final Lyrics single = fetchViaLyrically(track);
             final List<Lyrics> results = new ArrayList<>();
             if (single != null) {
@@ -110,42 +121,18 @@ public final class AppleMusicProvider implements LyricsProvider {
             return results;
         }
 
-        synchronized (TOKEN_LOCK) {
-            if (cachedDevToken == null) {
-                cachedDevToken = fetchDevToken();
-                cachedStorefront = null;
-                cachedLanguage = null;
-                cachedTranslationParam = null;
-                cachedSupportedLanguages = null;
-            }
-            if (cachedDevToken == null) {
-                final Lyrics single = fetchViaLyrically(track);
-                final List<Lyrics> fallback = new ArrayList<>();
-                if (single != null) {
-                    fallback.add(single);
-                }
-                return fallback;
-            }
-            if (cachedStorefront == null) {
-                resolveStorefront(userToken);
-            }
-        }
-
-        String storefront = cachedStorefront != null ? cachedStorefront : "us";
-        String language = cachedLanguage != null ? cachedLanguage : "en-US";
-
-        List<String> songIds = searchAllSongs(track, userToken, storefront);
+        List<String> songIds = searchAllSongs(track, ctx.userToken, ctx.storefront);
         if (songIds.isEmpty()) {
             return new ArrayList<>();
         }
 
         List<Lyrics> results = new ArrayList<>();
         for (String songId : songIds) {
-            if (results.size() >= 5) {
+            if (results.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
             try {
-                Lyrics lyrics = fetchLyrics(userToken, storefront, language, songId);
+                Lyrics lyrics = fetchLyrics(ctx.userToken, ctx.storefront, ctx.language, songId);
                 if (lyrics != null) {
                     results.add(lyrics);
                 }

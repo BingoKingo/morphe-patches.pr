@@ -19,9 +19,7 @@ import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.List;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
-import app.morphe.extension.music.patches.lyrics.LyricsFileParser;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.shared.requests.Requester;
@@ -95,7 +93,7 @@ public final class LrcLibProvider implements LyricsProvider {
         });
 
         for (JSONObject candidate : candidates) {
-            if (results.size() >= 5) {
+            if (results.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
             Lyrics lyrics = toLyrics(candidate);

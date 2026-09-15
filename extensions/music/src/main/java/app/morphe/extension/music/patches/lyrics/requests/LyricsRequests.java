@@ -23,11 +23,13 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.GZIPInputStream;
 
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.requests.Requester;
@@ -37,6 +39,7 @@ import app.morphe.extension.shared.requests.Requester;
  */
 final class LyricsRequests {
 
+    static final int MAX_CANDIDATES = 5;
     private static final int CONNECT_TIMEOUT_MILLISECONDS = 5 * 1000;
     private static final int READ_TIMEOUT_MILLISECONDS = 5 * 1000;
 
@@ -63,11 +66,33 @@ final class LyricsRequests {
     }
 
     /**
+     * Opens a GET connection with configurable timeouts and extra headers.
+     */
+    static HttpURLConnection openConnection(String url, int connectTimeoutMs,
+            int readTimeoutMs, Map<String, String> headers) throws IOException {
+        HttpURLConnection connection = Requester.openConnection(url);
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(connectTimeoutMs);
+        connection.setReadTimeout(readTimeoutMs);
+        connection.setRequestProperty("User-Agent", userAgent());
+        if (headers != null) {
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                connection.setRequestProperty(entry.getKey(), entry.getValue());
+            }
+        }
+        return connection;
+    }
+
+    /**
      * Opens a POST connection with a JSON body. The caller reads the response with
      * one of the {@link app.morphe.extension.shared.requests.Requester} parse helpers.
      */
     static HttpURLConnection postJson(String url, String json) throws IOException {
         return postConnection(url, json, "application/json; charset=utf-8", null);
+    }
+
+    static HttpURLConnection postJson(String url, String json, Map<String, String> headers) throws IOException {
+        return postConnection(url, json, "application/json; charset=utf-8", headers);
     }
 
     /**
@@ -180,5 +205,26 @@ final class LyricsRequests {
             }
         }
         lastRequestTime.set(System.currentTimeMillis());
+    }
+
+    static int scoreTrackCandidate(String title, String artist, long durationSec, TrackInfo track) {
+        String wantedTitle = track.title().toLowerCase(Locale.ROOT);
+        String wantedArtist = track.artist().toLowerCase(Locale.ROOT);
+        String t = title != null ? title.toLowerCase(Locale.ROOT) : "";
+        String a = artist != null ? artist.toLowerCase(Locale.ROOT) : "";
+
+        int score = 0;
+        if (!t.isEmpty() && (t.contains(wantedTitle) || wantedTitle.contains(t))) {
+            score += 2;
+        }
+        if (!a.isEmpty() && a.contains(wantedArtist)) {
+            score += 2;
+        }
+        if (track.durationSeconds() > 0 && durationSec > 0) {
+            if (Math.abs(durationSec - track.durationSeconds()) <= 5) {
+                score += 2;
+            }
+        }
+        return score;
     }
 }

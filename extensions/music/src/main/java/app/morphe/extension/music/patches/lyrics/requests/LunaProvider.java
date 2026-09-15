@@ -14,7 +14,9 @@ import org.json.JSONObject;
 
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,7 +24,6 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
@@ -63,11 +64,11 @@ public final class LunaProvider implements LyricsProvider {
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
         JSONArray trackIds = searchTracks(track);
         if (trackIds == null || trackIds.length() == 0) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         List<Lyrics> results = new ArrayList<>();
-        for (int i = 0; i < trackIds.length() && results.size() < 5; i++) {
+        for (int i = 0; i < trackIds.length() && results.size() < LyricsRequests.MAX_CANDIDATES; i++) {
             String trackId = trackIds.optString(i, null);
             if (trackId == null || trackId.isEmpty()) {
                 continue;
@@ -239,7 +240,7 @@ public final class LunaProvider implements LyricsProvider {
 
         JSONObject langTranslations = lyricInfo.optJSONObject("lang_translations");
         if (langTranslations != null) {
-            java.util.Iterator<String> keys = langTranslations.keys();
+            Iterator<String> keys = langTranslations.keys();
             while (keys.hasNext()) {
                 String lang = keys.next();
                 JSONObject transObj = langTranslations.optJSONObject(lang);

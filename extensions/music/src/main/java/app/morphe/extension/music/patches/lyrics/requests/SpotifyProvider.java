@@ -12,9 +12,7 @@ import androidx.annotation.Nullable;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -33,6 +31,7 @@ import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.Word;
 import app.morphe.extension.music.settings.Settings;
+import app.morphe.extension.shared.requests.Requester;
 
 public final class SpotifyProvider implements LyricsProvider {
 
@@ -167,7 +166,7 @@ public final class SpotifyProvider implements LyricsProvider {
             final int code = connection.getResponseCode();
 
             if (code == 200) {
-                final String json = parseBody(connection);
+                final String json = Requester.parseString(connection);
                 connection.disconnect();
 
                 final String trackId = parseSearchResult(json);
@@ -496,7 +495,7 @@ public final class SpotifyProvider implements LyricsProvider {
                 return null;
             }
 
-            final String body = parseBody(connection);
+            final String body = Requester.parseString(connection);
             JSONObject json = new JSONObject(body);
             final String token = json.optString("accessToken", "");
             if (token.isBlank()) {
@@ -576,7 +575,7 @@ public final class SpotifyProvider implements LyricsProvider {
                 return null;
             }
 
-            final String body = parseBody(connection);
+            final String body = Requester.parseString(connection);
             JSONObject json = new JSONObject(body);
             JSONObject grantedToken = json.optJSONObject("granted_token");
             if (grantedToken == null) {
@@ -616,7 +615,7 @@ public final class SpotifyProvider implements LyricsProvider {
 
             final int code = connection.getResponseCode();
             if (code == 200) {
-                final String body = parseBody(connection);
+                final String body = Requester.parseString(connection);
                 JSONObject json = new JSONObject(body);
                 final long serverTime = json.optLong("serverTime", 0);
                 if (serverTime > 0) {
@@ -729,7 +728,7 @@ public final class SpotifyProvider implements LyricsProvider {
 
                 final int code = connection.getResponseCode();
                 if (code == 200) {
-                    return parseBody(connection);
+                    return Requester.parseString(connection);
                 }
             } catch (IOException ex) {
             } finally {
@@ -764,18 +763,6 @@ public final class SpotifyProvider implements LyricsProvider {
             }
         }
         return 3000; // default 3 seconds
-    }
-
-    private static String parseBody(HttpURLConnection connection) throws IOException {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-            final StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append('\n');
-            }
-            return sb.toString();
-        }
     }
 
     public static void invalidateToken() {

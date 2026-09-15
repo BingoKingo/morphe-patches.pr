@@ -15,6 +15,7 @@ import org.json.JSONObject;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
@@ -373,7 +374,7 @@ public final class YTMusicProvider implements LyricsProvider {
         conn.setDoOutput(true);
 
         if (sendAuth) {
-            for (java.util.Map.Entry<String, String> entry :
+            for (Map.Entry<String, String> entry :
                     AuthUtils.getRequestHeader().entrySet()) {
                 if (!entry.getValue().isEmpty()) {
                     conn.setRequestProperty(entry.getKey(), entry.getValue());

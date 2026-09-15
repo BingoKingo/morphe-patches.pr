@@ -17,6 +17,7 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,7 +48,7 @@ public final class CaptionsFetcher {
                     + "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
 
     private static final String SW_COOKIE_URL = "https://www.youtube.com/sw.js";
-    private static final List<String> COOKIE_KEYS = java.util.Arrays.asList(
+    private static final List<String> COOKIE_KEYS = Arrays.asList(
             "YSC", "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA", "__Secure-ROLLOUT_TOKEN"
     );
     private static volatile String cachedCookies = null;
@@ -150,7 +151,7 @@ public final class CaptionsFetcher {
 
             Lyrics result = outcome.lyrics;
             if (outcome.translationLyrics != null && !outcome.translationLyrics.isEmpty()) {
-                String langTag = java.util.Locale.getDefault().toLanguageTag();
+                String langTag = Locale.getDefault().toLanguageTag();
                 Map<String, List<LyricsLine>> translations = new java.util.HashMap<>();
                 translations.put(langTag, outcome.translationLyrics.lines());
                 result = new Lyrics(result.lines(), result.providerName(), result.synced(),

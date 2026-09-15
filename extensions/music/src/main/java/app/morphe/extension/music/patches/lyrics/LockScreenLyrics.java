@@ -121,10 +121,9 @@ public final class LockScreenLyrics {
         if (track == null) {
             return false;
         }
-        // The manager stores cleaned metadata, while realTitle/realArtist are raw, so both
-        // sides must be normalized before comparing.
-        String cleanedTitle = MetadataCleaner.cleanTitle(realTitle);
-        String cleanedArtist = MetadataCleaner.cleanArtist(realArtist);
+        String[] parsed = MetadataCleaner.parseTitleAndArtist(realTitle);
+        String cleanedTitle = parsed != null ? parsed[1] : MetadataCleaner.cleanTitle(realTitle);
+        String cleanedArtist = parsed != null ? parsed[0] : MetadataCleaner.cleanArtist(realArtist);
         return Objects.equals(track.title(), cleanedTitle)
                 && Objects.equals(track.artist(), cleanedArtist)
                 && manager.areLyricsSynced();

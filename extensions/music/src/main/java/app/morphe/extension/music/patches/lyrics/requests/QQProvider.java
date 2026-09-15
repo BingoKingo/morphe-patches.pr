@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.LyricsMerge;
@@ -58,13 +57,9 @@ public final class QQProvider implements LyricsProvider {
     private static final Pattern QRC_XML = Pattern.compile(
             "<Lyric_1 LyricType=\"1\" LyricContent=\"([\\s\\S]*?)\"/>");
     private static final Pattern NUMERIC_ENTITY = Pattern.compile("&#(\\d+);");
-    private static final Pattern QRC_META = Pattern.compile("^\\[(\\w+):([^\\]]*)]$");
     private static final Pattern QRC_LINE = Pattern.compile("^\\[(\\d+),(\\d+)](.*)");
     private static final Pattern QRC_WORD = Pattern.compile("\\((\\d+),(\\d+)\\)");
     private static final Pattern QRC_WHOLE_LINE_COMMENT = Pattern.compile("//");
-
-    private static final java.util.Set<String> LRC_CREDIT_META_KEYS =
-            java.util.Set.of("ti", "ar", "al", "au");
 
     @Override
     public String name() {
@@ -93,7 +88,7 @@ public final class QQProvider implements LyricsProvider {
         List<JSONObject> candidates = searchAll(keyword, track);
         List<Lyrics> results = new ArrayList<>();
         for (JSONObject song : candidates) {
-            if (results.size() >= 5) {
+            if (results.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
             if (song == null || !song.has("id")) {
@@ -236,25 +231,10 @@ public final class QQProvider implements LyricsProvider {
     }
 
     private static int scoreCandidate(JSONObject item, TrackInfo track) {
-        String title = item.optString("title", "").toLowerCase(Locale.ROOT);
-        String artist = singers(item).toLowerCase(Locale.ROOT);
-        String wantedTitle = track.title().toLowerCase(Locale.ROOT);
-        String wantedArtist = track.artist().toLowerCase(Locale.ROOT);
-
-        int score = 0;
-        if (!title.isEmpty() && (title.contains(wantedTitle) || wantedTitle.contains(title))) {
-            score += 2;
-        }
-        if (!artist.isEmpty() && artist.contains(wantedArtist)) {
-            score += 2;
-        }
-        if (track.durationSeconds() > 0) {
-            int duration = item.optInt("interval", 0);
-            if (duration > 0 && Math.abs(duration - track.durationSeconds()) <= 5) {
-                score += 2;
-            }
-        }
-        return score;
+        String title = item.optString("title", "");
+        String artist = singers(item);
+        return LyricsRequests.scoreTrackCandidate(title, artist,
+                item.optInt("interval", 0), track);
     }
 
     private static String singers(JSONObject item) {
@@ -396,7 +376,7 @@ public final class QQProvider implements LyricsProvider {
             if (line.isEmpty()) {
                 continue;
             }
-            Matcher m = QRC_META.matcher(line);
+            Matcher m = LrcParser.LRC_META.matcher(line);
             if (!m.matches()) {
                 continue;
             }
@@ -409,7 +389,7 @@ public final class QQProvider implements LyricsProvider {
                 }
                 continue;
             }
-            if (LRC_CREDIT_META_KEYS.contains(key.toLowerCase(Locale.ROOT))) {
+            if (LrcParser.CREDIT_META_KEYS.contains(key.toLowerCase(Locale.ROOT))) {
                 String trimmed = value.trim();
                 if (!trimmed.isEmpty()) {
                     metadata.add(key + ":" + trimmed);
@@ -458,7 +438,7 @@ public final class QQProvider implements LyricsProvider {
                 continue;
             }
 
-            if (QRC_META.matcher(line).matches()) {
+            if (LrcParser.LRC_META.matcher(line).matches()) {
                 continue;
             }
 

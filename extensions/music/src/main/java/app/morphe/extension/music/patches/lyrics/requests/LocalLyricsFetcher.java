@@ -24,8 +24,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-import app.morphe.extension.music.patches.lyrics.LrcParser;
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
 import app.morphe.extension.shared.Utils;
@@ -537,7 +537,7 @@ public final class LocalLyricsFetcher {
                     final long min = tsMs / 60_000;
                     final long sec = (tsMs / 1000) % 60;
                     final long cs = (tsMs % 1000) / 10;
-                    sb.append(String.format(java.util.Locale.US, "[%02d:%02d.%02d]", min, sec, cs));
+                    sb.append(String.format(Locale.US, "[%02d:%02d.%02d]", min, sec, cs));
                 }
                 sb.append(seg).append('\n');
             }

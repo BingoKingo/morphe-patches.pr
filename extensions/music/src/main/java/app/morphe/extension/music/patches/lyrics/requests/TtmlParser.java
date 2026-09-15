@@ -62,6 +62,105 @@ final class TtmlParser {
     private TtmlParser() {
     }
 
+    private record HeadMetadata(
+            List<String> songwriters,
+            List<String> amllCredits,
+            Map<String, AgentInfo> agentTypes,
+            Map<String, List<RomajiSyllable>> sidecarRoman,
+            Map<String, SidecarTranslation> sidecarTrans) {}
+
+    private static HeadMetadata parseHeadMetadata(String ttml) {
+        List<String> songwriters = new ArrayList<>();
+        List<String> amllCredits = new ArrayList<>();
+        Map<String, AgentInfo> agentTypes = new HashMap<>();
+        Map<String, List<RomajiSyllable>> sidecarRoman = new HashMap<>();
+        Map<String, SidecarTranslation> sidecarTrans = new HashMap<>();
+
+        try {
+            final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+            factory.setNamespaceAware(true);
+            final XmlPullParser p = factory.newPullParser();
+            p.setInput(new StringReader(ttml));
+
+            boolean inHead = false;
+            boolean inSongwriters = false;
+            boolean inAgent = false;
+            int songwritersDepth = 0;
+            String agentId = null;
+            String agentType = null;
+            String agentName = null;
+
+            int event = p.getEventType();
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG) {
+                    final String local = localName(p.getName());
+                    if ("head".equals(local)) {
+                        inHead = true;
+                    } else if (inHead) {
+                        if ("songwriters".equals(local)) {
+                            inSongwriters = true;
+                            songwritersDepth = 1;
+                        } else if (inSongwriters) {
+                            songwritersDepth++;
+                            if ("songwriter".equals(local)) {
+                                final String name = readTextContent(p);
+                                if (name != null && !name.trim().isEmpty()) {
+                                    songwriters.add(name.trim());
+                                }
+                            }
+                        } else if ("meta".equals(local) && NS_AMLL.equals(p.getNamespace())) {
+                            final String key = getAttr(p, NS_AMLL, "key", "amll:key");
+                            final String value = getAttr(p, NS_AMLL, "value", "amll:value");
+                            if (key != null && value != null && !key.isEmpty() && !value.isEmpty()
+                                    && !AMLL_EXCLUDED_KEYS.contains(key)) {
+                                amllCredits.add(key + ": " + value.trim());
+                            }
+                        } else if ("agent".equals(local)) {
+                            agentId = getAttr(p, NS_TTM, "id", "xml:id");
+                            agentType = getAttr(p, NS_TTM, "type", "ttm:type");
+                            if (agentType == null) {
+                                agentType = getAttr(p, null, "type", "type");
+                            }
+                            agentName = null;
+                            inAgent = true;
+                        } else if (inAgent && "name".equals(local)) {
+                            final String name = readTextContent(p);
+                            if (name != null && !name.trim().isEmpty()) {
+                                agentName = name.trim();
+                            }
+                        } else if ("transliterations".equals(local)) {
+                            collectSidecarTransliterations(p, sidecarRoman);
+                        } else if ("translations".equals(local)) {
+                            collectSidecarTranslations(p, sidecarTrans);
+                        }
+                    }
+                } else if (event == XmlPullParser.END_TAG) {
+                    final String local = localName(p.getName());
+                    if ("head".equals(local)) {
+                        inHead = false;
+                    } else if (inSongwriters && "songwriters".equals(local)) {
+                        songwritersDepth--;
+                        if (songwritersDepth <= 0) {
+                            inSongwriters = false;
+                        }
+                    } else if (inAgent && "agent".equals(local)) {
+                        if (agentId != null && agentType != null) {
+                            agentTypes.put(agentId, new AgentInfo(agentType, agentName));
+                        }
+                        inAgent = false;
+                        agentId = null;
+                        agentType = null;
+                        agentName = null;
+                    }
+                }
+                event = p.next();
+            }
+        } catch (XmlPullParserException | IOException ignored) {
+        }
+
+        return new HeadMetadata(songwriters, amllCredits, agentTypes, sidecarRoman, sidecarTrans);
+    }
+
     private static final String AGENT_TYPE_PERSON = "person";
     private static final String AGENT_TYPE_GROUP = "group";
     private static final String AGENT_TYPE_OTHER = "other";
@@ -134,24 +233,23 @@ final class TtmlParser {
             return null;
         }
         try {
-            final List<String> rawSongwriters = parseSongwriters(ttml);
+            final HeadMetadata hm = parseHeadMetadata(ttml);
+
             final List<String> songwriters;
-            if (!rawSongwriters.isEmpty()) {
+            if (!hm.songwriters().isEmpty()) {
                 StringBuilder sb = new StringBuilder("Written by ");
-                for (int i = 0; i < rawSongwriters.size(); i++) {
+                for (int i = 0; i < hm.songwriters().size(); i++) {
                     if (i > 0) sb.append(" · ");
-                    sb.append(rawSongwriters.get(i));
+                    sb.append(hm.songwriters().get(i));
                 }
                 songwriters = List.of(sb.toString());
             } else {
                 songwriters = null;
             }
-            final List<String> amllCreditLines = parseAmllMetadata(ttml);
-            final Map<String, AgentInfo> agentTypes = parseAgentTypes(ttml);
-            final Map<String, List<RomajiSyllable>> sidecarRoman =
-                    parseSidecarTransliterations(ttml);
-            final Map<String, SidecarTranslation> sidecarTrans =
-                    parseSidecarTranslations(ttml);
+            final List<String> amllCreditLines = hm.amllCredits();
+            final Map<String, AgentInfo> agentTypes = hm.agentTypes();
+            final Map<String, List<RomajiSyllable>> sidecarRoman = hm.sidecarRoman();
+            final Map<String, SidecarTranslation> sidecarTrans = hm.sidecarTrans();
 
             final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
             factory.setNamespaceAware(true);
@@ -348,140 +446,6 @@ final class TtmlParser {
         }
     }
 
-    private static List<String> parseSongwriters(String ttml)
-            throws XmlPullParserException, IOException {
-        final List<String> result = new ArrayList<>();
-        final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-        factory.setNamespaceAware(true);
-        final XmlPullParser p = factory.newPullParser();
-        p.setInput(new StringReader(ttml));
-
-        boolean inSongwriters = false;
-        int depth = 0;
-        int event = p.getEventType();
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG) {
-                final String local = localName(p.getName());
-                if ("songwriters".equals(local)) {
-                    inSongwriters = true;
-                    depth = 1;
-                } else if (inSongwriters) {
-                    depth++;
-                    if ("songwriter".equals(local)) {
-                        final String name = readTextContent(p);
-                        if (name != null && !name.trim().isEmpty()) {
-                            result.add(name.trim());
-                        }
-                    }
-                }
-            } else if (event == XmlPullParser.END_TAG) {
-                if (inSongwriters) {
-                    depth--;
-                    if (depth <= 0) {
-                        break;
-                    }
-                }
-            }
-            event = p.next();
-        }
-        return result;
-    }
-
-    private static List<String> parseAmllMetadata(String ttml) {
-        final List<String> result = new ArrayList<>();
-        try {
-            final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-            factory.setNamespaceAware(true);
-            final XmlPullParser p = factory.newPullParser();
-            p.setInput(new StringReader(ttml));
-
-            boolean inHead = false;
-            int event = p.getEventType();
-            while (event != XmlPullParser.END_DOCUMENT) {
-                if (event == XmlPullParser.START_TAG) {
-                    final String local = localName(p.getName());
-                    if ("head".equals(local)) {
-                        inHead = true;
-                    } else if (inHead && "meta".equals(local)) {
-                        // Match <amll:meta key="xxx" value="yyy"/> or <amll:meta key="xxx" value="yyy">
-                        // by checking namespace
-                        final String ns = p.getNamespace();
-                        if (NS_AMLL.equals(ns)) {
-                            final String key = getAttr(p, NS_AMLL, "key", "amll:key");
-                            final String value = getAttr(p, NS_AMLL, "value", "amll:value");
-                            if (key != null && value != null && !key.isEmpty() && !value.isEmpty()
-                                    && !AMLL_EXCLUDED_KEYS.contains(key)) {
-                                result.add(key + ": " + value.trim());
-                            }
-                        }
-                    }
-                } else if (event == XmlPullParser.END_TAG) {
-                    final String local = localName(p.getName());
-                    if ("head".equals(local)) {
-                        inHead = false;
-                    }
-                }
-                event = p.next();
-            }
-        } catch (XmlPullParserException | IOException ignored) {
-            // If parsing fails, return what we have
-        }
-        return result;
-    }
-
-    private static Map<String, AgentInfo> parseAgentTypes(String ttml)
-            throws XmlPullParserException, IOException {
-        final Map<String, AgentInfo> map = new HashMap<>();
-        final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-        factory.setNamespaceAware(true);
-        final XmlPullParser p = factory.newPullParser();
-        p.setInput(new StringReader(ttml));
-
-        boolean inHead = false;
-        boolean inAgent = false;
-        String agentId = null;
-        String agentType = null;
-        String agentName = null;
-
-        int event = p.getEventType();
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG) {
-                final String local = localName(p.getName());
-                if ("head".equals(local)) {
-                    inHead = true;
-                } else if (inHead && "agent".equals(local)) {
-                    agentId = getAttr(p, NS_TTM, "id", "xml:id");
-                    agentType = getAttr(p, NS_TTM, "type", "ttm:type");
-                    if (agentType == null) {
-                        agentType = getAttr(p, null, "type", "type");
-                    }
-                    agentName = null;
-                    inAgent = true;
-                } else if (inAgent && "name".equals(local)) {
-                    final String name = readTextContent(p);
-                    if (name != null && !name.trim().isEmpty()) {
-                        agentName = name.trim();
-                    }
-                }
-            } else if (event == XmlPullParser.END_TAG) {
-                final String local = localName(p.getName());
-                if ("head".equals(local)) {
-                    inHead = false;
-                } else if (inAgent && "agent".equals(local)) {
-                    if (agentId != null && agentType != null) {
-                        map.put(agentId, new AgentInfo(agentType, agentName));
-                    }
-                    inAgent = false;
-                    agentId = null;
-                    agentType = null;
-                    agentName = null;
-                }
-            }
-            event = p.next();
-        }
-        return map;
-    }
-
     private static void resolveDuet(List<LyricsLine> lines, Map<String, AgentInfo> agentTypes) {
         String lastPersonAgentId = null;
         boolean lastPersonIsDuet = false;
@@ -537,27 +501,6 @@ final class TtmlParser {
         } catch (NumberFormatException e) {
             return 0;
         }
-    }
-
-    private static Map<String, List<RomajiSyllable>> parseSidecarTransliterations(String ttml)
-            throws XmlPullParserException, IOException {
-        final Map<String, List<RomajiSyllable>> map = new HashMap<>();
-        final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-        factory.setNamespaceAware(true);
-        final XmlPullParser p = factory.newPullParser();
-        p.setInput(new StringReader(ttml));
-
-        int event = p.getEventType();
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG) {
-                final String local = localName(p.getName());
-                if ("transliterations".equals(local)) {
-                    collectSidecarTransliterations(p, map);
-                }
-            }
-            event = p.next();
-        }
-        return map;
     }
 
     private static void collectSidecarTransliterations(XmlPullParser p,
@@ -646,27 +589,6 @@ final class TtmlParser {
             }
         }
         return syllables;
-    }
-
-    private static Map<String, SidecarTranslation> parseSidecarTranslations(String ttml)
-            throws XmlPullParserException, IOException {
-        final Map<String, SidecarTranslation> map = new HashMap<>();
-        final XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-        factory.setNamespaceAware(true);
-        final XmlPullParser p = factory.newPullParser();
-        p.setInput(new StringReader(ttml));
-
-        int event = p.getEventType();
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG) {
-                final String local = localName(p.getName());
-                if ("translations".equals(local)) {
-                    collectSidecarTranslations(p, map);
-                }
-            }
-            event = p.next();
-        }
-        return map;
     }
 
     private static void collectSidecarTranslations(XmlPullParser p,

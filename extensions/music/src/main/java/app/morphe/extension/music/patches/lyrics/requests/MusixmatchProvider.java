@@ -17,12 +17,15 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import app.morphe.extension.music.patches.lyrics.Lyrics;
 import app.morphe.extension.music.patches.lyrics.LyricsLine;
@@ -47,6 +50,7 @@ public final class MusixmatchProvider implements LyricsProvider {
     private static final long REQUEST_THROTTLE_MS = 500;
 
     private static final AtomicLong lastRequestTime = new AtomicLong(0);
+    private static final Object TOKEN_LOCK = new Object();
     private static String cachedToken = null;
     private static String[] cachedLanguages = null;
 
@@ -71,12 +75,12 @@ public final class MusixmatchProvider implements LyricsProvider {
     public List<Lyrics> fetchCandidates(TrackInfo track) throws Exception {
         final String token = ensureToken();
         if (token == null) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         final List<Integer> trackIds = searchTracks(track, token);
         if (trackIds.isEmpty()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         final String lang = resolveLanguage();
@@ -104,93 +108,97 @@ public final class MusixmatchProvider implements LyricsProvider {
 
     @Nullable
     private String ensureToken() throws IOException, JSONException {
-        final String userToken = Settings.MUSIXMATCH_TOKEN.get();
-        if (userToken != null && !userToken.isBlank() && isUsableToken(userToken)) {
-            cachedToken = userToken;
-            ensureLanguagesPopulated(cachedToken);
-            return cachedToken;
-        }
-
-        if (cachedToken != null && !cachedToken.isEmpty()) {
-            ensureLanguagesPopulated(cachedToken);
-            return cachedToken;
-        }
-
-        final String url = TOKEN_URL
-                + "?user_language=en"
-                + "&app_id=" + APP_ID
-                + "&t=" + requestId();
-
-        final HttpURLConnection connection = openApi(url);
-        try {
-            final int httpCode = connection.getResponseCode();
-            if (httpCode != 200) {
-                return null;
+        synchronized (TOKEN_LOCK) {
+            final String userToken = Settings.MUSIXMATCH_TOKEN.get();
+            if (userToken != null && !userToken.isBlank() && isUsableToken(userToken)) {
+                cachedToken = userToken;
+                ensureLanguagesPopulated(cachedToken);
+                return cachedToken;
             }
 
-            JSONObject root = Requester.parseJSONObject(connection);
-            final int status = headerStatus(root);
-            final String hint = headerHint(root);
-            if (status == 401) {
-                if ("captcha".equalsIgnoreCase(hint)) {
-                    return null;
-                }
-            }
-            if (status != 200) {
-                return null;
+            if (cachedToken != null && !cachedToken.isEmpty()) {
+                ensureLanguagesPopulated(cachedToken);
+                return cachedToken;
             }
 
-            JSONObject body = obj(obj(root, "message"), "body");
-            if (body != null) {
-                final String t = body.optString("user_token", null);
-                if (isUsableToken(t)) {
-                    cachedToken = t;
-                }
-                JSONObject appConfig = body.optJSONObject("app_config");
-                if (appConfig != null) {
-                    final JSONArray langs = appConfig.optJSONArray("languages");
-                    if (langs != null && langs.length() > 0) {
-                        cachedLanguages = new String[langs.length()];
-                        for (int i = 0; i < langs.length(); i++) {
-                            cachedLanguages[i] = langs.optString(i, null);
-                        }
-                    }
-                }
-            }
-            return cachedToken;
-        } finally {
-            connection.disconnect();
-        }
-    }
-
-    private void ensureLanguagesPopulated(String token) {
-        if (cachedLanguages != null) return;
-        try {
             final String url = TOKEN_URL
                     + "?user_language=en"
                     + "&app_id=" + APP_ID
                     + "&t=" + requestId();
+
             final HttpURLConnection connection = openApi(url);
             try {
                 final int httpCode = connection.getResponseCode();
                 if (httpCode != 200) {
-                    return;
+                    return null;
                 }
+
                 JSONObject root = Requester.parseJSONObject(connection);
-                JSONObject body = obj(obj(root, "message"), "body");
-                if (body == null) return;
-                JSONObject appConfig = body.optJSONObject("app_config");
-                if (appConfig == null) return;
-                final JSONArray langs = appConfig.optJSONArray("languages");
-                if (langs == null || langs.length() == 0) return;
-                cachedLanguages = new String[langs.length()];
-                for (int i = 0; i < langs.length(); i++) {
-                    cachedLanguages[i] = langs.optString(i, null);
+                final int status = headerStatus(root);
+                final String hint = headerHint(root);
+                if (status == 401) {
+                    if ("captcha".equalsIgnoreCase(hint)) {
+                        return null;
+                    }
                 }
+                if (status != 200) {
+                    return null;
+                }
+
+                JSONObject body = obj(obj(root, "message"), "body");
+                if (body != null) {
+                    final String t = body.optString("user_token", null);
+                    if (isUsableToken(t)) {
+                        cachedToken = t;
+                    }
+                    JSONObject appConfig = body.optJSONObject("app_config");
+                    if (appConfig != null) {
+                        final JSONArray langs = appConfig.optJSONArray("languages");
+                        if (langs != null && langs.length() > 0) {
+                            cachedLanguages = new String[langs.length()];
+                            for (int i = 0; i < langs.length(); i++) {
+                                cachedLanguages[i] = langs.optString(i, null);
+                            }
+                        }
+                    }
+                }
+                return cachedToken;
             } finally {
                 connection.disconnect();
             }
-        } catch (Exception ignored) {
+        }
+    }
+
+    private void ensureLanguagesPopulated(String token) {
+        synchronized (TOKEN_LOCK) {
+            if (cachedLanguages != null) return;
+            try {
+                final String url = TOKEN_URL
+                        + "?user_language=en"
+                        + "&app_id=" + APP_ID
+                        + "&t=" + requestId();
+                final HttpURLConnection connection = openApi(url);
+                try {
+                    final int httpCode = connection.getResponseCode();
+                    if (httpCode != 200) {
+                        return;
+                    }
+                    JSONObject root = Requester.parseJSONObject(connection);
+                    JSONObject body = obj(obj(root, "message"), "body");
+                    if (body == null) return;
+                    JSONObject appConfig = body.optJSONObject("app_config");
+                    if (appConfig == null) return;
+                    final JSONArray langs = appConfig.optJSONArray("languages");
+                    if (langs == null || langs.length() == 0) return;
+                    cachedLanguages = new String[langs.length()];
+                    for (int i = 0; i < langs.length(); i++) {
+                        cachedLanguages[i] = langs.optString(i, null);
+                    }
+                } finally {
+                    connection.disconnect();
+                }
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -199,10 +207,12 @@ public final class MusixmatchProvider implements LyricsProvider {
         if ("en".equals(sysLang)) {
             return "en";
         }
-        if (cachedLanguages != null) {
-            for (String supported : cachedLanguages) {
-                if (sysLang.equals(supported)) {
-                    return sysLang;
+        synchronized (TOKEN_LOCK) {
+            if (cachedLanguages != null) {
+                for (String supported : cachedLanguages) {
+                    if (sysLang.equals(supported)) {
+                        return sysLang;
+                    }
                 }
             }
         }
@@ -216,9 +226,9 @@ public final class MusixmatchProvider implements LyricsProvider {
 
         final StringBuilder url = new StringBuilder(SEARCH_URL)
                 .append("?page_size=10&page=1&s_track_rating=desc")
-                .append("&q_track=").append(encode(track.title()))
-                .append("&q_artist=").append(encode(track.artist()))
-                .append("&usertoken=").append(encode(token))
+                .append("&q_track=").append(LyricsRequests.encode(track.title()))
+                .append("&q_artist=").append(LyricsRequests.encode(track.artist()))
+                .append("&usertoken=").append(LyricsRequests.encode(token))
                 .append("&format=json")
                 .append("&app_id=").append(APP_ID)
                 .append("&t=").append(requestId());
@@ -232,7 +242,7 @@ public final class MusixmatchProvider implements LyricsProvider {
         try {
             final int httpCode = connection.getResponseCode();
             if (httpCode != 200) {
-                return java.util.Collections.emptyList();
+                return Collections.emptyList();
             }
 
             JSONObject root = Requester.parseJSONObject(connection);
@@ -240,20 +250,20 @@ public final class MusixmatchProvider implements LyricsProvider {
             final String hint = headerHint(root);
             if (status == 401) {
                 if ("renew".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 } else if ("captcha".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 }
-                return java.util.Collections.emptyList();
+                return Collections.emptyList();
             }
             if (status != 200) {
-                return java.util.Collections.emptyList();
+                return Collections.emptyList();
             }
 
             JSONObject body = obj(obj(root, "message"), "body");
             final JSONArray trackList = body != null ? body.optJSONArray("track_list") : null;
             if (trackList == null || trackList.length() == 0) {
-                return java.util.Collections.emptyList();
+                return Collections.emptyList();
             }
 
             final List<Integer> result = new ArrayList<>();
@@ -278,9 +288,9 @@ public final class MusixmatchProvider implements LyricsProvider {
             String language) throws IOException, JSONException {
 
         final StringBuilder url = new StringBuilder(SUBTITLE_TRANSLATION_URL)
-                .append("?selected_language=").append(encode(language))
+                .append("?selected_language=").append(LyricsRequests.encode(language))
                 .append("&track_id=").append(trackId)
-                .append("&usertoken=").append(encode(token))
+                .append("&usertoken=").append(LyricsRequests.encode(token))
                 .append("&format=json")
                 .append("&app_id=").append(APP_ID)
                 .append("&t=").append(requestId());
@@ -298,9 +308,9 @@ public final class MusixmatchProvider implements LyricsProvider {
             final String hint = headerHint(root);
             if (status == 401) {
                 if ("renew".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 } else if ("captcha".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 }
                 return null;
             }
@@ -334,8 +344,8 @@ public final class MusixmatchProvider implements LyricsProvider {
         }
     }
 
-    private static final java.util.regex.Pattern LRC_LINE_PATTERN =
-            java.util.regex.Pattern.compile("\\[(\\d{2}):(\\d{2})\\.\\d{2}]\\s?(.*)");
+    private static final Pattern LRC_LINE_PATTERN =
+            Pattern.compile("\\[(\\d{2}):(\\d{2})\\.\\d{2}]\\s?(.*)");
 
     private static List<LyricsLine> parseTranslationLrc(String lrcBody) {
         final List<LyricsLine> lines = new ArrayList<>();
@@ -345,7 +355,7 @@ public final class MusixmatchProvider implements LyricsProvider {
             if (trimmed.isEmpty()) {
                 continue;
             }
-            final java.util.regex.Matcher m = LRC_LINE_PATTERN.matcher(trimmed);
+            final Matcher m = LRC_LINE_PATTERN.matcher(trimmed);
             if (m.matches()) {
                 final int min = Integer.parseInt(m.group(1));
                 final int sec = Integer.parseInt(m.group(2));
@@ -369,7 +379,7 @@ public final class MusixmatchProvider implements LyricsProvider {
                 .append("&subtitle_format=lrc")
                 .append("&track_id=").append(trackId)
                 .append("&f_subtitle_length_max_deviation=40")
-                .append("&usertoken=").append(encode(token))
+                .append("&usertoken=").append(LyricsRequests.encode(token))
                 .append("&format=json")
                 .append("&app_id=").append(APP_ID)
                 .append("&t=").append(requestId());
@@ -387,9 +397,9 @@ public final class MusixmatchProvider implements LyricsProvider {
             final String hint = headerHint(root);
             if (status == 401) {
                 if ("renew".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 } else if ("captcha".equalsIgnoreCase(hint)) {
-                    cachedToken = null;
+                    synchronized (TOKEN_LOCK) { cachedToken = null; }
                 }
                 return null;
             }
@@ -694,22 +704,12 @@ public final class MusixmatchProvider implements LyricsProvider {
         return o == null ? null : o.optJSONObject(key);
     }
 
-    private static String encode(String s) {
-        if (s == null) return "";
-        final byte[] utf8 = s.getBytes(StandardCharsets.UTF_8);
-        final StringBuilder sb = new StringBuilder(utf8.length * 3);
-        for (byte b : utf8) {
-            sb.append(String.format("%%%02X", b & 0xFF));
-        }
-        return sb.toString();
-    }
-
     public static boolean validateToken(String token) {
         if (!isUsableToken(token)) return false;
         try {
             final String url = SEARCH_URL
                     + "?page_size=1&page=1&q_track=a&q_artist=a"
-                    + "&usertoken=" + encode(token)
+                    + "&usertoken=" + LyricsRequests.encode(token)
                     + "&format=json"
                     + "&app_id=" + APP_ID
                     + "&t=" + requestId();
