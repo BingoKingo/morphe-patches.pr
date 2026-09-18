@@ -79,32 +79,48 @@ public final class MusixmatchProvider implements LyricsProvider {
             return Collections.emptyList();
         }
 
-        final List<Integer> trackIds = searchTracks(track, token);
-        if (trackIds.isEmpty()) {
+        final List<JSONObject> trackObjs = searchTracks(track, token);
+        if (trackObjs.isEmpty()) {
             return Collections.emptyList();
         }
 
         final String lang = resolveLanguage();
-        final List<Lyrics> results = new ArrayList<>();
-        for (int trackId : trackIds) {
+        final List<ScoredLyrics> scored = new ArrayList<>();
+        for (JSONObject trackObj : trackObjs) {
+            final int trackId = trackObj.optInt("track_id", -1);
+            if (trackId <= 0) continue;
             final Lyrics lyrics = fetchLyricsByTrackId(trackId, token);
             if (lyrics != null) {
+                int score = LyricsRequests.scoreLyricsCandidate(
+                        trackObj.optString("track_name", ""),
+                        trackObj.optString("artist_name", ""),
+                        trackObj.optInt("track_length", 0),
+                        lyrics, track);
                 if (!"en".equals(lang)) {
                     final Map<String, List<LyricsLine>> translations =
                             fetchTranslations(trackId, token, lang);
                     if (translations != null) {
-                        results.add(new Lyrics(lyrics.lines(), lyrics.providerName(),
+                        scored.add(new ScoredLyrics(score, new Lyrics(lyrics.lines(), lyrics.providerName(),
                                 lyrics.synced(), null, translations, null, null,
-                                lyrics.rawFormat(), lyrics.formatType(), lyrics.sourceUrl()));
+                                lyrics.rawFormat(), lyrics.formatType(), lyrics.sourceUrl())));
                     } else {
-                        results.add(lyrics);
+                        scored.add(new ScoredLyrics(score, lyrics));
                     }
                 } else {
-                    results.add(lyrics);
+                    scored.add(new ScoredLyrics(score, lyrics));
                 }
             }
         }
+
+        scored.sort((a, b) -> b.score - a.score);
+        final List<Lyrics> results = new ArrayList<>(scored.size());
+        for (ScoredLyrics s : scored) {
+            results.add(s.lyrics);
+        }
         return results;
+    }
+
+    private record ScoredLyrics(int score, Lyrics lyrics) {
     }
 
     @Nullable
@@ -221,7 +237,7 @@ public final class MusixmatchProvider implements LyricsProvider {
         return "en";
     }
 
-    private List<Integer> searchTracks(TrackInfo track, String token)
+    private List<JSONObject> searchTracks(TrackInfo track, String token)
             throws IOException, JSONException {
         final double durationSec = track.durationSeconds() > 0
                 ? (double) track.durationSeconds() : 0;
@@ -267,14 +283,14 @@ public final class MusixmatchProvider implements LyricsProvider {
                 return Collections.emptyList();
             }
 
-            final List<Integer> result = new ArrayList<>();
+            final List<JSONObject> result = new ArrayList<>();
             for (int i = 0; i < trackList.length(); i++) {
                 JSONObject item = trackList.optJSONObject(i);
                 JSONObject trackObj = item != null ? item.optJSONObject("track") : null;
                 if (trackObj != null) {
                     final int id = trackObj.optInt("track_id", -1);
                     if (id > 0) {
-                        result.add(id);
+                        result.add(trackObj);
                     }
                 }
             }

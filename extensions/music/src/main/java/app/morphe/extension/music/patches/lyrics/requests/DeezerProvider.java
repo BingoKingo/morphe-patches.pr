@@ -90,10 +90,11 @@ public final class DeezerProvider implements LyricsProvider {
             return Collections.emptyList();
         }
 
-        List<Lyrics> results = new ArrayList<>();
-        for (int i = 0; i < searchResults.length() && results.size() < LyricsRequests.MAX_CANDIDATES; i++) {
-            JSONObject item = searchResults.optJSONObject(i);
-            if (item == null) continue;
+        List<JSONObject> sorted = sortCandidates(searchResults, track);
+
+        List<ScoredLyrics> scored = new ArrayList<>();
+        for (JSONObject item : sorted) {
+            if (scored.size() >= LyricsRequests.MAX_CANDIDATES) break;
 
             final long trackId = item.optLong("id", -1);
             if (trackId <= 0) continue;
@@ -101,12 +102,51 @@ public final class DeezerProvider implements LyricsProvider {
             try {
                 Lyrics lyrics = fetchLyricsByTrackId(trackId, arl);
                 if (lyrics != null) {
-                    results.add(lyrics);
+                    int score = LyricsRequests.scoreLyricsCandidate(
+                            item.optString("title", ""),
+                            artistName(item),
+                            item.optInt("duration", 0),
+                            lyrics, track);
+                    scored.add(new ScoredLyrics(score, lyrics));
                 }
             } catch (Exception ignored) {
             }
         }
+
+        scored.sort((a, b) -> b.score - a.score);
+        List<Lyrics> results = new ArrayList<>(scored.size());
+        for (ScoredLyrics s : scored) {
+            results.add(s.lyrics);
+        }
         return results;
+    }
+
+    private static String artistName(JSONObject item) {
+        JSONObject artistObj = item.optJSONObject("artist");
+        return artistObj != null ? artistObj.optString("name", "") : "";
+    }
+
+    private record ScoredLyrics(int score, Lyrics lyrics) {
+    }
+
+    private static int scoreCandidate(JSONObject item, TrackInfo track) {
+        String title = item.optString("title", "");
+        JSONObject artistObj = item.optJSONObject("artist");
+        String artist = artistObj != null ? artistObj.optString("name", "") : "";
+        return LyricsRequests.scoreTrackCandidate(title, artist,
+                item.optInt("duration", 0), track);
+    }
+
+    private static List<JSONObject> sortCandidates(JSONArray searchResults, TrackInfo track) {
+        List<JSONObject> list = new ArrayList<>();
+        for (int i = 0; i < searchResults.length(); i++) {
+            JSONObject item = searchResults.optJSONObject(i);
+            if (item != null) {
+                list.add(item);
+            }
+        }
+        list.sort((a, b) -> scoreCandidate(b, track) - scoreCandidate(a, track));
+        return list;
     }
 
     @Nullable
