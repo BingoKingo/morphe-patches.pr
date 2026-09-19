@@ -153,6 +153,95 @@ final class LyricsCache {
     }
 
     @Nullable
+    static List<String> getTranslationPollination(TrackInfo track, String source,
+            String language, int expectedLineCount) {
+        File file = pollinationTranslationFile(track, source, language);
+        if (file == null || !file.exists()) {
+            return null;
+        }
+        try {
+            List<String> lines = Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
+            return lines.size() == expectedLineCount ? lines : null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    static void putTranslationPollination(TrackInfo track, String source,
+            String language, List<String> lines) {
+        File file = pollinationTranslationFile(track, source, language);
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.write(file.toPath(), lines, StandardCharsets.UTF_8);
+            trimDiskCache();
+        } catch (IOException ex) {
+            Logger.printInfo(() -> "Could not write pollination translation", ex);
+        }
+    }
+
+    @Nullable
+    private static File pollinationTranslationFile(TrackInfo track, String source, String language) {
+        File directory = cacheDirectory();
+        if (directory == null) {
+            return null;
+        }
+        return new File(directory,
+                Integer.toHexString(key(track, source).hashCode()) + ".pol." + language + ".txt");
+    }
+
+    @Nullable
+    static List<LyricsLine> getRomanizationPollination(TrackInfo track, String source,
+            int expectedLineCount) {
+        File file = pollinationRomanizationFile(track, source);
+        if (file == null || !file.exists()) {
+            return null;
+        }
+        try {
+            List<String> lines = Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
+            if (lines.size() != expectedLineCount) {
+                return null;
+            }
+            List<LyricsLine> result = new ArrayList<>(lines.size());
+            for (String line : lines) {
+                result.add(new LyricsLine(LyricsLine.NO_TIME, line));
+            }
+            return result;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    static void putRomanizationPollination(TrackInfo track, String source,
+            List<LyricsLine> lines) {
+        File file = pollinationRomanizationFile(track, source);
+        if (file == null) {
+            return;
+        }
+        try {
+            List<String> fileLines = new ArrayList<>(lines.size());
+            for (LyricsLine line : lines) {
+                fileLines.add(line.text());
+            }
+            Files.write(file.toPath(), fileLines, StandardCharsets.UTF_8);
+            trimDiskCache();
+        } catch (IOException ex) {
+            Logger.printDebug(() -> "Could not write pollination romanization cache", ex);
+        }
+    }
+
+    @Nullable
+    private static File pollinationRomanizationFile(TrackInfo track, String source) {
+        File directory = cacheDirectory();
+        if (directory == null) {
+            return null;
+        }
+        return new File(directory,
+                Integer.toHexString(key(track, source).hashCode()) + ".pol.rom.txt");
+    }
+
+    @Nullable
     private static File translationFile(TrackInfo track, String source, String language) {
         File directory = cacheDirectory();
         if (directory == null) {

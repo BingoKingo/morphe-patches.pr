@@ -501,6 +501,8 @@ Required cookies: SID, HSID, SSID, SAPISID, __Secure-3PAPISID, __Secure-1PAPISID
     <string name="morphe_music_lyrics_source_label">Source: %s</string>
     <string name="morphe_music_lyrics_translated_by_google">Translated by Google</string>
     <string name="morphe_music_lyrics_romanized_by_google">Romanized by Google</string>
+    <string name="morphe_music_lyrics_translated_by_pollinations">Translated by Pollinations</string>
+    <string name="morphe_music_lyrics_romanized_by_pollinations">Romanized by Pollinations</string>
     <!-- Tappable label under the lyrics that turns the translation on. -->
     <string name="morphe_music_lyrics_translate_hide">Translated</string>
     <string name="morphe_music_lyrics_translating">Translating…</string>
@@ -517,6 +519,8 @@ Required cookies: SID, HSID, SSID, SAPISID, __Secure-3PAPISID, __Secure-1PAPISID
     <string name="morphe_music_lyrics_hide_info_summary">Hide the credit line shown below the lyrics</string>
     <string name="morphe_music_lyrics_swap_trans_roma_title">Swap translation and romanization</string>
     <string name="morphe_music_lyrics_swap_trans_roma_summary">ON puts romanization below lyrics and translation above; OFF keeps romanization above and translation below</string>
+    <string name="morphe_music_lyrics_use_pollinations_title">Pollinations translation</string>
+    <string name="morphe_music_lyrics_use_pollinations_summary">Use Pollinations AI as a fallback for translation and romanization. Responses may take up to 45 seconds. Falls back to Google if unavailable</string>
 
     <!-- misc.spoof.appversion.spoofAppVersionPatch -->
     <string name="morphe_music_spoof_app_version_target_entry_8_23_51">8.23.51 - Disable bold icons</string>

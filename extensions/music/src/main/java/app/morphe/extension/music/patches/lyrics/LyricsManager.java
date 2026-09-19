@@ -155,6 +155,11 @@ public final class LyricsManager {
                 (videoId, resolvedVideoId) -> reloadCurrentTrack());
         VideoInformation.addVideoIdListener(videoId -> reloadCurrentTrack());
         executor.execute(LunaBeatProvider::preloadIndex);
+        executor.execute(() -> {
+            MetadataCleaner.resolveSetting(Settings.LYRICS_CUSTOM_REGEX.get());
+            MetadataCleaner.resolveSetting(Settings.LYRICS_TEXT_FILTER.get());
+            MetadataCleaner.resolveSetting(Settings.LYRICS_CREDIT_LINE_REGEX.get());
+        });
     }
 
     private final PriorityQueue<ScoredCandidate> candidateQueue = new PriorityQueue<>();
@@ -999,7 +1004,7 @@ public final class LyricsManager {
         if (countSlashes(text) > 5) {
             return true;
         }
-        String setting = Settings.LYRICS_CREDIT_LINE_REGEX.get();
+        String setting = MetadataCleaner.resolveSetting(Settings.LYRICS_CREDIT_LINE_REGEX.get());
         if (setting.isBlank()) {
             return false;
         }
@@ -1026,6 +1031,8 @@ public final class LyricsManager {
                 }
             }
         }
+
+        String normalizedWithSpaces = normalized;
 
         normalized = normalized
                  .replace('|', ':')
@@ -1055,11 +1062,30 @@ public final class LyricsManager {
         }
         String beforeSep = sepIdx >= 0 ? normalized.substring(0, sepIdx) : normalized;
 
+        boolean hasRealSeparator = false;
+        if (sepIdx >= 0) {
+            int realSepIdx = -1;
+            int spaceSepIdx = normalizedWithSpaces.indexOf(' ');
+            int colonSepIdx = normalizedWithSpaces.indexOf(':');
+            if (colonSepIdx >= 0) {
+                realSepIdx = colonSepIdx;
+            }
+            for (char c : new char[]{'|', '｜', '—', '－', '-', ';', '；', ',', '，', '~', '～',
+                    '：', '·', '@', '/', '\\', '&'}) {
+                int idx = normalizedWithSpaces.indexOf(c);
+                if (idx >= 0 && (realSepIdx < 0 || idx < realSepIdx)) {
+                    realSepIdx = idx;
+                }
+            }
+            hasRealSeparator = realSepIdx >= 0
+                    && (spaceSepIdx < 0 || realSepIdx < spaceSepIdx);
+        }
+
         for (String variant : allVariants) {
             if (variant.isEmpty()) {
                 continue;
             }
-            if (beforeSep.equals(variant)) {
+            if (hasRealSeparator && beforeSep.equals(variant)) {
                 return true;
             }
             if (sepIdx >= 0 && beforeSep.endsWith(variant)) {
@@ -1181,7 +1207,7 @@ public final class LyricsManager {
         if (lyrics == Lyrics.NOT_FOUND) {
             return lyrics;
         }
-        String filter = Settings.LYRICS_TEXT_FILTER.get();
+        String filter = MetadataCleaner.resolveSetting(Settings.LYRICS_TEXT_FILTER.get());
         if (filter.isBlank()) {
             return lyrics;
         }
