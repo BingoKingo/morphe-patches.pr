@@ -244,9 +244,9 @@ public final class DeezerProvider implements LyricsProvider {
             return null;
         }
 
-        final String rawFormat = lyrics.toString();
         JSONArray syncedLines = lyrics.optJSONArray("synchronizedLines");
         if (syncedLines != null && syncedLines.length() > 0) {
+            final String rawFormat = syncedLines.toString();
             Lyrics synced = parseSyncedLyrics(syncedLines, trackId, rawFormat, creditLines(lyrics));
             if (synced != null) {
                 return synced;
@@ -255,6 +255,7 @@ public final class DeezerProvider implements LyricsProvider {
 
         final String text = LyricsRequests.optString(lyrics, "text");
         if (text != null) {
+            final String rawFormat = text;
             return parsePlainText(text, trackId, rawFormat, creditLines(lyrics));
         }
         return null;
@@ -312,11 +313,11 @@ public final class DeezerProvider implements LyricsProvider {
         List<String> credits = new ArrayList<>(2);
         final String writers = flatten(lyrics.opt("writers"));
         if (writers != null) {
-            credits.add("Written by " + writers);
+            credits.add("Writer(s): " + writers);
         }
         final String copyright = LyricsRequests.optString(lyrics, "copyright");
         if (copyright != null) {
-            credits.add(copyright);
+            credits.add("Copyright: " + copyright);
         }
         return credits.isEmpty() ? null : credits;
     }
@@ -371,7 +372,7 @@ public final class DeezerProvider implements LyricsProvider {
 
         String sourceUrl = "https://www.deezer.com/track/" + trackId;
         return new Lyrics(lines, name(), false, null, null, null, creditLines,
-                rawFormat, "dzr.json", sourceUrl);
+                rawFormat, "txt", sourceUrl);
     }
 
     public static boolean validateArl(String arl) {

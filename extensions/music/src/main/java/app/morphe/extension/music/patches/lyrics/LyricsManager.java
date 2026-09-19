@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -157,6 +158,7 @@ public final class LyricsManager {
     }
 
     private final PriorityQueue<ScoredCandidate> candidateQueue = new PriorityQueue<>();
+    private final Set<String> shownFingerprints = ConcurrentHashMap.newKeySet();
     private volatile boolean phase2Done;
 
     private final Map<String, Lyrics> filteredCache = new java.util.LinkedHashMap<>(32, 0.75f, true) {
@@ -420,6 +422,7 @@ public final class LyricsManager {
             candidateQueue.clear();
             phase2Done = false;
         }
+        shownFingerprints.clear();
         filteredCache.clear();
 
         executor.execute(() -> runProviderLookup(id, track, null));
@@ -444,6 +447,7 @@ public final class LyricsManager {
                 while (!candidateQueue.isEmpty()) {
                     ScoredCandidate next = candidateQueue.poll();
                     if (next.lyrics() != currentLyrics
+                            && !shownFingerprints.contains(fingerprint(next.lyrics()))
                             && isValidLyrics(next.lyrics(), track)) {
                         Utils.runOnMainThread(() -> {
                             if (id != requestId) {
@@ -465,6 +469,7 @@ public final class LyricsManager {
                     while (!candidateQueue.isEmpty()) {
                         ScoredCandidate next = candidateQueue.poll();
                         if (next.lyrics() != currentLyrics
+                                && !shownFingerprints.contains(fingerprint(next.lyrics()))
                                 && isValidLyrics(next.lyrics(), track)) {
                             Utils.runOnMainThread(() -> {
                                 if (id != requestId) {
@@ -490,7 +495,7 @@ public final class LyricsManager {
 
     private void collectRemainingCandidates(int id, TrackInfo track,
                                              List<LyricsProvider> providers) {
-        Set<String> existing = new HashSet<>();
+        Set<String> existing = new HashSet<>(shownFingerprints);
         synchronized (candidateQueue) {
             for (ScoredCandidate sc : candidateQueue) {
                 existing.add(fingerprint(sc.lyrics()));
@@ -848,6 +853,7 @@ public final class LyricsManager {
         if (lyrics == Lyrics.NOT_FOUND || lyrics.isEmpty()) {
             setState(State.NOT_FOUND, null);
         } else {
+            shownFingerprints.add(fingerprint(lyrics));
             setState(State.LOADED, lyrics);
             LyricsPanelInstaller.enableLyricsButton();
             Utils.runOnMainThreadDelayed(LyricsPanelInstaller::onLyricsPanelDetected, 300);
