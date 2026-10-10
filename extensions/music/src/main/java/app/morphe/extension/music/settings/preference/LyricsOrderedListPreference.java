@@ -53,8 +53,8 @@ public final class LyricsOrderedListPreference extends Preference {
     /** Canonical provider ids, in the default priority order, shown in the list. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "YTMusic", "Captions", "LRCLIB", "QQ", "NetEase", "KuGou", "Luna",
-            "PetitLyrics", "bLyrics", "BiniLyrics", "Unison", "SimpMusic", "AMLL",
-            "LunaBeat", "Lyricify", "Apple", "Musixmatch", "Spotify", "Deezer");
+            "RMM", "PetitLyrics", "bLyrics", "BiniLyrics", "Unison", "SimpMusic", "AMLL",
+            "LunaBeat", "Lyricify", "Apple", "Musixmatch", "Spotify", "Deezer", "Genius");
 
     /** Friendlier labels for display; ids not present here are shown verbatim. */
     private static final Map<String, String> PROVIDER_LABELS = new HashMap<>();
@@ -62,12 +62,14 @@ public final class LyricsOrderedListPreference extends Preference {
         PROVIDER_LABELS.put("YTMusic", "YouTube Music");
         PROVIDER_LABELS.put("Captions", "YouTube Captions (Auto) *");
         PROVIDER_LABELS.put("Apple", "Apple Music");
+        PROVIDER_LABELS.put("RMM", "RMM Revival");
         PROVIDER_LABELS.put("Luna", "Soda (Luna)");
         PROVIDER_LABELS.put("bLyrics", "BetterLyrics (bLyrics)");
         PROVIDER_LABELS.put("BiniLyrics", "BiniLyrics (Binimum)");
         PROVIDER_LABELS.put("Musixmatch", "Musixmatch");
         PROVIDER_LABELS.put("Spotify", "Spotify *");
         PROVIDER_LABELS.put("Deezer", "Deezer *");
+        PROVIDER_LABELS.put("Genius", "Genius");
     }
 
     private static final Map<String, String> PROVIDER_URLS = new HashMap<>();
@@ -85,6 +87,8 @@ public final class LyricsOrderedListPreference extends Preference {
         PROVIDER_URLS.put("AMLL", "https://amlldb.bikonoo.com");
         PROVIDER_URLS.put("LunaBeat", "https://2755337087.github.io/ttml-hub");
         PROVIDER_URLS.put("Lyricify", "https://lyricify.app");
+        PROVIDER_URLS.put("RMM", "https://rmmreviv.al/");
+        PROVIDER_URLS.put("Genius", "https://genius.com/");
     }
 
     private static String providerLabel(String id) {

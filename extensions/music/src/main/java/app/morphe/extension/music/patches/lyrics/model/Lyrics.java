@@ -31,6 +31,7 @@ import java.util.Map;
  * @param formatType File extension for the raw format (e.g. {@code "lrc"}, {@code "qrc"}, {@code "ttml"}).
  * @param sourceUrl Optional URL to the song page on the provider's platform, opened when the
  *                  source label is clicked.
+ * @param about Song description, shown under the credits on the info line.
  */
 public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
                      @Nullable List<LyricsLine> romanization,
@@ -39,7 +40,21 @@ public record Lyrics(List<LyricsLine> lines, String providerName, boolean synced
                      @Nullable List<String> songwriters,
                      @Nullable String rawFormat,
                      @Nullable String formatType,
-                     @Nullable String sourceUrl) {
+                     @Nullable String sourceUrl,
+                     @Nullable String about) {
+
+    /** Every provider but Genius ships no description, so most call sites keep the shorter form. */
+    public Lyrics(List<LyricsLine> lines, String providerName, boolean synced,
+                  @Nullable List<LyricsLine> romanization,
+                  @Nullable Map<String, List<LyricsLine>> translations,
+                  @Nullable Map<String, List<LyricsLine>> romanizations,
+                  @Nullable List<String> songwriters,
+                  @Nullable String rawFormat,
+                  @Nullable String formatType,
+                  @Nullable String sourceUrl) {
+        this(lines, providerName, synced, romanization, translations, romanizations,
+                songwriters, rawFormat, formatType, sourceUrl, null);
+    }
 
     public record ScoredLyrics(int score, Lyrics lyrics) {
     }

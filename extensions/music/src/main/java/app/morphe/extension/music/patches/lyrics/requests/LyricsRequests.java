@@ -74,6 +74,22 @@ public final class LyricsRequests {
         return Locale.getDefault().getLanguage();
     }
 
+    public static String translationLanguage() {
+        String language = Settings.LYRICS_TRANSLATION_LANGUAGE.get();
+        return "DEFAULT".equalsIgnoreCase(language)
+                ? deviceLanguage()
+                : language.toLowerCase(Locale.ROOT);
+    }
+
+    /** The leading subtag of a BCP-47 tag, which is what two spellings of one language share. */
+    public static String primarySubtag(@Nullable String language) {
+        if (language == null) {
+            return "";
+        }
+        int idx = language.indexOf('-');
+        return (idx >= 0 ? language.substring(0, idx) : language).toLowerCase(Locale.ROOT);
+    }
+
     public static long fractionToMs(String fraction) {
         if (fraction == null || fraction.isEmpty()) {
             throw new NumberFormatException("Empty LRC fraction");

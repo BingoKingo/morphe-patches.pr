@@ -1199,11 +1199,19 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         footerView.setOnClickListener(view -> onSourceClicked());
 
         List<String> songwriters = newLyrics.songwriters();
-        if (songwriters != null && !songwriters.isEmpty()) {
+        String about = newLyrics.about();
+        boolean hasAbout = about != null && !about.isEmpty();
+        if ((songwriters != null && !songwriters.isEmpty()) || hasAbout) {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < songwriters.size(); i++) {
-                if (i > 0) sb.append('\n');
-                sb.append(songwriters.get(i));
+            if (songwriters != null) {
+                for (int i = 0; i < songwriters.size(); i++) {
+                    if (i > 0) sb.append('\n');
+                    sb.append(songwriters.get(i));
+                }
+            }
+            if (hasAbout) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(about);
             }
             creditView.setText(sb.toString());
             creditView.setVisibility(Settings.LYRICS_HIDE_INFO.get() ? GONE : VISIBLE);
@@ -1611,6 +1619,16 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
     private void applyOnlyModeState() {
         captureOnlyModeScrollAnchor();
         resetOnlyModeKaraokeState();
+        clearActiveLineState();
+    }
+
+    private void clearActiveLineState() {
+        final int color = LyricsColors.secondaryTextColor();
+        for (TextView lineView : lineViews) {
+            if (lineView instanceof LyricsLineView view) {
+                view.setActiveLine(false, color);
+            }
+        }
     }
 
     private void clearPendingHideAnchor() {
@@ -2606,12 +2624,14 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         final long pos = LyricsManager.getInstance().getPositionMs();
         final int index = current.indexForPosition(pos, highlightedIndex);
         if (index == highlightedIndex) {
+            markActiveLine(index, current, true);
             applyLineOverlay(index);
             scrollAnchorIntoView(Math.max(index, 0), false);
             return;
         }
 
         if (highlightedIndex >= 0 && highlightedIndex < lineViews.size()) {
+            markActiveLine(highlightedIndex, current, false);
             fadeTo(lineViews.get(highlightedIndex), INACTIVE_LINE_ALPHA);
             lineViews.get(highlightedIndex).setTextColor(LyricsColors.unsungWordColor());
             forEachBgLine(highlightedIndex, current, i -> {
@@ -2632,6 +2652,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         }
 
         applyLineOverlay(index);
+
+        markActiveLine(index, current, true);
 
         fadeTo(lineViews.get(index), 1f);
         lineViews.get(index).setTextColor(LyricsColors.lineTextColor());

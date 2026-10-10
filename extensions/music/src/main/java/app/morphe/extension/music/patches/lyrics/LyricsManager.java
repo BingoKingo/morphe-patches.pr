@@ -51,6 +51,7 @@ import app.morphe.extension.music.patches.lyrics.requests.BinimumProvider;
 import app.morphe.extension.music.patches.lyrics.requests.BlyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.CaptionsFetcher;
 import app.morphe.extension.music.patches.lyrics.requests.DeezerProvider;
+import app.morphe.extension.music.patches.lyrics.requests.GeniusProvider;
 import app.morphe.extension.music.patches.lyrics.requests.KuGouProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LRCLIBProvider;
 import app.morphe.extension.music.patches.lyrics.requests.LocalLyricsFetcher;
@@ -63,6 +64,7 @@ import app.morphe.extension.music.patches.lyrics.requests.MusixmatchProvider;
 import app.morphe.extension.music.patches.lyrics.requests.NetEaseProvider;
 import app.morphe.extension.music.patches.lyrics.requests.PetitLyricsProvider;
 import app.morphe.extension.music.patches.lyrics.requests.QQProvider;
+import app.morphe.extension.music.patches.lyrics.requests.RmmProvider;
 import app.morphe.extension.music.patches.lyrics.requests.SimpMusicProvider;
 import app.morphe.extension.music.patches.lyrics.requests.SpotifyProvider;
 import app.morphe.extension.music.patches.lyrics.requests.UnisonProvider;
@@ -939,6 +941,29 @@ public final class LyricsManager {
         }
     }
 
+    /**
+     * Cache reads are keyed by provider id, while a result carries the name shown to the user.
+     * The two agree unless a provider appends a qualifier such as "(via Lyrically)", in which
+     * case the id keeps the cache to one entry per provider.
+     */
+    private static String cacheSourceFor(@Nullable Lyrics lyrics) {
+        if (lyrics == null) {
+            return "";
+        }
+        final String providerName = lyrics.providerName();
+        for (String id : PROVIDER_ORDER) {
+            if (providerName.equals(id)) {
+                return id;
+            }
+        }
+        for (String id : PROVIDER_ORDER) {
+            if (providerName.startsWith(id + " ")) {
+                return id;
+            }
+        }
+        return providerName;
+    }
+
     private static String fingerprint(Lyrics lyrics) {
         if (lyrics == null) return "";
         String provider = lyrics.providerName();
@@ -1359,7 +1384,7 @@ public final class LyricsManager {
         boolean validResult = isValidLyrics(result, track);
         if (validResult) {
             if (!LyricsRequests.isCustomMatchMode()) {
-                LyricsCache.put(track, result.providerName(), result);
+                LyricsCache.put(track, cacheSourceFor(result), result);
             }
             publishFromLookup(id, result);
         }
@@ -2135,7 +2160,7 @@ public final class LyricsManager {
                     lyrics.providerName(), true, lyrics.romanization(),
                     lyrics.translations(), lyrics.romanizations(),
                     lyrics.songwriters(), lyrics.rawFormat(),
-                    lyrics.formatType(), lyrics.sourceUrl());
+                    lyrics.formatType(), lyrics.sourceUrl(), lyrics.about());
         }
         return lyrics;
     }
@@ -2238,7 +2263,8 @@ public final class LyricsManager {
 
         return new Lyrics(filteredLines, lyrics.providerName(), lyrics.synced(),
                 romanization, translations, romanizations,
-                songwriters, lyrics.rawFormat(), lyrics.formatType(), lyrics.sourceUrl());
+                songwriters, lyrics.rawFormat(), lyrics.formatType(), lyrics.sourceUrl(),
+                lyrics.about());
     }
 
     private static List<LyricsLine> filterAlignedList(List<LyricsLine> aligned, boolean[] kept) {
@@ -2496,9 +2522,10 @@ public final class LyricsManager {
 
     /**
      * Applies {@link Settings#LYRICS_TEXT_FILTER} to the original lyrics text only.
-     * Translations and romanizations are left untouched, and a line the filter does not
-     * fire on keeps its provider text rather than a normalized copy, so fullwidth
-     * punctuation is not folded to ASCII.
+     * Translations and romanizations are not run through the filter, but when the filter
+     * drops a line they drop with it so a translation stays under the line it belongs to.
+     * A line the filter does not fire on keeps its provider text rather than a normalized
+     * copy, so fullwidth punctuation is not folded to ASCII.
      */
     private static Lyrics filterLyricsText(Lyrics lyrics) {
         if (lyrics == null || lyrics == Lyrics.NOT_FOUND) {
@@ -2511,14 +2538,17 @@ public final class LyricsManager {
 
         List<LyricsLine> original = lyrics.lines();
         List<LyricsLine> filtered = new ArrayList<>(original.size());
+        boolean[] kept = new boolean[original.size()];
         boolean anyDropped = false;
-        for (LyricsLine line : original) {
+        for (int i = 0; i < original.size(); i++) {
+            LyricsLine line = original.get(i);
             String text = MetadataCleaner.applyRegexPreserveOriginal(line.text(), filter)
                     .trim().replaceAll("\\s+", " ");
             if (text.isEmpty()) {
                 anyDropped = true;
                 continue;
             }
+            kept[i] = true;
             if (text.equals(line.text().trim().replaceAll("\\s+", " "))) {
                 filtered.add(line);
                 continue;
@@ -2543,9 +2573,14 @@ public final class LyricsManager {
             return lyrics;
         }
 
+        // The aligned lists drop with the lyrics so a translation stays under the line it
+        // belongs to, rather than being shifted up onto the next one.
         return new Lyrics(filtered, lyrics.providerName(), lyrics.synced(),
-                null, null, null, lyrics.songwriters(), lyrics.rawFormat(), lyrics.formatType(),
-                lyrics.sourceUrl());
+                filterAlignedList(lyrics.romanization(), kept),
+                filterAlignedMap(lyrics.translations(), kept),
+                filterAlignedMap(lyrics.romanizations(), kept),
+                lyrics.songwriters(), lyrics.rawFormat(), lyrics.formatType(),
+                lyrics.sourceUrl(), lyrics.about());
     }
 
     private void setErrorStateIfCurrent(int id) {
@@ -2649,8 +2684,8 @@ public final class LyricsManager {
     /** Canonical provider ids, in the default priority order. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "YTMusic", "Captions", "LRCLIB", "QQ", "NetEase", "KuGou",
-            "Luna", "PetitLyrics", "bLyrics", "BiniLyrics",
-            "Unison", "SimpMusic", "AMLL", "LunaBeat", "Lyricify", "Apple", "Musixmatch", "Spotify", "Deezer");
+            "Luna", "RMM", "PetitLyrics", "bLyrics", "BiniLyrics",
+            "Unison", "SimpMusic", "AMLL", "LunaBeat", "Lyricify", "Apple", "Musixmatch", "Spotify", "Deezer", "Genius");
 
     @NonNull
     private static List<String> enabledProviderIds(String order) {
@@ -2710,10 +2745,12 @@ public final class LyricsManager {
             case "AMLL" -> new AMLLProvider();
             case "LunaBeat" -> new LunaBeatProvider();
             case "Apple" -> new AppleMusicProvider();
+            case "RMM" -> new RmmProvider();
             case "Spotify" -> new SpotifyProvider();
             case "Lyricify" -> new LyricifyProvider();
             case "Musixmatch" -> new MusixmatchProvider();
             case "Deezer" -> new DeezerProvider();
+            case "Genius" -> new GeniusProvider();
             default -> null;
         };
     }

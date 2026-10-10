@@ -39,10 +39,7 @@ public final class LyricsTranslator {
     }
 
     private static String translationLanguage() {
-        String language = Settings.LYRICS_TRANSLATION_LANGUAGE.get();
-        return "DEFAULT".equalsIgnoreCase(language)
-                ? LyricsRequests.deviceLanguage()
-                : language.toLowerCase(Locale.ROOT);
+        return LyricsRequests.translationLanguage();
     }
 
     @Nullable
@@ -89,11 +86,7 @@ public final class LyricsTranslator {
     }
 
     private static String primarySubtag(String lang) {
-        if (lang == null) {
-            return "";
-        }
-        final int idx = lang.indexOf('-');
-        return (idx >= 0 ? lang.substring(0, idx) : lang).toLowerCase(Locale.ROOT);
+        return LyricsRequests.primarySubtag(lang);
     }
 
     public static void translate(TrackInfo track, Lyrics lyrics, String source, Callback callback) {
