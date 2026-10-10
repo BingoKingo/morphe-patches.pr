@@ -917,6 +917,11 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         final int textSize = Settings.LYRICS_TEXT_SIZE.get();
         final int foregroundColor = LyricsColors.lineTextColor();
         final boolean tapToSeek = newLyrics.synced() && Settings.LYRICS_TAP_TO_SEEK.get();
+        final Paint baseLinePaint = new Paint();
+        baseLinePaint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSize,
+                getResources().getDisplayMetrics()));
+        baseLinePaint.setTypeface(Typeface.DEFAULT_BOLD);
+        baseLinePaint.setElegantTextHeight(true);
 
         final int generation = buildGeneration.get();
         final OnlyMode onlySnap = onlyMode;
@@ -944,7 +949,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             if (preserveHidePosition) {
                 LyricsSpanBuilder.BuildResult result =
                         LyricsSpanBuilder.buildLineText(line, gapTimings, i,
-                                perWordRomaji, romanizedLines, translatedLines, onlyMode);
+                                perWordRomaji, romanizedLines, translatedLines, onlyMode,
+                                baseLinePaint);
                 lineView.setText(result.text());
                 lineView.setTranslationBounds(result.transStart(), result.transEnd());
                 lineView.setRomanizationBounds(result.romaStart(), result.romaEnd());
@@ -963,8 +969,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             lineOriginalStarts.add(gapOrigStart);
             if (reusePrevious) {
                 lineView.setHighlight(gapTimings, prevView.positionMs, prevView.allSung,
-                        LyricsColors.unsungWordColor(), LyricsColors.lineTextColor(), gapOrigStart);
+                        LyricsColors.unsungWordColor(), gapOrigStart);
             }
+            lineView.setActiveLine(onlySnap == OnlyMode.NONE
+                    && reusePrevious && prevView.activeLine, LyricsColors.secondaryTextColor());
             lineView.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSize);
             lineView.setTextColor(foregroundColor);
             lineView.setAlpha(1f);
@@ -1092,7 +1100,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                                 LyricsSpanBuilder.BuildResult result =
                                         LyricsSpanBuilder.buildLineText(newLyrics.lines().get(i),
                                                 allTimings.get(i), i,
-                                                perWordRomaji, romanizedLines, translatedLines, onlyMode);
+                                                perWordRomaji, romanizedLines, translatedLines, onlyMode,
+                                                baseLinePaint);
                                 tv.setText(result.text());
                                 lineUnsungSpans.set(i, result.unsungSpan());
                                 if (tv instanceof LyricsLineView lineView) {
@@ -2383,6 +2392,21 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         }
     }
 
+    private void markActiveLine(int index, Lyrics current, boolean active) {
+        if (index < 0 || current == null) {
+            return;
+        }
+        final int color = LyricsColors.secondaryTextColor();
+        if (index < lineViews.size() && lineViews.get(index) instanceof LyricsLineView view) {
+            view.setActiveLine(active, color);
+        }
+        forEachBgLine(index, current, i -> {
+            if (lineViews.get(i) instanceof LyricsLineView view) {
+                view.setActiveLine(active, color);
+            }
+        });
+    }
+
     private void updateHighlight() {
         Lyrics current = lyrics;
         if (current == null || !current.synced() || lineViews.isEmpty()) {
@@ -2395,6 +2419,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         final long pos = manager.getPositionMs();
         final int index = current.indexForPosition(pos, highlightedIndex);
         if (index == highlightedIndex) {
+            markActiveLine(index, current, true);
             if (!karaokeActive && index >= 0 && index < lineViews.size()) {
                 lineViews.get(index).setTextColor(LyricsColors.lineTextColor());
                 forEachBgLine(index, current,
@@ -2408,6 +2433,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         if (highlightedIndex >= 0 && highlightedIndex < lineViews.size()) {
             final boolean keepFullOpacity = karaokeActive
                     && KaraokeHighlightState.stillLit(wordTimings, highlightedIndex, pos);
+            markActiveLine(highlightedIndex, current, false);
             if (!keepFullOpacity) {
                 fadeTo(lineViews.get(highlightedIndex), INACTIVE_LINE_ALPHA);
                 if (!karaokeActive) {
@@ -2434,6 +2460,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         }
 
         applyLineOverlay(index);
+
+        markActiveLine(index, current, true);
 
         fadeTo(lineViews.get(index), 1f);
         if (!karaokeActive) {
@@ -2657,7 +2685,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             lineUnsungSpans.set(line, null);
         }
         if (lineViews.get(line) instanceof LyricsLineView lineView) {
-            lineView.setHighlight(Collections.emptyList(), 0, false, 0, 0, -1);
+            lineView.setHighlight(Collections.emptyList(), 0, false, 0, -1);
         }
     }
 
@@ -2733,7 +2761,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
 
         if (lineView instanceof LyricsLineView) {
             ((LyricsLineView) lineView).setHighlight(
-                    timings, positionMs, allSung, LyricsColors.unsungWordColor(), LyricsColors.lineTextColor(), origStart);
+                    timings, positionMs, allSung, LyricsColors.unsungWordColor(), origStart);
         }
     }
 

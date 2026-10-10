@@ -12,6 +12,8 @@ import static app.morphe.extension.shared.StringRef.str;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.preference.Preference;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -66,6 +68,23 @@ public final class LyricsOrderedListPreference extends Preference {
         PROVIDER_LABELS.put("Musixmatch", "Musixmatch");
         PROVIDER_LABELS.put("Spotify", "Spotify *");
         PROVIDER_LABELS.put("Deezer", "Deezer *");
+    }
+
+    private static final Map<String, String> PROVIDER_URLS = new HashMap<>();
+    static {
+        PROVIDER_URLS.put("LRCLIB", "https://lrclib.net");
+        PROVIDER_URLS.put("QQ", "https://y.qq.com");
+        PROVIDER_URLS.put("NetEase", "https://music.163.com");
+        PROVIDER_URLS.put("KuGou", "https://www.kugou.com");
+        PROVIDER_URLS.put("Luna", "https://www.qishui.com");
+        PROVIDER_URLS.put("PetitLyrics", "https://petitlyrics.com");
+        PROVIDER_URLS.put("bLyrics", "https://betterlyrics.org/");
+        PROVIDER_URLS.put("BiniLyrics", "https://lyrics.binimum.org");
+        PROVIDER_URLS.put("Unison", "https://unison.betterlyrics.org");
+        PROVIDER_URLS.put("SimpMusic", "https://lyrics.simpmusic.org");
+        PROVIDER_URLS.put("AMLL", "https://amlldb.bikonoo.com");
+        PROVIDER_URLS.put("LunaBeat", "https://2755337087.github.io/ttml-hub");
+        PROVIDER_URLS.put("Lyricify", "https://lyricify.app");
     }
 
     private static String providerLabel(String id) {
@@ -234,6 +253,16 @@ public final class LyricsOrderedListPreference extends Preference {
         pref.showDialog(onTokenSaved);
     }
 
+    private void openUrl(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Failed to open provider site", ex);
+        }
+    }
+
     private void rebuildRows() {
         if (rowsContainer == null) {
             return;
@@ -272,6 +301,10 @@ public final class LyricsOrderedListPreference extends Preference {
         if (!locked && hasTokenDialog(item.id)) {
             name.setClickable(true);
             name.setOnClickListener(v -> showTokenDialogFor(item.id, null));
+        } else if (!locked && PROVIDER_URLS.containsKey(item.id)) {
+            final String url = PROVIDER_URLS.get(item.id);
+            name.setClickable(true);
+            name.setOnClickListener(v -> openUrl(url));
         }
 
         Switch switchV = new Switch(context);

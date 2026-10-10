@@ -119,6 +119,8 @@ public final class LyricsManager {
 
     private static final long PENDING_COMMIT_MS = 1500;
 
+    private static final long REBINDING_CONFIRM_MS = 1500;
+
     private final ExecutorService lookupExecutor = Executors.newFixedThreadPool(8);
 
     private final ExecutorService fetchExecutor = Executors.newFixedThreadPool(16);
@@ -304,6 +306,13 @@ public final class LyricsManager {
      */
     private String loadedForVideoId = "";
 
+    @Nullable
+    private String unconfirmedVideoId;
+
+    private int rebindingGeneration;
+
+    private boolean staleLyricsDropped;
+
     private final Map<String, Lyrics> filteredCache =
             java.util.Collections.synchronizedMap(Utils.createSizeRestrictedMap(32));
 
@@ -440,6 +449,9 @@ public final class LyricsManager {
 
     public void reloadAfterSettingsChange() {
         loadedForVideoId = "";
+        unconfirmedVideoId = null;
+        rebindingGeneration++;
+        staleLyricsDropped = false;
         reloadCurrentTrack();
     }
 
@@ -451,7 +463,15 @@ public final class LyricsManager {
         String rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
         String rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
         if (rawTitle == null || rawTitle.trim().isEmpty() || rawArtist == null || rawArtist.trim().isEmpty()) {
-            return;
+            PlaylistRequest.Song song = PlayAlbumSongsPatch.getSong(VideoInformation.getVideoId());
+            if (song != null && song.title() != null && !song.title().isBlank()
+                    && song.artist() != null && !song.artist().isBlank()) {
+                rawTitle = song.title();
+                rawArtist = song.artist();
+            } else {
+                dropStaleLyrics();
+                return;
+            }
         }
 
         int durationSeconds = (int) (metadata.getLong(MediaMetadata.METADATA_KEY_DURATION) / 1000);
@@ -489,7 +509,9 @@ public final class LyricsManager {
         }
         TrackInfo existingTrack = currentTrack;
         if (track.equals(existingTrack)) {
-            cancelPendingTrack();
+            if (pendingTrack != null && pendingTrack.track().equals(track)) {
+                cancelPendingTrack();
+            }
             if (videoId.equals(currentVideoId)) {
                 currentRawTitle = rawTitle;
                 currentRawArtist = rawArtist;
@@ -498,9 +520,15 @@ public final class LyricsManager {
                         && track.durationSeconds() != existingTrack.durationSeconds()) {
                     currentTrack = track;
                 }
+                if (staleLyricsDropped && unconfirmedVideoId == null) {
+                    deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
+                }
                 return;
             }
-            commitTrackChange(track, rawTitle, rawArtist, mediaUri, videoId, true);
+            currentRawTitle = rawTitle;
+            currentRawArtist = rawArtist;
+            currentMediaUri = mediaUri;
+            deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
             return;
         }
         if (existingTrack == null || durationSeconds > 0 || !videoId.equals(currentVideoId)) {
@@ -518,7 +546,8 @@ public final class LyricsManager {
      * marker, which makes this idempotent across the events that do arrive.
      */
     private void ensureLoadedForCurrentVideo() {
-        if (!Settings.LYRICS_ENABLED.get() || currentTrack == null || pendingTrack != null) {
+        if (!Settings.LYRICS_ENABLED.get() || currentTrack == null || pendingTrack != null
+                || unconfirmedVideoId != null) {
             return;
         }
         final String videoId = VideoInformation.getVideoId();
@@ -529,8 +558,53 @@ public final class LyricsManager {
         load(currentTrack, true);
     }
 
+    private void deferTrackRebinding(String videoId, String rawTitle, String rawArtist,
+                                     @Nullable Uri mediaUri) {
+        unconfirmedVideoId = videoId;
+        rebindingGeneration++;
+        final int generation = rebindingGeneration;
+        Utils.runOnMainThreadDelayed(() -> {
+            if (generation != rebindingGeneration || unconfirmedVideoId == null) {
+                return;
+            }
+            final String target = unconfirmedVideoId;
+            unconfirmedVideoId = null;
+            if (!target.equals(VideoInformation.getVideoId())) {
+                return;
+            }
+            final TrackInfo track = currentTrack;
+            if (track == null) {
+                return;
+            }
+            commitTrackChange(track, rawTitle, rawArtist, mediaUri, target, true);
+        }, REBINDING_CONFIRM_MS);
+    }
+
+    private void dropStaleLyrics() {
+        final String videoId = VideoInformation.getVideoId();
+        if (videoId.isEmpty()
+                || (videoId.equals(currentVideoId) && !videoId.equals(unconfirmedVideoId))) {
+            return;
+        }
+        unconfirmedVideoId = null;
+        rebindingGeneration++;
+        requestId.incrementAndGet();
+        cancelPendingFetches();
+        cancelPendingTrack();
+        suppressForRequest = -1;
+        currentVideoId = videoId;
+        loadedForVideoId = videoId;
+        final Lyrics shown = currentLyrics;
+        if (shown != null && !shown.isEmpty()) {
+            staleLyricsDropped = true;
+        }
+        setState(State.NOT_FOUND, null);
+    }
+
     private void commitTrackChange(TrackInfo track, String rawTitle, String rawArtist,
                                    @Nullable Uri mediaUri, String videoId, boolean sameTrack) {
+        unconfirmedVideoId = null;
+        rebindingGeneration++;
         currentRawTitle = rawTitle;
         currentRawArtist = rawArtist;
         currentMediaUri = mediaUri;
@@ -671,6 +745,7 @@ public final class LyricsManager {
         filteredCache.clear();
         lastHighlightedIndex = -1;
         suppressForRequest = -1;
+        staleLyricsDropped = false;
         preferredFingerprint = null;
         rememberedQueue = null;
         searchQueryTitle = null;
