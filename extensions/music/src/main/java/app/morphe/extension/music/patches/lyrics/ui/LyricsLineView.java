@@ -201,10 +201,16 @@ class LyricsLineView extends TextView {
             secondaryExpandAnimator = null;
         }
         if (Math.abs(secondaryExpandFraction - target) < 0.001f) {
-            if (!expand && getVisibility() != View.GONE) {
-                setVisibility(View.GONE);
-            } else if (expand && getVisibility() != View.VISIBLE) {
-                setVisibility(View.VISIBLE);
+            if (!expand) {
+                if (getVisibility() != View.GONE) {
+                    setVisibility(View.GONE);
+                }
+                setAlpha(0f);
+            } else {
+                if (getVisibility() != View.VISIBLE) {
+                    setVisibility(View.VISIBLE);
+                }
+                setAlpha(0.90f);
             }
             return;
         }
@@ -226,6 +232,9 @@ class LyricsLineView extends TextView {
                 secondaryExpandAnimator = null;
                 if (!expand) {
                     setVisibility(View.GONE);
+                    setAlpha(0f);
+                } else {
+                    setAlpha(0.90f);
                 }
             }
         });
