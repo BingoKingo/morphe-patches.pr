@@ -131,7 +131,6 @@ class LyricsLineView extends TextView {
     private int sungColor;
     private int originalTextStart;
     private float[] lineMaxSungX;
-    private float currentScale = 0.95f;
     private boolean isLineActive = false;
     private boolean cachedHasWordTimings = false;
 
@@ -241,9 +240,48 @@ class LyricsLineView extends TextView {
         secondaryExpandAnimator.start();
     }
 
-    private boolean isGravityRightAligned() {
+    boolean isGravityRightAligned() {
         int absGravity = Gravity.getAbsoluteGravity(getGravity(), getLayoutDirection());
         return (absGravity & Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT;
+    }
+
+    @Nullable
+    private ValueAnimator scaleAnimator;
+
+    public void animateScale(float targetScale, long duration, float pivotX, float pivotY) {
+        setPivotX(pivotX);
+        setPivotY(pivotY);
+        if (scaleAnimator != null) {
+            scaleAnimator.cancel();
+            scaleAnimator = null;
+        }
+        if (Math.abs(getScaleX() - targetScale) < 0.001f) {
+            setScaleX(targetScale);
+            setScaleY(targetScale);
+            return;
+        }
+        scaleAnimator = ValueAnimator.ofFloat(getScaleX(), targetScale);
+        scaleAnimator.setDuration(duration);
+        scaleAnimator.setInterpolator(TRANSITION_INTERPOLATOR);
+        scaleAnimator.addUpdateListener(anim -> {
+            float s = (Float) anim.getAnimatedValue();
+            setScaleX(s);
+            setScaleY(s);
+        });
+        scaleAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                scaleAnimator = null;
+            }
+        });
+        scaleAnimator.start();
+    }
+
+    public void cancelScaleAnimation() {
+        if (scaleAnimator != null) {
+            scaleAnimator.cancel();
+            scaleAnimator = null;
+        }
     }
 
     private RenderEffect currentRenderEffect;
@@ -863,23 +901,11 @@ class LyricsLineView extends TextView {
         }
 
         final boolean active = isLineActive || (positionMs != Long.MIN_VALUE && !allSung);
-        float target = active ? 1.0f : 0.95f;
-        if (Math.abs(currentScale - target) > 0.001f) {
-            currentScale += (target - currentScale) * 0.15f;
-            postInvalidateOnAnimation();
-        } else {
-            currentScale = target;
-        }
 
         canvas.save();
         if (isSecondary) {
             canvas.clipRect(0, 0, getWidth(), getHeight());
         }
-        float pivotX = isGravityRightAligned()
-                ? (getWidth() - getCompoundPaddingRight())
-                : getCompoundPaddingLeft();
-        float pivotY = getHeight() / 2f;
-        canvas.scale(currentScale, currentScale, pivotX, pivotY);
         canvas.translate(getCompoundPaddingLeft(), getExtendedPaddingTop());
 
         TextPaint mainP = getPaint();
@@ -909,9 +935,7 @@ class LyricsLineView extends TextView {
         glowPaint.setShader(null);
         glowPaint.clearShadowLayer();
 
-        int baseUnsung = (active && lineHasTimings)
-                ? ((unsungColor != 0) ? unsungColor : unsungWordColor())
-                : baseSung;
+        int baseUnsung = (unsungColor != 0) ? unsungColor : unsungWordColor();
         unsungKanjiPaint.setColor(baseUnsung);
         unsungKanjiPaint.setFakeBoldText(false);
 
@@ -1845,23 +1869,11 @@ class LyricsLineView extends TextView {
         }
 
         final boolean active = isLineActive || (positionMs != Long.MIN_VALUE && !allSung);
-        float target = active ? 1.0f : 0.95f;
-        if (Math.abs(currentScale - target) > 0.001f) {
-            currentScale += (target - currentScale) * 0.15f;
-            postInvalidateOnAnimation();
-        } else {
-            currentScale = target;
-        }
 
         canvas.save();
         if (isSecondary) {
             canvas.clipRect(0, 0, getWidth(), getHeight());
         }
-        float pivotX = isGravityRightAligned()
-                ? (getWidth() - getCompoundPaddingRight())
-                : getCompoundPaddingLeft();
-        float pivotY = getHeight() / 2f;
-        canvas.scale(currentScale, currentScale, pivotX, pivotY);
 
         super.onDraw(canvas);
         if (unsungColor == 0 || !hasWordTimings()) {
