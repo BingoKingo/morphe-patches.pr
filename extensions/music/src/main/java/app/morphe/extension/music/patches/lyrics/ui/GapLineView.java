@@ -27,7 +27,11 @@ import app.morphe.extension.music.patches.lyrics.LyricsManager;
 import app.morphe.extension.shared.ui.Dim;
 
 class GapLineView extends View {
-    public record GapInterval(long startMs, long endMs, long nextStartMs, boolean isDuet, int beforeLineIndex) {}
+    public record GapInterval(long startMs, long endMs, long nextStartMs, boolean isDuet, int beforeLineIndex, boolean isRightAligned) {
+        public GapInterval(long startMs, long endMs, long nextStartMs, boolean isDuet, int beforeLineIndex) {
+            this(startMs, endMs, nextStartMs, isDuet, beforeLineIndex, isDuet);
+        }
+    }
 
     static final long GAP_EXIT_DURATION_MS = 600L;
     private static final float INTERVAL_DOT_RADIUS_DP = 4.0f;
@@ -231,7 +235,7 @@ class GapLineView extends View {
         final float totalWidth = 2f * step + 2f * r;
 
         final float textMargin = Dim.dp16;
-        final float startX = interval.isDuet()
+        final float startX = interval.isRightAligned()
                 ? (getWidth() - totalWidth - textMargin)
                 : textMargin;
         final float groupCenterX = startX + totalWidth / 2f;
@@ -264,7 +268,9 @@ class GapLineView extends View {
             int finalAlpha = Math.max(0, Math.min(255, Math.round(dotFillAlpha * groupAlpha)));
             dotPaint.setColor(Color.argb(finalAlpha, red, green, blue));
 
-            float cx = startX + r + i * step;
+            float cx = interval.isRightAligned()
+                    ? (startX + totalWidth - r - i * step)
+                    : (startX + r + i * step);
             canvas.drawCircle(cx, cy, r, dotPaint);
         }
 
