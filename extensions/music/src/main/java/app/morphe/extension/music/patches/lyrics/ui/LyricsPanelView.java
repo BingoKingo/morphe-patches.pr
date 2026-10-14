@@ -3456,7 +3456,7 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
         searchTextCol.addView(searchTitleTv);
 
         TextView searchDescTv = new TextView(context);
-        searchDescTv.setText(str("morphe_music_lyrics_show_refresh_button_summary"));
+        searchDescTv.setText(str("morphe_music_lyrics_search_dialog_desc"));
         searchDescTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         searchDescTv.setTextColor(0x88FFFFFF);
         searchTextCol.addView(searchDescTv);
