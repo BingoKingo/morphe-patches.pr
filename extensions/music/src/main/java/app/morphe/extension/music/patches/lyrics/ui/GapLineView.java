@@ -33,7 +33,7 @@ class GapLineView extends View {
         }
     }
 
-    static final long GAP_EXIT_DURATION_MS = 600L;
+    static final long GAP_EXIT_DURATION_MS = 800L;
     private static final float INTERVAL_DOT_RADIUS_DP = 4.0f;
     private static final float INTERVAL_DOT_GAP_DP = 7.0f;
     private static final int INTERVAL_SECONDARY_ALPHA = 0x55;
@@ -55,6 +55,65 @@ class GapLineView extends View {
         this.interval = interval;
         dotPaint.setStyle(Paint.Style.FILL);
         setVisibility(View.GONE);
+    }
+
+    private float currentBlurRadius = 0f;
+    @Nullable
+    private ValueAnimator blurAnimator;
+
+    public void setRenderEffectCompat(@Nullable android.graphics.RenderEffect effect) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            super.setRenderEffect(effect);
+        }
+    }
+
+    public void animateBlur(float targetRadius, long duration) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            return;
+        }
+        if (blurAnimator != null) {
+            blurAnimator.cancel();
+            blurAnimator = null;
+        }
+        if (Math.abs(currentBlurRadius - targetRadius) < 0.1f) {
+            setBlurRadius(targetRadius);
+            return;
+        }
+        blurAnimator = ValueAnimator.ofFloat(currentBlurRadius, targetRadius);
+        blurAnimator.setDuration(duration);
+        blurAnimator.setInterpolator(TRANSITION_INTERPOLATOR);
+        blurAnimator.addUpdateListener(anim -> {
+            float r = (Float) anim.getAnimatedValue();
+            setBlurRadius(r);
+        });
+        blurAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                blurAnimator = null;
+                setBlurRadius(targetRadius);
+            }
+        });
+        blurAnimator.start();
+    }
+
+    public void setBlurRadius(float radius) {
+        this.currentBlurRadius = radius;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (radius < 0.5f) {
+                setRenderEffectCompat(null);
+            } else {
+                setRenderEffectCompat(LyricsPanelView.getCachedBlurEffect(radius));
+            }
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (blurAnimator != null) {
+            blurAnimator.cancel();
+            blurAnimator = null;
+        }
     }
 
     public GapInterval getInterval() {
@@ -234,12 +293,12 @@ class GapLineView extends View {
         final float step = 2f * r + gapPx;
         final float totalWidth = 2f * step + 2f * r;
 
-        final float textMargin = Dim.dp16;
+        final float textMargin = Dim.dp(19f);
         final float startX = interval.isRightAligned()
                 ? (getWidth() - totalWidth - textMargin)
                 : textMargin;
         final float groupCenterX = startX + totalWidth / 2f;
-        final float cy = getHeight() / 2f;
+        final float cy = getHeight() * 0.30f;
 
         int baseColor = lineTextColor();
         int red = Color.red(baseColor);

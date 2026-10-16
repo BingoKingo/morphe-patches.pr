@@ -369,6 +369,12 @@ public final class DeezerProvider extends ScoredSongProvider {
             } else {
                 endMs = cur.startTimeMs() + Math.max(5000L, cur.text().length() * 180L);
             }
+            if (!cur.words().isEmpty()) {
+                long lastWordEnd = cur.words().get(cur.words().size() - 1).endMs();
+                if (lastWordEnd != LyricsLine.NO_TIME) {
+                    endMs = Math.max(endMs, lastWordEnd);
+                }
+            }
             lines.set(i, new LyricsLine(cur.startTimeMs(), endMs, cur.text(), cur.words(), cur.agentId(), cur.isDuet(), cur.isBG(), cur.songPart()));
         }
 

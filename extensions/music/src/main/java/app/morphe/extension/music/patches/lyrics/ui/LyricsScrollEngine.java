@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -156,7 +157,7 @@ public final class LyricsScrollEngine {
             return;
         }
 
-        // user seek or track change just jump directly without bounce
+        // force instant jump if explicitly requested (e.g. changing song)
         if (forceInstant) {
             reset();
             callback.setProgrammaticScrolling(true);
@@ -167,10 +168,38 @@ public final class LyricsScrollEngine {
 
         final int viewportHeight = scrollView.getHeight();
 
-        // if jump distance too far use normal smooth scroll so it dont look crazy
+        // distance too large to cascade cleanly, smoothscroll directly with animator so no teleport
         if (Math.abs(requestedDelta) > viewportHeight * NATIVE_SCROLL_DISTANCE_RATIO) {
-            reset();
-            scrollView.smoothScrollTo(0, target);
+            cancelCascade();
+            isAnimating = true;
+            handler.removeCallbacks(unlockRunnable);
+            final int duration = Math.min(550, Math.max(280, (int) (Math.abs(requestedDelta) * 0.3f)));
+            handler.postDelayed(unlockRunnable, duration + 50L);
+
+            final ValueAnimator scrollAnimator = ValueAnimator.ofInt(currentScrollY, target);
+            currentAnimator = scrollAnimator;
+            scrollAnimator.setDuration(duration);
+            scrollAnimator.setInterpolator(new DecelerateInterpolator(1.8f));
+            scrollAnimator.addUpdateListener(animation -> {
+                final int y = (Integer) animation.getAnimatedValue();
+                callback.setProgrammaticScrolling(true);
+                scrollView.scrollTo(0, y);
+                callback.setProgrammaticScrolling(false);
+            });
+            scrollAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    currentAnimator = null;
+                    isAnimating = false;
+                }
+
+                @Override
+                public void onAnimationCancel(Animator animation) {
+                    currentAnimator = null;
+                    isAnimating = false;
+                }
+            });
+            scrollAnimator.start();
             return;
         }
 
@@ -191,6 +220,8 @@ public final class LyricsScrollEngine {
 
         final float appliedDelta = (float) (afterY - beforeY);
         if (Math.abs(appliedDelta) < SKIP_THRESHOLD_PX) {
+            isAnimating = false;
+            handler.removeCallbacks(unlockRunnable);
             return;
         }
 
@@ -214,6 +245,8 @@ public final class LyricsScrollEngine {
 
         final int totalRows = validRows.size();
         if (totalRows == 0) {
+            isAnimating = false;
+            handler.removeCallbacks(unlockRunnable);
             return;
         }
 
@@ -247,6 +280,31 @@ public final class LyricsScrollEngine {
             refRowIdx = (referenceIndex >= 0) ? Math.max(0, Math.min(referenceIndex, totalRows - 1)) : targetRowIdx;
         }
 
+        // if ref matches target or is outside viewport when browsing, pick visible row anchor so cascade wave flows naturally
+        boolean refOffScreen = false;
+        if (refRowIdx >= 0 && refRowIdx < totalRows) {
+            View refV = validRows.get(refRowIdx);
+            if (refV.getBottom() < beforeY || refV.getTop() > beforeY + viewportHeight) {
+                refOffScreen = true;
+            }
+        }
+        if ((refRowIdx == targetRowIdx || refOffScreen) && Math.abs(appliedDelta) >= SKIP_THRESHOLD_PX) {
+            int bestIdx = -1;
+            int bestDist = Integer.MAX_VALUE;
+            final int anchorY = beforeY + (int) (viewportHeight * 0.25f);
+            for (int i = 0; i < totalRows; i++) {
+                final View row = validRows.get(i);
+                final int dist = Math.abs(row.getTop() - anchorY);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIdx = i;
+                }
+            }
+            if (bestIdx >= 0) {
+                refRowIdx = bestIdx;
+            }
+        }
+
         final int refIdx = refRowIdx;
 
         // calculate visible lines range
@@ -273,6 +331,8 @@ public final class LyricsScrollEngine {
 
         final int count = end - start;
         if (count <= 0) {
+            isAnimating = false;
+            handler.removeCallbacks(unlockRunnable);
             return;
         }
 
@@ -331,6 +391,8 @@ public final class LyricsScrollEngine {
         currentSpecCount = specIdx;
 
         final long totalDurationMs = maxTotalMs;
+        handler.removeCallbacks(unlockRunnable);
+        handler.postDelayed(unlockRunnable, totalDurationMs + 50L);
         final ValueAnimator animator = ValueAnimator.ofInt(0, (int) totalDurationMs);
         currentAnimator = animator;
         animator.setDuration(totalDurationMs);
@@ -379,6 +441,7 @@ public final class LyricsScrollEngine {
             currentSpecCount = 0;
         }
         currentAnimator = null;
+        isAnimating = false;
     }
 
     public void cancelCascade() {
@@ -387,5 +450,7 @@ public final class LyricsScrollEngine {
             currentAnimator = null;
         }
         finishCascade();
+        isAnimating = false;
+        handler.removeCallbacks(unlockRunnable);
     }
 }

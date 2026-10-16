@@ -285,6 +285,9 @@ class LyricsLineView extends TextView {
     }
 
     private RenderEffect currentRenderEffect;
+    private float currentBlurRadius = 0f;
+    @Nullable
+    private ValueAnimator blurAnimator;
 
     public void setRenderEffectCompat(@Nullable RenderEffect effect) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -293,6 +296,63 @@ class LyricsLineView extends TextView {
             }
             this.currentRenderEffect = effect;
             super.setRenderEffect(effect);
+        }
+    }
+
+    public void animateBlur(float targetRadius, long duration) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return;
+        }
+        if (blurAnimator != null) {
+            blurAnimator.cancel();
+            blurAnimator = null;
+        }
+        if (Math.abs(currentBlurRadius - targetRadius) < 0.1f) {
+            setBlurRadius(targetRadius);
+            return;
+        }
+        blurAnimator = ValueAnimator.ofFloat(currentBlurRadius, targetRadius);
+        blurAnimator.setDuration(duration);
+        blurAnimator.setInterpolator(TRANSITION_INTERPOLATOR);
+        blurAnimator.addUpdateListener(anim -> {
+            float r = (Float) anim.getAnimatedValue();
+            setBlurRadius(r);
+        });
+        blurAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                blurAnimator = null;
+                setBlurRadius(targetRadius);
+            }
+        });
+        blurAnimator.start();
+    }
+
+    public void setBlurRadius(float radius) {
+        this.currentBlurRadius = radius;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (radius < 0.5f) {
+                setRenderEffectCompat(null);
+            } else {
+                setRenderEffectCompat(LyricsPanelView.getCachedBlurEffect(radius));
+            }
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (scaleAnimator != null) {
+            scaleAnimator.cancel();
+            scaleAnimator = null;
+        }
+        if (blurAnimator != null) {
+            blurAnimator.cancel();
+            blurAnimator = null;
+        }
+        if (secondaryExpandAnimator != null) {
+            secondaryExpandAnimator.cancel();
+            secondaryExpandAnimator = null;
         }
     }
 
@@ -347,6 +407,22 @@ class LyricsLineView extends TextView {
 
     public boolean hasWordUnits() {
         return wordUnits != null && !wordUnits.isEmpty();
+    }
+
+    public long getLastWordEndMs() {
+        if (wordUnits == null || wordUnits.isEmpty()) {
+            return LyricsLine.NO_TIME;
+        }
+        long maxEnd = LyricsLine.NO_TIME;
+        for (int i = 0; i < wordUnits.size(); i++) {
+            WordUnit u = wordUnits.get(i);
+            if (u.endMs != LyricsLine.NO_TIME) {
+                if (maxEnd == LyricsLine.NO_TIME || u.endMs > maxEnd) {
+                    maxEnd = u.endMs;
+                }
+            }
+        }
+        return maxEnd;
     }
 
     private void layoutWordUnits(int availableWidth) {
@@ -500,6 +576,7 @@ class LyricsLineView extends TextView {
         float curY = 0f;
         int currentLine = 0;
         float lastRomajiEndX = 0f;
+        int wrapWidth = Math.max(1, Math.round(availableWidth / 1.08f));
 
         int i = 0;
         while (i < wordUnits.size()) {
@@ -511,8 +588,9 @@ class LyricsLineView extends TextView {
 
             if (isContinuousScript) {
                 WordUnit u = firstInGroup;
-                float pillarW = Math.max(u.kanjiWidth, u.romajiWidth);
-                if (curX > 0f && curX + pillarW > availableWidth) {
+                float romajiMinGap = (!u.romaji.isEmpty()) ? Dim.dp(6f) : 0f;
+                float pillarW = Math.max(u.kanjiWidth, u.romajiWidth + romajiMinGap);
+                if (curX > 0f && curX + pillarW > wrapWidth) {
                     curX = 0f;
                     currentLine++;
                     curY += lineSpacing;
@@ -560,7 +638,7 @@ class LyricsLineView extends TextView {
                 }
 
                 // wrap line if word too wide
-                if (curX > 0f && curX + wordTotalW > availableWidth) {
+                if (curX > 0f && curX + wordTotalW > wrapWidth) {
                     curX = 0f;
                     currentLine++;
                     curY += lineSpacing;
@@ -577,7 +655,7 @@ class LyricsLineView extends TextView {
                     float pillarW = Math.max(u.kanjiWidth, u.romajiWidth);
 
                     // fallback if one word wider than screen
-                    if (curX > 0f && curX + pillarW > availableWidth) {
+                    if (curX > 0f && curX + pillarW > wrapWidth) {
                         curX = 0f;
                         currentLine++;
                         curY += lineSpacing;
@@ -675,7 +753,7 @@ class LyricsLineView extends TextView {
                     : Layout.Alignment.ALIGN_NORMAL;
 
             StaticLayout.Builder tb = StaticLayout.Builder
-                    .obtain(translationText, 0, translationText.length(), transPaint, availableWidth)
+                    .obtain(translationText, 0, translationText.length(), transPaint, wrapWidth)
                     .setAlignment(align)
                     .setLineSpacing(Dim.dp(3), 1.15f)
                     .setIncludePad(false);
@@ -683,7 +761,7 @@ class LyricsLineView extends TextView {
                 tb.setUseLineSpacingFromFallbacks(true);
             }
             transLayout = tb.build();
-            transLayoutWidth = availableWidth;
+            transLayoutWidth = wrapWidth;
 
             totalMeasuredHeight = Math.round(curY + singleLineHeight + Dim.dp(4f) + transLayout.getHeight());
         } else {
@@ -697,6 +775,7 @@ class LyricsLineView extends TextView {
                                     float romajiHeight, float romajiBaseline,
                                     float baseSpaceWidth, boolean hasRomaji) {
         final boolean isRightAligned = isGravityRightAligned();
+        int wrapWidth = Math.max(1, Math.round(availableWidth / 1.08f));
 
         // wrap arabic words
         float arabicLineSpacing = kanjiHeight * 1.25f;
@@ -709,7 +788,7 @@ class LyricsLineView extends TextView {
             float wordW = u.kanjiWidth;
             float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
 
-            if (!curArabicLine.isEmpty() && curLineWidth + wordW > availableWidth) {
+            if (!curArabicLine.isEmpty() && curLineWidth + wordW > wrapWidth) {
                 arabicLines.add(curArabicLine);
                 curArabicLine = new ArrayList<>();
                 curLineWidth = 0f;
@@ -776,7 +855,7 @@ class LyricsLineView extends TextView {
                 float wordW = u.romajiWidth;
                 float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
 
-                if (!curRomajiLine.isEmpty() && curRLineWidth + wordW > availableWidth) {
+                if (!curRomajiLine.isEmpty() && curRLineWidth + wordW > wrapWidth) {
                     romajiLines.add(curRomajiLine);
                     curRomajiLine = new ArrayList<>();
                     curRLineWidth = 0f;
@@ -834,7 +913,7 @@ class LyricsLineView extends TextView {
                     : Layout.Alignment.ALIGN_NORMAL;
 
             StaticLayout.Builder tb = StaticLayout.Builder
-                    .obtain(translationText, 0, translationText.length(), transPaint, availableWidth)
+                    .obtain(translationText, 0, translationText.length(), transPaint, wrapWidth)
                     .setAlignment(align)
                     .setLineSpacing(Dim.dp(3), 1.15f)
                     .setIncludePad(false);
@@ -842,7 +921,7 @@ class LyricsLineView extends TextView {
                 tb.setUseLineSpacingFromFallbacks(true);
             }
             transLayout = tb.build();
-            transLayoutWidth = availableWidth;
+            transLayoutWidth = wrapWidth;
 
             totalMeasuredHeight = Math.round(bottomOfLyrics + Dim.dp(6f) + transLayout.getHeight());
         } else {
@@ -877,14 +956,22 @@ class LyricsLineView extends TextView {
 
     private long lastDrawnClockPos = Long.MIN_VALUE;
 
+    public void resetClockPos() {
+        this.lastDrawnClockPos = Long.MIN_VALUE;
+        invalidate();
+    }
+
     private long getLiveClockPositionMs() {
         if (positionMs == Long.MIN_VALUE) {
             lastDrawnClockPos = Long.MIN_VALUE;
             return Long.MIN_VALUE;
         }
         long rawPos = LyricsManager.getInstance().getPositionMs();
+        // hold drawn time from jumping backwards while playing, unless user actually seeks
         if (LyricsManager.getInstance().isPlaying() && lastDrawnClockPos != Long.MIN_VALUE) {
-            if (rawPos >= lastDrawnClockPos - 1000L) {
+            if (rawPos < lastDrawnClockPos - 200L || (rawPos < 200L && lastDrawnClockPos >= 400L)) {
+                lastDrawnClockPos = rawPos;
+            } else {
                 rawPos = Math.max(lastDrawnClockPos, rawPos);
             }
         }
@@ -973,7 +1060,8 @@ class LyricsLineView extends TextView {
                             : null;
                     float lift = state != null ? state.lift : 0f;
                     float scale = state != null ? state.scale : 1f;
-                    float chX = u.kanjiX + u.charOffsets[c];
+                    float spreadX = state != null ? state.spreadX : 0f;
+                    float chX = u.kanjiX + u.charOffsets[c] + spreadX;
                     float chW = u.charWidths[c];
                     float chCenterX = chX + chW / 2f;
                     String chStr = u.kanji.substring(c, c + cc);
@@ -1016,7 +1104,8 @@ class LyricsLineView extends TextView {
                                 : null;
                         float lift = state != null ? state.lift : 0f;
                         float scale = state != null ? state.scale : 1f;
-                        float chX = u.romajiX + u.romajiCharOffsets[c];
+                        float spreadX = state != null ? state.spreadX : 0f;
+                        float chX = u.romajiX + u.romajiCharOffsets[c] + spreadX;
                         float chW = u.romajiCharWidths[c];
                         float chCenterX = chX + chW / 2f;
                         String chStr = u.romaji.substring(c, c + cc);
@@ -1108,8 +1197,9 @@ class LyricsLineView extends TextView {
                             float lift = state.lift;
                             float scale = state.scale;
                             float glowAlpha = state.glowAlpha;
+                            float spreadX = state.spreadX;
 
-                            float chX = u.kanjiX + chLeft;
+                            float chX = u.kanjiX + chLeft + spreadX;
                             float chCenterX = chX + chW / 2f;
                             String chStr = u.kanji.substring(c, c + cc);
 
@@ -1123,7 +1213,7 @@ class LyricsLineView extends TextView {
 
                             if (wiperX >= chRight) {
                                 if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.28f * mainP.getTextSize());
+                                    float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
                                     int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
                                     glowPaint.set(sungKanjiPaint);
                                     glowPaint.setShader(null);
@@ -1137,7 +1227,7 @@ class LyricsLineView extends TextView {
                             } else if (wiperX > chLeft) {
                                 float chProgress = (wiperX - chLeft) / Math.max(0.001f, chW);
                                 if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.28f * mainP.getTextSize());
+                                    float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
                                     int glowColor = Color.argb(Math.round(glowAlpha * chProgress), 255, 255, 255);
                                     glowPaint.set(sungKanjiPaint);
                                     glowPaint.setShader(null);
@@ -1160,7 +1250,7 @@ class LyricsLineView extends TextView {
                         float glowAlpha = state.glowAlpha;
 
                         if (glowAlpha > 1f && progress > 0f) {
-                            float bloomRadius = Math.max(2f, 0.28f * mainP.getTextSize());
+                            float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
                             int glowColor = Color.argb(Math.round(glowAlpha * progress), 255, 255, 255);
                             glowPaint.set(sungKanjiPaint);
                             glowPaint.setShader(null);
@@ -1203,8 +1293,9 @@ class LyricsLineView extends TextView {
                                 float lift = state.lift;
                                 float scale = state.scale;
                                 float glowAlpha = state.glowAlpha;
+                                float spreadX = state.spreadX;
 
-                                float chX = u.romajiX + chLeft;
+                                float chX = u.romajiX + chLeft + spreadX;
                                 float chCenterX = chX + chW / 2f;
                                 String chStr = u.romaji.substring(c, c + cc);
 
@@ -1218,7 +1309,7 @@ class LyricsLineView extends TextView {
 
                                 if (wiperX >= chRight) {
                                     if (glowAlpha > 1f) {
-                                        float bloomRadius = Math.max(2f, 0.28f * romajiPaint.getTextSize());
+                                        float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
                                         int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
                                         glowPaint.set(sungRomajiPaint);
                                         glowPaint.setShader(null);
@@ -1232,7 +1323,7 @@ class LyricsLineView extends TextView {
                                 } else if (wiperX > chLeft) {
                                     float chProgress = (wiperX - chLeft) / Math.max(0.001f, chW);
                                     if (glowAlpha > 1f) {
-                                        float bloomRadius = Math.max(2f, 0.28f * romajiPaint.getTextSize());
+                                        float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
                                         int glowColor = Color.argb(Math.round(glowAlpha * chProgress), 255, 255, 255);
                                         glowPaint.set(sungRomajiPaint);
                                         glowPaint.setShader(null);
@@ -1254,7 +1345,7 @@ class LyricsLineView extends TextView {
                             float scale = state.scale;
                             float glowAlpha = state.glowAlpha;
                             if (glowAlpha > 1f && progress > 0f) {
-                                float bloomRadius = Math.max(2f, 0.28f * romajiPaint.getTextSize());
+                                float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
                                 int glowColor = Color.argb(Math.round(glowAlpha * progress), 255, 255, 255);
                                 glowPaint.set(sungRomajiPaint);
                                 glowPaint.setShader(null);
@@ -1290,8 +1381,9 @@ class LyricsLineView extends TextView {
                             float lift = state.lift;
                             float scale = state.scale;
                             float glowAlpha = state.glowAlpha;
+                            float spreadX = state.spreadX;
 
-                            float chX = u.kanjiX + u.charOffsets[c];
+                            float chX = u.kanjiX + u.charOffsets[c] + spreadX;
                             float chW = u.charWidths[c];
                             float chCenterX = chX + chW / 2f;
                             String chStr = u.kanji.substring(c, c + cc);
@@ -1305,7 +1397,7 @@ class LyricsLineView extends TextView {
                             }
 
                             if (glowAlpha > 1f) {
-                                float bloomRadius = Math.max(2f, 0.28f * mainP.getTextSize());
+                                float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
                                 int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
                                 glowPaint.set(sungKanjiPaint);
                                 glowPaint.setShader(null);
@@ -1327,7 +1419,7 @@ class LyricsLineView extends TextView {
                         float glowAlpha = state.glowAlpha;
 
                         if (glowAlpha > 1f) {
-                            float bloomRadius = Math.max(2f, 0.28f * mainP.getTextSize());
+                            float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
                             int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
                             glowPaint.set(sungKanjiPaint);
                             glowPaint.setShader(null);
@@ -1363,8 +1455,9 @@ class LyricsLineView extends TextView {
                                 float lift = state.lift;
                                 float scale = state.scale;
                                 float glowAlpha = state.glowAlpha;
+                                float spreadX = state.spreadX;
 
-                                float chX = u.romajiX + u.romajiCharOffsets[c];
+                                float chX = u.romajiX + u.romajiCharOffsets[c] + spreadX;
                                 float chW = u.romajiCharWidths[c];
                                 float chCenterX = chX + chW / 2f;
                                 String chStr = u.romaji.substring(c, c + cc);
@@ -1374,7 +1467,7 @@ class LyricsLineView extends TextView {
                                 if (scale != 1f) canvas.scale(scale, scale, chCenterX, u.romajiCenterY);
 
                                 if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.28f * romajiPaint.getTextSize());
+                                    float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
                                     int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
                                     glowPaint.set(sungRomajiPaint);
                                     glowPaint.setShader(null);
@@ -1420,11 +1513,17 @@ class LyricsLineView extends TextView {
         final float scale;
         final float lift;
         final float glowAlpha;
+        final float spreadX;
 
         EmphasisState(float scale, float lift, float glowAlpha) {
+            this(scale, lift, glowAlpha, 0f);
+        }
+
+        EmphasisState(float scale, float lift, float glowAlpha, float spreadX) {
             this.scale = scale;
             this.lift = lift;
             this.glowAlpha = glowAlpha;
+            this.spreadX = spreadX;
         }
     }
 
@@ -1435,110 +1534,58 @@ class LyricsLineView extends TextView {
         long refStart = (u.wordStartMs != LyricsLine.NO_TIME) ? u.wordStartMs : u.startMs;
         long refEnd = (u.wordEndMs != LyricsLine.NO_TIME) ? u.wordEndMs : u.endMs;
         if (refStart == LyricsLine.NO_TIME) {
-            return new EmphasisState(1f, 0f, 0f);
+            return new EmphasisState(1f, 0f, 0f, 0f);
         }
 
-        final float sungLift = Math.max(2.5f, textSize * 0.045f);
         final boolean growable = isWordGrowable(u, isSecondary);
 
         if (growable) {
-            long finalDuration = Math.max(1L, refEnd - refStart);
-            float maxTotalDelay = finalDuration * 0.60f;
-            float baseDelayPerChar = Math.min(finalDuration * 0.09f, numChars > 1 ? maxTotalDelay / (numChars - 1) : 0f);
-            long charDelayMs = (long) (charIndex * baseDelayPerChar);
-            long charStartMs = refStart + charDelayMs;
+            double duration = Math.max(0.001, (refEnd - refStart) / 1000.0);
+            int count = Math.max(1, numChars);
+            double delay = Math.min((duration / count) * 0.4, 0.4);
+            double hold = (2.0 * duration) / count;
+            double response = Math.min(3.0, duration);
+            double emphasis = Math.min(1.0, Math.max(0.0, duration - 1.0));
+            double glow = 0.45 * Math.min(1.0, Math.max(0.0, (duration - 1.0) / 0.5));
+            double spanDuration = hold + response * 2.0;
 
-            if (livePosMs < charStartMs) {
-                return new EmphasisState(1f, 0f, 0f);
+            double elapsed = (livePosMs - refStart) / 1000.0;
+            double startDelay = (charIndex + 1) * delay;
+            double time = elapsed - startDelay;
+
+            if (time <= 0.0) {
+                return new EmphasisState(1f, 0f, 0f, 0f);
             }
 
-            long growDurationMs = Math.max(500L, Math.min(4500L, (long) (finalDuration * 1.5f)));
-            float elapsedMs = (float) (livePosMs - charStartMs);
+            double half = Math.max(1.0, (count - 1) / 2.0);
+            double side = (charIndex - (count - 1) / 2.0) / half; // -1 .. 1
 
-            // calculate bounce and lift for sung words
-            long minDuration = 1000L;
-            long maxDuration = 5000L;
-            float progress = Math.min(1f, Math.max(0f, (float) (finalDuration - minDuration) / (float) (maxDuration - minDuration)));
-            float easedProgress = progress * progress * progress;
+            if (time < spanDuration) {
+                float rise = SpringEasing.springProgress(time, response);
+                float envelope = SpringEasing.springProgress(time, response)
+                        * (1f - SpringEasing.springProgress(time - hold, response));
 
-            float penaltyFactor = 1.0f;
-            float maxDecayRate = 0f;
-            boolean isLongWord = numChars > 5;
-            boolean isShortDuration = finalDuration < 1500L;
-            if (isLongWord || isShortDuration) {
-                float decayStrength = 0f;
-                if (isLongWord) decayStrength += Math.min((numChars - 5) / 3f, 1.0f) * 0.4f;
-                if (isShortDuration) decayStrength += Math.max(0f, 1.0f - (finalDuration - 1000f) / 500f) * 0.4f;
-                maxDecayRate = Math.min(decayStrength, 0.85f);
-            }
+                float spreadX = (float) (side * 0.05 * emphasis * envelope * textSize);
+                float lift = (float) ((0.05 * rise + 0.035 * emphasis * envelope) * textSize);
+                float scale = (float) (1.0 + 0.10 * emphasis * envelope);
+                float glowAlpha = (float) (255.0 * glow * envelope);
 
-            float positionInWord = numChars > 1 ? (float) charIndex / (float) (numChars - 1) : 0f;
-            float decayFactor = 1.0f - positionInWord * maxDecayRate;
-            float charProgress = easedProgress * penaltyFactor * decayFactor;
-
-            float baseGrowth = numChars <= 3 ? 0.07f : 0.05f;
-            float charMaxScale = 1.0f + baseGrowth + charProgress * 0.10f;
-            float charShadowIntensity = 0.40f + charProgress * 0.40f;
-            float normalizedGrowth = Math.min(1.0f, Math.max(0f, (charMaxScale - 1.0f) / 0.13f));
-
-            // lift up letter higher if singer hold long note
-            float charPeakLift = Math.max(5.5f, (textSize * 0.080f) + (normalizedGrowth * textSize * 0.045f));
-
-            // go up to peak then hold a bit then go back down to resting height
-            float t = elapsedMs / (float) Math.max(1L, growDurationMs);
-            if (t <= 0f) {
-                return new EmphasisState(1f, 0f, 0f);
-            } else if (t < 0.25f) {
-                float phase = t / 0.25f;
-                float easeUp = 0.5f * (1.0f - (float) Math.cos(phase * Math.PI));
-                float scale = 1.0f + (charMaxScale - 1.0f) * easeUp;
-                float lift = charPeakLift * easeUp;
-                float glowAlpha = 255f * charShadowIntensity * easeUp;
-                return new EmphasisState(scale, lift, glowAlpha);
-            } else if (t <= 0.30f) {
-                float scale = charMaxScale;
-                float lift = charPeakLift;
-                float glowAlpha = 255f * charShadowIntensity;
-                return new EmphasisState(scale, lift, glowAlpha);
-            } else if (t <= 1.0f) {
-                float phase = (t - 0.30f) / 0.70f;
-                float easeDown = 0.5f * (1.0f - (float) Math.cos(phase * Math.PI));
-                float scale = charMaxScale + (1.0f - charMaxScale) * easeDown;
-                float lift = charPeakLift - (charPeakLift - sungLift) * easeDown;
-                float glowAlpha = 255f * charShadowIntensity * (1.0f - easeDown);
-                return new EmphasisState(scale, lift, glowAlpha);
+                return new EmphasisState(scale, lift, glowAlpha, spreadX);
             } else {
-                return new EmphasisState(1.0f, sungLift, 0f);
+                float lift = 0.05f * textSize;
+                return new EmphasisState(1.0f, lift, 0f, 0f);
             }
         } else {
             // normal lyrics glide up slightly and stay elevated
             long sylStart = (u.startMs != LyricsLine.NO_TIME) ? u.startMs : refStart;
-            long sylEnd = (u.endMs != LyricsLine.NO_TIME) ? u.endMs : refEnd;
-            long sylDuration = Math.max(1L, sylEnd - sylStart);
-
-            // timing when each letter get wiped
-            float charRatio;
-            if (numChars == u.romaji.length() && !u.romaji.isEmpty() && u.romajiCharOffsets != null && u.romajiWidth > 0f) {
-                charRatio = charIndex < u.romajiCharOffsets.length ? (u.romajiCharOffsets[charIndex] / u.romajiWidth) : 0f;
-            } else if (u.charOffsets != null && u.kanjiWidth > 0f && charIndex < u.charOffsets.length) {
-                charRatio = u.charOffsets[charIndex] / u.kanjiWidth;
-            } else {
-                charRatio = numChars > 1 ? ((float) charIndex / (float) numChars) : 0f;
+            if (livePosMs < sylStart) {
+                return new EmphasisState(1f, 0f, 0f, 0f);
             }
 
-            long charStartMs = sylStart + (long) (charRatio * sylDuration);
-            if (livePosMs < charStartMs) {
-                return new EmphasisState(1f, 0f, 0f);
-            }
-
-            long charAnimDur = Math.max(350L, Math.min(800L, (long) (sylDuration * 1.2f)));
-            float elapsed = (float) (livePosMs - charStartMs);
-            float t = Math.min(1.0f, Math.max(0f, elapsed / (float) charAnimDur));
-
-            // smooth glide up to sung lift using smoothstep
-            float easeUp = t * t * (3.0f - 2.0f * t);
-            float lift = sungLift * easeUp;
-            return new EmphasisState(1.0f, lift, 0f);
+            double elapsed = (livePosMs - sylStart) / 1000.0;
+            float rise = SpringEasing.springProgress(elapsed, 0.45);
+            float lift = 0.05f * rise * textSize;
+            return new EmphasisState(1.0f, lift, 0f, 0f);
         }
     }
 
@@ -1546,52 +1593,47 @@ class LyricsLineView extends TextView {
         long refStart = (u.wordStartMs != LyricsLine.NO_TIME) ? u.wordStartMs : u.startMs;
         long refEnd = (u.wordEndMs != LyricsLine.NO_TIME) ? u.wordEndMs : u.endMs;
         if (refStart == LyricsLine.NO_TIME || livePosMs < refStart) {
-            return new EmphasisState(1f, 0f, 0f);
+            return new EmphasisState(1f, 0f, 0f, 0f);
         }
 
-        final float sungLift = Math.max(2.5f, textSize * 0.045f);
         final boolean growable = isWordGrowable(u, isSecondary);
         if (growable) {
-            long finalDuration = Math.max(1L, refEnd - refStart);
-            long growDurationMs = (long) (finalDuration * 1.5f);
-            float elapsedMs = (float) (livePosMs - refStart);
-            float t = elapsedMs / (float) Math.max(1L, growDurationMs);
+            double duration = Math.max(0.001, (refEnd - refStart) / 1000.0);
+            int count = 1;
+            double hold = 2.0 * duration;
+            double response = Math.min(3.0, duration);
+            double emphasis = Math.min(1.0, Math.max(0.0, duration - 1.0));
+            double glow = 0.45 * Math.min(1.0, Math.max(0.0, (duration - 1.0) / 0.5));
+            double spanDuration = hold + response * 2.0;
 
-            float wordMaxScale = 1.06f;
-            float charPeakLift = Math.max(5.5f, textSize * 0.080f);
-            float maxGlowAlpha = 255f * 0.50f;
+            double elapsed = (livePosMs - refStart) / 1000.0;
+            if (elapsed <= 0.0) {
+                return new EmphasisState(1f, 0f, 0f, 0f);
+            }
+            if (elapsed < spanDuration) {
+                float rise = SpringEasing.springProgress(elapsed, response);
+                float envelope = SpringEasing.springProgress(elapsed, response)
+                        * (1f - SpringEasing.springProgress(elapsed - hold, response));
 
-            if (t <= 0f) {
-                return new EmphasisState(1f, 0f, 0f);
-            } else if (t < 0.25f) {
-                float phase = t / 0.25f;
-                float easeUp = 0.5f * (1.0f - (float) Math.cos(phase * Math.PI));
-                return new EmphasisState(1.0f + (wordMaxScale - 1.0f) * easeUp, charPeakLift * easeUp, maxGlowAlpha * easeUp);
-            } else if (t <= 0.30f) {
-                return new EmphasisState(wordMaxScale, charPeakLift, maxGlowAlpha);
-            } else if (t <= 1.0f) {
-                float phase = (t - 0.30f) / 0.70f;
-                float easeDown = 0.5f * (1.0f - (float) Math.cos(phase * Math.PI));
-                return new EmphasisState(wordMaxScale + (1.0f - wordMaxScale) * easeDown,
-                        charPeakLift - (charPeakLift - sungLift) * easeDown,
-                        maxGlowAlpha * (1.0f - easeDown));
+                float lift = (float) ((0.05 * rise + 0.035 * emphasis * envelope) * textSize);
+                float scale = (float) (1.0 + 0.10 * emphasis * envelope);
+                float glowAlpha = (float) (255.0 * glow * envelope);
+
+                return new EmphasisState(scale, lift, glowAlpha, 0f);
             } else {
-                return new EmphasisState(1.0f, sungLift, 0f);
+                float lift = 0.05f * textSize;
+                return new EmphasisState(1.0f, lift, 0f, 0f);
             }
         } else {
             long sylStart = (u.startMs != LyricsLine.NO_TIME) ? u.startMs : refStart;
-            long sylEnd = (u.endMs != LyricsLine.NO_TIME) ? u.endMs : refEnd;
-            long sylDuration = Math.max(1L, sylEnd - sylStart);
             if (livePosMs < sylStart) {
-                return new EmphasisState(1f, 0f, 0f);
+                return new EmphasisState(1f, 0f, 0f, 0f);
             }
 
-            long wordAnimDur = Math.max(350L, Math.min(800L, (long) (sylDuration * 1.2f)));
-            float elapsed = (float) (livePosMs - sylStart);
-            float t = Math.min(1.0f, Math.max(0f, elapsed / (float) wordAnimDur));
-            float easeUp = t * t * (3.0f - 2.0f * t);
-            float lift = sungLift * easeUp;
-            return new EmphasisState(1.0f, lift, 0f);
+            double elapsed = (livePosMs - sylStart) / 1000.0;
+            float rise = SpringEasing.springProgress(elapsed, 0.45);
+            float lift = 0.05f * rise * textSize;
+            return new EmphasisState(1.0f, lift, 0f, 0f);
         }
     }
 
@@ -1625,7 +1667,7 @@ class LyricsLineView extends TextView {
             return;
         }
         final float p = Math.max(0f, Math.min(1f, progress));
-        final float feather = Math.min(WORD_FEATHER_PX, width / 2f);
+        final float feather = Math.min(Math.max(6f, paint.getTextSize() * 0.35f), width / 2f);
         final int clear = color & 0x00FFFFFF;
 
         final float wiperX;
@@ -1671,9 +1713,9 @@ class LyricsLineView extends TextView {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         if (isGravityRightAligned()) {
-            setPivotX(w);
+            setPivotX(w - getPaddingRight());
         } else {
-            setPivotX(0f);
+            setPivotX(getPaddingLeft());
         }
         setPivotY(h / 2f);
     }
@@ -1735,11 +1777,14 @@ class LyricsLineView extends TextView {
         final boolean sungChanged = (this.allSung != sung);
         final boolean colorChanged = (this.unsungColor != unsungCol || this.sungColor != sungCol);
         final boolean timingChanged = (this.wordTimings != timings || this.originalTextStart != origStart);
+        // reset line clock if user seek backward or rewind track to start
+        final boolean backwardSeek = (this.positionMs != Long.MIN_VALUE && posMs != Long.MIN_VALUE
+                && (posMs < this.positionMs - 200L || (posMs < 200L && this.positionMs >= 400L)));
 
         this.wordTimings = timings != null ? timings : Collections.emptyList();
         this.cachedHasWordTimings = computeHasWordTimings();
         this.positionMs = posMs;
-        if (posMs == Long.MIN_VALUE) {
+        if (posMs == Long.MIN_VALUE || backwardSeek) {
             this.lastDrawnClockPos = Long.MIN_VALUE;
         }
         this.allSung = sung;

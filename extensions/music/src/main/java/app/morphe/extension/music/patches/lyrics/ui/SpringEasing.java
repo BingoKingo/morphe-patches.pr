@@ -90,4 +90,13 @@ public final class SpringEasing {
         CACHE.put(key, r);
         return r;
     }
+
+    /**
+     * compute damped spring progress from time and response duration
+     */
+    public static float springProgress(double time, double response) {
+        if (time <= 0.0) return 0f;
+        double phase = (2.0 * Math.PI * time) / Math.max(0.001, response);
+        return (float) (1.0 - (1.0 + phase) * Math.exp(-phase));
+    }
 }

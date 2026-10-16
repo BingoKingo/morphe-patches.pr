@@ -172,8 +172,17 @@ public final class LyricsRetiming {
             LyricsLine e = lyrics.get(i);
             startMs[i] = e.startTimeMs();
             long end = e.endTimeMs();
-            if (end == LyricsLine.NO_TIME && !e.words().isEmpty()) {
-                end = e.words().get(e.words().size() - 1).endMs();
+            // line end must cover last word timing so word sync not cut prematurely
+            if (!e.words().isEmpty()) {
+                long maxWordEnd = LyricsLine.NO_TIME;
+                for (Word w : e.words()) {
+                    if (w.endMs() != LyricsLine.NO_TIME) {
+                        maxWordEnd = Math.max(maxWordEnd, w.endMs());
+                    }
+                }
+                if (maxWordEnd != LyricsLine.NO_TIME) {
+                    end = (end == LyricsLine.NO_TIME) ? maxWordEnd : Math.max(end, maxWordEnd);
+                }
             }
             if (end == LyricsLine.NO_TIME) {
                 end = (i + 1 < len) ? lyrics.get(i + 1).startTimeMs() : startMs[i] + 4000L;
