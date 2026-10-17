@@ -12,6 +12,8 @@ import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
+import app.morphe.extension.music.patches.lyrics.model.Word;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.patches.lyrics.romanizers.ScriptDetector.Script;
 
@@ -41,6 +43,17 @@ public final class LocalRomanizer {
         }
     }
 
+    private static final class Read {
+        private final String text;
+        @Nullable
+        private final String dictionary;
+
+        Read(String text, @Nullable String dictionary) {
+            this.text = text;
+            this.dictionary = dictionary;
+        }
+    }
+
     private static final String PINYIN = "UniDict, pinyin-pro";
     private static final String JYUTPING = "UniDict, Rime Cantonese";
     private static final String RULE = "Built-in Romanization";
@@ -55,47 +68,87 @@ public final class LocalRomanizer {
         if (lines == null || lines.isEmpty()) return null;
         if (ScriptDetector.detect(lines) == Script.OTHER) return null;
 
+        final boolean cantonese = cantonese();
         boolean changed = false;
         String dictionary = null;
         List<String> result = new ArrayList<>(lines.size());
-        final boolean cantonese = cantonese();
 
         for (String line : lines) {
-            String romanized = line;
-            switch (ScriptDetector.detect(line)) {
-                case HAN:
-                    if (cantonese) {
-                        if (CantoneseDictStore.isReady()) {
-                            romanized = JyutpingRomanizer.romanize(line);
-                            dictionary = JYUTPING;
-                        }
-                    } else if (PinyinDictStore.isReady()) {
-                        romanized = PinyinRomanizer.romanize(line);
-                        dictionary = PINYIN;
-                    }
-                    break;
-                case JAPANESE:
-                    romanized = japanese(line);
-                    // Kana read by rule are not the dictionary's work, so nothing is credited.
-                    if (JapaneseDictStore.isReady()) dictionary = JAPANESE;
-                    break;
-                case KOREAN:
-                    romanized = HangulRomanizer.romanize(line);
-                    dictionary = RULE;
-                    break;
-                case GREEK:
-                    romanized = GreekRomanizer.romanize(line);
-                    dictionary = RULE;
-                    break;
-                default:
-                    break;
-            }
-
-            if (!romanized.equals(line)) changed = true;
-            result.add(romanized);
+            final Read read = readAs(line, ScriptDetector.detect(line), cantonese);
+            if (read.dictionary != null) dictionary = read.dictionary;
+            if (!read.text.equals(line)) changed = true;
+            result.add(read.text);
         }
 
         return changed ? new Result(result, dictionary) : null;
+    }
+
+    /**
+     * The word timings are the source's own; only the reading is added, and only to the lines
+     * the source had split. A line it did not split keeps the whole-line reading passed in.
+     */
+    @Nullable
+    public static List<LyricsLine> alignWords(List<LyricsLine> lines,
+            List<LyricsLine> wholeLine) {
+        if (lines == null || wholeLine == null || lines.size() != wholeLine.size()) return null;
+
+        final boolean cantonese = cantonese();
+        List<LyricsLine> result = new ArrayList<>(lines.size());
+        boolean aligned = false;
+
+        for (int i = 0; i < lines.size(); i++) {
+            final LyricsLine line = lines.get(i);
+            final List<Word> words = line.words();
+            // Kana is what marks a line Japanese; a word of kanji alone says only Han, and would
+            // then be looked up in the wrong dictionary.
+            final Script script = ScriptDetector.detect(line.text());
+            final List<Word> read = new ArrayList<>(words.size());
+            boolean any = false;
+
+            for (Word word : words) {
+                final String reading = readAs(word.text(), script, cantonese).text;
+                if (reading.equals(word.text())) {
+                    read.add(word);
+                    continue;
+                }
+                read.add(new Word(word.startMs(), word.endMs(), word.text(), reading,
+                        word.endsWithSpace()));
+                any = true;
+            }
+
+            if (!any) {
+                result.add(wholeLine.get(i));
+                continue;
+            }
+            result.add(new LyricsLine(line.startTimeMs(), line.endTimeMs(), line.text(), read,
+                    line.agentId(), line.isDuet(), line.isBG(), line.songPart()));
+            aligned = true;
+        }
+
+        return aligned ? result : null;
+    }
+
+    private static Read readAs(String text, Script script, boolean cantonese) {
+        switch (script) {
+            case HAN:
+                if (cantonese) {
+                    return CantoneseDictStore.isReady()
+                            ? new Read(JyutpingRomanizer.romanize(text), JYUTPING)
+                            : new Read(text, null);
+                }
+                return PinyinDictStore.isReady()
+                        ? new Read(PinyinRomanizer.romanize(text), PINYIN)
+                        : new Read(text, null);
+            case JAPANESE:
+                // Kana read by rule are not the dictionary's work, so nothing is credited.
+                return new Read(japanese(text), JapaneseDictStore.isReady() ? JAPANESE : null);
+            case KOREAN:
+                return new Read(HangulRomanizer.romanize(text), RULE);
+            case GREEK:
+                return new Read(GreekRomanizer.romanize(text), RULE);
+            default:
+                return new Read(text, null);
+        }
     }
 
     /** Cantonese rather than Chinese, which the Han text itself cannot say. */

@@ -116,10 +116,14 @@ public final class LyricsRomanizer {
                         && Settings.LYRICS_LOCAL_ROMANIZATION.get()
                         ? LocalRomanizer.romanize(lines) : null;
 
-                List<LyricsLine> result = local != null ? toLines(local.lines) : romanized;
+                final List<LyricsLine> wholeLine = local != null ? toLines(local.lines) : romanized;
+                final List<LyricsLine> aligned = local != null && Settings.LYRICS_WORD_SYNC.get()
+                        ? LocalRomanizer.alignWords(lyrics.lines(), wholeLine) : null;
+                final List<LyricsLine> result = aligned != null ? aligned : wholeLine;
+                final boolean alignedPerWord = aligned != null;
                 final boolean fromGoogle = online && local == null && result != null;
                 Utils.runOnMainThread(() -> callback.onRomanized(
-                        result, fromGoogle, false, null, false,
+                        result, fromGoogle, false, null, alignedPerWord,
                         local != null ? local.dictionary : null));
             } catch (Throwable ignored) {
                 Utils.runOnMainThread(

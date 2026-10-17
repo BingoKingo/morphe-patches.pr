@@ -114,26 +114,42 @@ record WordTiming(int start, int end, long startMs, long endMs,
 
     static Reading readingFor(LyricsLine line, int index,
             @Nullable List<LyricsLine> romanizedLines, boolean perWordRomaji) {
-        if (perWordRomaji && line.hasWords()) {
-            final StringBuilder text = new StringBuilder();
-            final List<WordTiming> spans = new ArrayList<>(line.words().size());
-            for (Word word : line.words()) {
-                final String reading = word.romaji();
-                if (reading == null || reading.isEmpty()) {
-                    continue;
+        if (perWordRomaji) {
+            final List<Word> words = readingWords(line, index, romanizedLines);
+            if (!words.isEmpty()) {
+                final StringBuilder text = new StringBuilder();
+                final List<WordTiming> spans = new ArrayList<>(words.size());
+                for (Word word : words) {
+                    final String reading = word.romaji();
+                    if (reading == null || reading.isEmpty()) {
+                        continue;
+                    }
+                    if (text.length() > 0) {
+                        text.append(' ');
+                    }
+                    final int start = text.length();
+                    text.append(reading);
+                    spans.add(new WordTiming(start, text.length(), word.startMs(), word.endMs(), null));
                 }
-                if (text.length() > 0) {
-                    text.append(' ');
+                if (!spans.isEmpty()) {
+                    return new Reading(text.toString(), closeReadingGaps(spans, line));
                 }
-                final int start = text.length();
-                text.append(reading);
-                spans.add(new WordTiming(start, text.length(), word.startMs(), word.endMs(), null));
-            }
-            if (!spans.isEmpty()) {
-                return new Reading(text.toString(), closeReadingGaps(spans, line));
             }
         }
         return new Reading(lineRomanizationAt(line, index, romanizedLines), null);
+    }
+
+    /** An aligned reading rides in the romanization's own lines; the lyric's own words are read
+     * only when they already carry one, as a provider's ruby does. */
+    private static List<Word> readingWords(LyricsLine line, int index,
+            @Nullable List<LyricsLine> romanizedLines) {
+        if (romanizedLines != null && index < romanizedLines.size()) {
+            final List<Word> words = romanizedLines.get(index).words();
+            if (!words.isEmpty()) {
+                return words;
+            }
+        }
+        return line.words();
     }
 
     private static List<WordTiming> closeReadingGaps(List<WordTiming> spans, LyricsLine line) {
@@ -536,7 +552,8 @@ record WordTiming(int start, int end, long startMs, long endMs,
         if (roma != null) {
             return roma;
         }
-        return line.hasWords() ? joinWordRomaji(line) : null;
+        final List<Word> words = readingWords(line, index, romanizedLines);
+        return words.isEmpty() ? null : joinWordRomaji(words);
     }
 
     /**
@@ -552,12 +569,9 @@ record WordTiming(int start, int end, long startMs, long endMs,
     }
 
     @Nullable
-    private static String joinWordRomaji(LyricsLine line) {
-        if (!line.hasWords()) {
-            return null;
-        }
+    private static String joinWordRomaji(List<Word> words) {
         StringBuilder sb = null;
-        for (Word word : line.words()) {
+        for (Word word : words) {
             final String romaji = word.romaji();
             if (romaji == null || romaji.isEmpty()) {
                 continue;
