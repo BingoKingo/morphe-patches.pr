@@ -12,6 +12,7 @@ import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.music.patches.lyrics.romanizers.ScriptDetector.Script;
 
 /**
@@ -40,8 +41,9 @@ public final class LocalRomanizer {
         }
     }
 
-    private static final String PINYIN = "Built-in pinyin";
-    private static final String HANGUL = "Built-in romanization";
+    private static final String PINYIN = "UniDict, pinyin-pro";
+    private static final String JYUTPING = "UniDict, Rime Cantonese";
+    private static final String RULE = "Built-in Romanization";
     private static final String JAPANESE = "SudachiDict";
 
     private LocalRomanizer() {
@@ -56,12 +58,18 @@ public final class LocalRomanizer {
         boolean changed = false;
         String dictionary = null;
         List<String> result = new ArrayList<>(lines.size());
+        final boolean cantonese = cantonese();
 
         for (String line : lines) {
             String romanized = line;
             switch (ScriptDetector.detect(line)) {
                 case HAN:
-                    if (PinyinDictStore.isReady()) {
+                    if (cantonese) {
+                        if (CantoneseDictStore.isReady()) {
+                            romanized = JyutpingRomanizer.romanize(line);
+                            dictionary = JYUTPING;
+                        }
+                    } else if (PinyinDictStore.isReady()) {
                         romanized = PinyinRomanizer.romanize(line);
                         dictionary = PINYIN;
                     }
@@ -73,7 +81,11 @@ public final class LocalRomanizer {
                     break;
                 case KOREAN:
                     romanized = HangulRomanizer.romanize(line);
-                    dictionary = HANGUL;
+                    dictionary = RULE;
+                    break;
+                case GREEK:
+                    romanized = GreekRomanizer.romanize(line);
+                    dictionary = RULE;
                     break;
                 default:
                     break;
@@ -86,9 +98,14 @@ public final class LocalRomanizer {
         return changed ? new Result(result, dictionary) : null;
     }
 
+    /** Cantonese rather than Chinese, which the Han text itself cannot say. */
+    private static boolean cantonese() {
+        return "YUE".equalsIgnoreCase(Settings.LYRICS_ROMANIZE_LANGUAGE.get());
+    }
+
     /** Kana by rule, everything else out of the dictionary. */
     private static String japanese(String line) {
-        JapaneseReadingTable table = JapaneseDictStore.table();
+        WordReadingTable table = JapaneseDictStore.table();
         StringBuilder out = new StringBuilder(line.length() * 2);
         int i = 0;
 
@@ -108,7 +125,7 @@ public final class LocalRomanizer {
                     continue;
                 }
                 // The longest entry that fits: a shorter one inside a longer word reads it wrong.
-                int limit = Math.min(JapaneseReadingTable.MAX_WORD_LENGTH, line.length() - i);
+                int limit = Math.min(WordReadingTable.MAX_WORD_LENGTH, line.length() - i);
                 String reading = null;
                 int length = 0;
                 for (int candidate = limit; candidate >= 1; candidate--) {
@@ -142,13 +159,13 @@ public final class LocalRomanizer {
 
     /** A run of kana, cut into words: the rule reads it either way, but without the words a
      * line reads as {@code chottomatte} where Google gives {@code Chotto matte}. */
-    private static void kana(String line, int from, int to, JapaneseReadingTable table,
+    private static void kana(String line, int from, int to, WordReadingTable table,
             StringBuilder out) {
         int at = from;
         while (at < to) {
             int length = to - at;
             if (table != null) {
-                int limit = Math.min(JapaneseReadingTable.MAX_WORD_LENGTH, to - at);
+                int limit = Math.min(WordReadingTable.MAX_WORD_LENGTH, to - at);
                 for (int candidate = limit; candidate >= 1; candidate--) {
                     if (table.reading(line.substring(at, at + candidate)) != null) {
                         length = candidate;

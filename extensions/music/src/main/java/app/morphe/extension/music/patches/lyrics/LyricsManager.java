@@ -1882,18 +1882,13 @@ private void reorderQueueByRemembered() {
                         return completed;
                     }
                 }
+                publishBest(id, display);
                 continue;
             }
             completed++;
             try {
                 boolean complete = display.accept(f.get(), scoreCandidates, stage12);
-                Lyrics available = display.bestResult != null
-                        ? display.bestResult : display.bestFallback;
-                // Word timing is an upgrade, not a reason to leave a usable lyric blank.
-                if (available != null && available != display.published) {
-                    display.published = available;
-                    publishFromLookup(id, available);
-                }
+                publishBest(id, display);
                 if (complete) {
                     display.windowClosed = true;
                     return completed;
@@ -1905,6 +1900,35 @@ private void reorderQueueByRemembered() {
         return completed;
     }
 
+    private static final int FIRST_PAINT_HOLD_MS = 800;
+
+    /**
+     * The word-timed version of the same lyric usually lands moments after the line-synced one,
+     * so a first result that carries only line timing waits out {@link #FIRST_PAINT_HOLD_MS}
+     * rather than render the song twice.
+     */
+    private void publishBest(int id, DisplayState display) {
+        final Lyrics available = display.bestResult != null
+                ? display.bestResult : display.bestFallback;
+        if (available == null || available == display.published) {
+            return;
+        }
+        final long stamp = SystemClock.uptimeMillis();
+        if (display.firstPaintAt == 0L) {
+            display.firstPaintAt = stamp;
+        }
+        final boolean holding = display.wordSync
+                && display.published == null
+                && !display.exhaustive
+                && stamp - display.firstPaintAt < FIRST_PAINT_HOLD_MS
+                && LyricsRequests.syncRank(available) < 2;
+        if (holding) {
+            return;
+        }
+        display.published = available;
+        publishFromLookup(id, available);
+    }
+
     private static final class DisplayState {
         final boolean wordSync;
         /**
@@ -1913,6 +1937,7 @@ private void reorderQueueByRemembered() {
          */
         final boolean exhaustive;
         @Nullable Lyrics published;
+        long firstPaintAt;
         @Nullable Lyrics bestResult;
         int bestDisplayRank;
         @Nullable Lyrics bestFallback;
@@ -1970,12 +1995,12 @@ private void reorderQueueByRemembered() {
                 return false;
             }
 
-            final int effectiveRank = rank == 2 ? -1 : rank;
-            if (effectiveRank > bestDisplayRank) {
+            // Demoting word timing below the weaker kinds let a later result replace it on screen.
+            if (rank > bestDisplayRank) {
                 bestResult = fetched;
-                bestDisplayRank = effectiveRank;
+                bestDisplayRank = rank;
             }
-            return !exhaustive && stage12 && effectiveRank >= 1 && bestResult != null;
+            return !exhaustive && stage12 && rank == 1 && bestResult != null;
         }
     }
 

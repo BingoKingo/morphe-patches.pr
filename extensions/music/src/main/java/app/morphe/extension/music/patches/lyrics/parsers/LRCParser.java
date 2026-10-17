@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import app.morphe.extension.music.patches.lyrics.TextTrim;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.Word;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsRequests;
@@ -287,7 +288,8 @@ public final class LRCParser {
         if (!first.text().startsWith(agentMarker)) {
             return words;
         }
-        String remainder = first.text().substring(agentMarker.length()).stripLeading();
+        String remainder = TextTrim.stripLeading(
+                first.text().substring(agentMarker.length()));
         List<Word> stripped = new ArrayList<>(words);
         if (remainder.isEmpty()) {
             stripped.remove(0);

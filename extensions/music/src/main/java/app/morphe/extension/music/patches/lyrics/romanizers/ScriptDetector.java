@@ -15,6 +15,8 @@ import java.util.List;
  * Decides which script a line is written in, since a romanizer is only correct for one of them
  * and the wrong one reads as a translation of something else. Lines are judged on their own:
  * a song mixes scripts, which is what a verdict for the whole song gets wrong.
+ *
+ * <p>The counters are indexed by {@link Script}, so a new script only needs a line in {@link #classify}.
  */
 public final class ScriptDetector {
 
@@ -23,9 +25,12 @@ public final class ScriptDetector {
         HAN,
         JAPANESE,
         KOREAN,
+        GREEK,
         /** Latin script, digits or punctuation only: nothing here needs a romanizer. */
         OTHER
     }
+
+    private static final Script[] SCRIPTS = Script.values();
 
     /** Kana below this, in a line of Han characters, is a loanword rather than Japanese. */
     private static final int MIN_KANA = 3;
@@ -41,41 +46,50 @@ public final class ScriptDetector {
     }
 
     public static Script detect(List<String> lines) {
-        int[] total = new int[3];
+        int[] total = new int[SCRIPTS.length];
         for (String line : lines) {
             if (line == null) continue;
-            int[] found = count(line);
-            for (int i = 0; i < 3; i++) total[i] += found[i];
+            add(total, count(line));
         }
         return classify(total);
     }
 
     private static int[] count(CharSequence line) {
-        int[] found = new int[3];
+        int[] found = new int[SCRIPTS.length];
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (isHan(c)) {
-                found[0]++;
+                found[Script.HAN.ordinal()]++;
             } else if (isKana(c)) {
-                found[1]++;
+                found[Script.JAPANESE.ordinal()]++;
             } else if (c >= 0xAC00 && c <= 0xD7A3) {
-                found[2]++;
+                found[Script.KOREAN.ordinal()]++;
+            } else if (isGreek(c)) {
+                found[Script.GREEK.ordinal()]++;
             }
         }
         return found;
     }
 
+    private static void add(int[] total, int[] found) {
+        for (int i = 0; i < found.length; i++) {
+            total[i] += found[i];
+        }
+    }
+
     private static Script classify(int[] found) {
-        int han = found[0];
-        int kana = found[1];
-        int hangul = found[2];
+        int han = found[Script.HAN.ordinal()];
+        int kana = found[Script.JAPANESE.ordinal()];
+        int hangul = found[Script.KOREAN.ordinal()];
+        int greek = found[Script.GREEK.ordinal()];
 
         if (hangul > 0 && hangul * 2 >= han + kana) return Script.KOREAN;
         // Kana with no Han at all is Japanese: nothing else that uses kana has none.
         if (kana > 0 && (han == 0 || (kana >= MIN_KANA && kana * KANA_PER_HAN >= han))) {
             return Script.JAPANESE;
         }
-        return han > 0 ? Script.HAN : Script.OTHER;
+        if (han > 0) return Script.HAN;
+        return greek > 0 ? Script.GREEK : Script.OTHER;
     }
 
     /** The blocks a modern lyric line is written with. */
@@ -89,5 +103,9 @@ public final class ScriptDetector {
         return (c >= 0x3040 && c <= 0x309F)
                 || (c >= 0x30A0 && c <= 0x30FF)
                 || (c >= 0x31F0 && c <= 0x31FF);
+    }
+
+    static boolean isGreek(char c) {
+        return (c >= 0x0370 && c <= 0x03FF) || (c >= 0x1F00 && c <= 0x1FFF);
     }
 }

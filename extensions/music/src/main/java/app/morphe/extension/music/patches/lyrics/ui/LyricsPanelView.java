@@ -1156,7 +1156,8 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
         Context context = getContext();
         final int textSize = Settings.LYRICS_TEXT_SIZE.get();
         final int foregroundColor = LyricsColors.lineTextColor();
-        final boolean tapToSeek = newLyrics.synced() && Settings.LYRICS_TAP_TO_SEEK.get();
+        final boolean lineGestures = Settings.LYRICS_TAP_TO_SEEK.get();
+        final boolean tapToSeek = newLyrics.synced() && lineGestures;
         final Paint baseLinePaint = new Paint();
         baseLinePaint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSize,
                 getResources().getDisplayMetrics()));
@@ -1262,26 +1263,28 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                 });
             }
 
-            lineView.setOnLongClickListener(v -> {
-                LyricsLineView lv = (LyricsLineView) v;
-                String textToCopy = lv.getCopyTextForTouch(lv.lastTouchY);
-                if (textToCopy == null || textToCopy.isEmpty()) {
-                    textToCopy = onlyMode != OnlyMode.NONE
-                            ? String.valueOf(lv.getText())
-                            : line.text();
-                }
-                if (textToCopy.isEmpty()) {
-                    return false;
-                }
-                ClipboardManager clipboard = (ClipboardManager) getContext()
-                        .getSystemService(Context.CLIPBOARD_SERVICE);
-                if (clipboard != null) {
-                    clipboard.setPrimaryClip(
-                            ClipData.newPlainText("lyric_line", textToCopy));
-                    Utils.showToastShort(str("morphe_music_lyrics_copied"));
-                }
-                return true;
-            });
+            if (lineGestures) {
+                lineView.setOnLongClickListener(v -> {
+                    LyricsLineView lv = (LyricsLineView) v;
+                    String textToCopy = lv.getCopyTextForTouch(lv.lastTouchY);
+                    if (textToCopy == null || textToCopy.isEmpty()) {
+                        textToCopy = onlyMode != OnlyMode.NONE
+                                ? String.valueOf(lv.getText())
+                                : line.text();
+                    }
+                    if (textToCopy.isEmpty()) {
+                        return false;
+                    }
+                    ClipboardManager clipboard = (ClipboardManager) getContext()
+                            .getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(
+                                ClipData.newPlainText("lyric_line", textToCopy));
+                        Utils.showToastShort(str("morphe_music_lyrics_copied"));
+                    }
+                    return true;
+                });
+            }
 
             LinearLayout lineRow = new LinearLayout(context);
             lineRow.setOrientation(LinearLayout.VERTICAL);
@@ -1829,7 +1832,9 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
 
         LyricsTranslator.translate(track, current, current.providerName(),
                 (lines, fromGoogle, fromAI, model) -> {
-                    if (requestId != translateRequestId || !Settings.LYRICS_TRANSLATE_ONLY.get()) {
+                    // A side the dual mode handed back lands as the small run, not as the line.
+                    final boolean asOnly = Settings.LYRICS_TRANSLATE_ONLY.get();
+                    if (requestId != translateRequestId || !asOnly && !translateInProgress) {
                         return;
                     }
                     if (lyrics != current) {
@@ -1845,6 +1850,13 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                     if (translatedLines == null) {
                         Utils.showToastShort(str("morphe_music_lyrics_translate_failed"));
                         fallBackFromDualMode(false);
+                        return;
+                    }
+                    if (!asOnly) {
+                        showLyrics(current);
+                        flashButtonLabel(translateView,
+                                str("morphe_music_lyrics_translate_hide"),
+                                updateTranslateLabelRunnable, 3000);
                         return;
                     }
                     onlyMode = Settings.LYRICS_ROMANIZE_ONLY.get() ? OnlyMode.BOTH : OnlyMode.TRANS;
@@ -1903,7 +1915,10 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
      * already been cleared, costing the row the surviving side was holding.
      */
     private void fallBackFromDualMode(boolean romanizeFailed) {
-        if (onlyMode != OnlyMode.BOTH) {
+        // A track change resets onlyMode but not the flags, so only they say what was claimed.
+        final boolean dualClaimed = onlyMode == OnlyMode.BOTH
+                || Settings.LYRICS_TRANSLATE_ONLY.get() && Settings.LYRICS_ROMANIZE_ONLY.get();
+        if (!dualClaimed) {
             // Only this one was ever claimed, so it clears the way it always did.
             if (romanizeFailed) {
                 clearRomanizeOnlyState();
@@ -1942,6 +1957,13 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
         }
         updateTranslateLabel();
         updateRomanizeLabel();
+        // A survivor still fetching puts its loading text back.
+        if (translateInProgress) {
+            setButtonLabel(translateView, str("morphe_music_lyrics_translating"), true);
+        }
+        if (romanizeInProgress) {
+            setButtonLabel(romanizeView, str("morphe_music_lyrics_romanizing"), true);
+        }
     }
 
     /**
@@ -2389,7 +2411,8 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
 
         LyricsRomanizer.romanize(track, current, current.providerName(),
                 (lines, fromGoogle, fromAI, model, perWord, localDictionary) -> {
-                    if (requestId != romanizeRequestId || !Settings.LYRICS_ROMANIZE_ONLY.get()) {
+                    final boolean asOnly = Settings.LYRICS_ROMANIZE_ONLY.get();
+                    if (requestId != romanizeRequestId || !asOnly && !romanizeInProgress) {
                         return;
                     }
                     if (lyrics != current) {
@@ -2408,6 +2431,15 @@ if (state == LyricsManager.State.LOADED && newLyrics == lyrics
                     if (!romaOk && !perWord) {
                         Utils.showToastShort(str("morphe_music_lyrics_romanize_failed"));
                         fallBackFromDualMode(true);
+                        return;
+                    }
+                    if (!asOnly) {
+                        showLyrics(current);
+                        if (romaOk) {
+                            flashButtonLabel(romanizeView,
+                                    str("morphe_music_lyrics_romanize_hide"),
+                                    updateRomanizeLabelRunnable, 3000);
+                        }
                         return;
                     }
                     onlyMode = Settings.LYRICS_TRANSLATE_ONLY.get() ? OnlyMode.BOTH : OnlyMode.ROMA;
