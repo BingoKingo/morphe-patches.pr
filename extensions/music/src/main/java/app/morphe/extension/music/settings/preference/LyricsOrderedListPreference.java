@@ -50,6 +50,7 @@ import app.morphe.extension.shared.ui.Dim;
 @SuppressWarnings({"unused", "deprecation"})
 public final class LyricsOrderedListPreference extends Preference {
 
+    /** Canonical provider ids, in the default priority order, shown in the list. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "Apple", "BiniLyrics", "LrcRed", "bLyrics", "Lyricify", "Unison",
             "PetitLyrics", "AMLL", "QQ", "SimpMusic", "KuGou", "Musixmatch",

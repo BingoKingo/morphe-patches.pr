@@ -29,6 +29,8 @@ import androidx.annotation.Nullable;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,28 +38,55 @@ import java.util.concurrent.Executors;
 import app.morphe.extension.music.patches.lyrics.LyricsManager;
 import app.morphe.extension.shared.Logger;
 
-/**
- * dynamic moving blur background that pulse with song beat
- */
 public final class DynamicBackgroundView extends View {
 
     private static final int BUFFER_SIZE = 256;
     private static final int BLUR_RADIUS = 14;
     private static final float TWO_PI = (float) (Math.PI * 2.0);
-    private static final float ARTWORK_TRANSITION_SPEED = 0.02f;
+    private static final long ARTWORK_TRANSITION_DURATION_MS = 1000L;
+    private static final long ROTATION_TICK_INTERVAL_MS = 50L;
 
     private static final float ROTATION_POWER = 0.8f;
-    private static final float[] ROTATION_SPEEDS = new float[] { -0.10f, 0.18f, 0.32f };
-    private static final float[] INITIAL_ROTATIONS = new float[] { 0.3f, -2.1f, 2.4f };
-    private static final float[] LAYER_SCALES = new float[] { 1.4f, 1.26f, 1.26f };
-    private static final float[] PERIMETER_SPEEDS = new float[] { 0.09f, 0.012f, 0.02f };
-    private static final float[] PERIMETER_DIRECTION = new float[] { -1.0f, 1.0f, 1.0f };
-    private static final float[] LAYER_BASE_POSITIONS = new float[] { 0.0f, 0.0f, 0.75f, -0.75f, -0.75f, 0.75f };
+    private static final float[] ROTATION_SPEEDS = new float[]{-0.10f, 0.18f, 0.32f};
+    private static final float[] INITIAL_ROTATIONS = new float[]{0.3f, -2.1f, 2.4f};
+    private static final float[] LAYER_SCALES = new float[]{1.4f, 1.26f, 1.26f};
+    private static final float[] PERIMETER_SPEEDS = new float[]{0.09f, 0.012f, 0.02f};
+    private static final float[] PERIMETER_DIRECTION = new float[]{-1.0f, 1.0f, 1.0f};
+    private static final float[] LAYER_BASE_POSITIONS = new float[]{0.0f, 0.0f, 0.75f, -0.75f, -0.75f, 0.75f};
 
-    private static final float[] BEAT_ROT_BOOST = new float[] { 0.28f, -0.18f, 0.02f };
-    private static final float[] BEAT_SPD_BOOST = new float[] { 0.8f, 0.2f, 0.5f };
-    private static final float[] BEAT_SCALE_BOOST = new float[] { 0.2f, 0.34f, 0.39f };
+    private static final float[] BEAT_ROT_BOOST = new float[]{0.28f, -0.18f, 0.02f};
+    private static final float[] BEAT_SPD_BOOST = new float[]{0.8f, 0.2f, 0.5f};
+    private static final float[] BEAT_SCALE_BOOST = new float[]{0.2f, 0.34f, 0.39f};
     private static final float BEAT_SCALE_DECAY = 2.0f;
+
+    private static final LinkedHashMap<String, Bitmap> LIQUID_ART_CACHE =
+            new LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
+                    return size() > 8;
+                }
+            };
+
+    @Nullable
+    private static volatile Bitmap lastRenderedArt = null;
+    private static volatile long globalLiquidRotationTimeMs = 0L;
+
+    @Nullable
+    private static Bitmap getCachedLiquidArt(@Nullable String key) {
+        if (key == null) return null;
+        synchronized (LIQUID_ART_CACHE) {
+            return LIQUID_ART_CACHE.get(key);
+        }
+    }
+
+    private static void putCachedLiquidArt(@Nullable String key, @NonNull Bitmap bmp) {
+        if (key != null && !key.isEmpty()) {
+            synchronized (LIQUID_ART_CACHE) {
+                LIQUID_ART_CACHE.put(key, bmp);
+            }
+        }
+        lastRenderedArt = bmp;
+    }
 
     private static final ExecutorService COLOR_EXECUTOR = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -90,8 +119,9 @@ public final class DynamicBackgroundView extends View {
     private final float[] cachedLayerPosY = new float[3];
 
     private float artworkTransitionProgress = 1.0f;
-    private long startTimeMs = 0L;
+    private long artworkTransitionStartUptimeMs = 0L;
     private long lastDrawTimeMs = 0L;
+    private long lastRotationTickUptimeMs = 0L;
 
     private float beatPulse = 0.0f;
     private float visualizerPulse = 0.0f;
@@ -117,7 +147,9 @@ public final class DynamicBackgroundView extends View {
         Canvas defCanvas = new Canvas(defaultArtwork);
         defCanvas.drawColor(0xFF1E1E28);
 
-        currentArtwork = defaultArtwork;
+        currentArtwork = (lastRenderedArt != null && !lastRenderedArt.isRecycled())
+                ? lastRenderedArt
+                : defaultArtwork;
 
         postProcessPaint.setColorFilter(new ColorMatrixColorFilter(createPostProcessMatrix()));
     }
@@ -126,13 +158,12 @@ public final class DynamicBackgroundView extends View {
         ColorMatrix satMatrix = new ColorMatrix();
         satMatrix.setSaturation(3.0f);
 
-        // tweak brightness and contrast
         ColorMatrix cbMatrix = new ColorMatrix();
         float contrast = 0.95f;
         float brightness = 0.70f;
         float scale = brightness * contrast;
         float translate = 0.5f * (1.0f - contrast) * 255.0f;
-        cbMatrix.set(new float[] {
+        cbMatrix.set(new float[]{
                 scale, 0, 0, 0, translate,
                 0, scale, 0, 0, translate,
                 0, 0, scale, 0, translate,
@@ -145,9 +176,6 @@ public final class DynamicBackgroundView extends View {
         return finalMatrix;
     }
 
-    /**
-     * update background image from bitmap or fetch youtube thumbnail
-     */
     public void setArtwork(@Nullable Bitmap bitmap, @Nullable String videoId, @Nullable String title, @Nullable String artist) {
         if (Objects.equals(videoId, currentVideoId) && bitmap == null && currentArtwork != null && currentArtwork != defaultArtwork) {
             return;
@@ -155,12 +183,20 @@ public final class DynamicBackgroundView extends View {
         currentVideoId = videoId;
 
         if (bitmap != null && !bitmap.isRecycled()) {
-            applyNewArtwork(bitmap);
+            applyNewArtwork(bitmap, videoId);
             return;
         }
 
+        if (videoId != null && !videoId.isEmpty()) {
+            Bitmap cached = getCachedLiquidArt(videoId);
+            if (cached != null && !cached.isRecycled()) {
+                applyNewArtwork(cached, videoId);
+                return;
+            }
+        }
+
         if (videoId == null || videoId.isEmpty()) {
-            applyNewArtwork(defaultArtwork);
+            applyNewArtwork(defaultArtwork, null);
             return;
         }
 
@@ -178,11 +214,14 @@ public final class DynamicBackgroundView extends View {
                 try (InputStream is = conn.getInputStream()) {
                     Bitmap downloaded = BitmapFactory.decodeStream(is);
                     if (downloaded != null) {
+                        Bitmap scaled = Bitmap.createScaledBitmap(downloaded, BUFFER_SIZE, BUFFER_SIZE, true);
+                        if (scaled != downloaded) {
+                            downloaded.recycle();
+                        }
+                        putCachedLiquidArt(targetVid, scaled);
                         mainHandler.post(() -> {
                             if (Objects.equals(currentVideoId, targetVid)) {
-                                applyNewArtwork(downloaded);
-                            } else {
-                                downloaded.recycle();
+                                applyNewArtwork(scaled, targetVid);
                             }
                         });
                     }
@@ -197,20 +236,29 @@ public final class DynamicBackgroundView extends View {
         setArtwork(null, videoId, title, artist);
     }
 
-    private void applyNewArtwork(@NonNull Bitmap newBmp) {
+    private void applyNewArtwork(@NonNull Bitmap newBmp, @Nullable String cacheKey) {
         Bitmap normalized;
         if (newBmp == defaultArtwork) {
             normalized = defaultArtwork;
+        } else if (newBmp.getWidth() == BUFFER_SIZE && newBmp.getHeight() == BUFFER_SIZE) {
+            normalized = newBmp;
         } else {
             normalized = Bitmap.createScaledBitmap(newBmp, BUFFER_SIZE, BUFFER_SIZE, true);
         }
 
-        if (previousArtwork != null && previousArtwork != currentArtwork && previousArtwork != defaultArtwork && !previousArtwork.isRecycled()) {
-            previousArtwork.recycle();
+        if (normalized != defaultArtwork) {
+            putCachedLiquidArt(cacheKey, normalized);
         }
-        previousArtwork = currentArtwork;
-        currentArtwork = normalized;
-        artworkTransitionProgress = 0.0f;
+
+        if (currentArtwork != null && currentArtwork != normalized) {
+            previousArtwork = currentArtwork;
+            currentArtwork = normalized;
+            artworkTransitionProgress = 0.0f;
+            artworkTransitionStartUptimeMs = SystemClock.uptimeMillis();
+        } else {
+            currentArtwork = normalized;
+            artworkTransitionProgress = 1.0f;
+        }
         postInvalidateOnAnimation();
     }
 
@@ -310,13 +358,25 @@ public final class DynamicBackgroundView extends View {
         if (w <= 0 || h <= 0) return;
 
         final long now = SystemClock.uptimeMillis();
-        if (startTimeMs == 0) startTimeMs = now;
         final float elapsedSec = (lastDrawTimeMs > 0) ? Math.min((now - lastDrawTimeMs) / 1000.0f, 0.1f) : 0.016f;
         lastDrawTimeMs = now;
-        final float currentTime = (now - startTimeMs) / 1000.0f;
+
+        if (lastRotationTickUptimeMs == 0L) {
+            lastRotationTickUptimeMs = now;
+        } else if (now - lastRotationTickUptimeMs >= ROTATION_TICK_INTERVAL_MS) {
+            long ticks = (now - lastRotationTickUptimeMs) / ROTATION_TICK_INTERVAL_MS;
+            globalLiquidRotationTimeMs += ticks * ROTATION_TICK_INTERVAL_MS;
+            lastRotationTickUptimeMs += ticks * ROTATION_TICK_INTERVAL_MS;
+        }
+        final float currentTime = globalLiquidRotationTimeMs / 1000.0f;
 
         if (artworkTransitionProgress < 1.0f) {
-            artworkTransitionProgress = Math.min(1.0f, artworkTransitionProgress + ARTWORK_TRANSITION_SPEED * 1.5f);
+            if (artworkTransitionStartUptimeMs > 0L) {
+                artworkTransitionProgress = Math.min(1.0f,
+                        (float) (now - artworkTransitionStartUptimeMs) / (float) ARTWORK_TRANSITION_DURATION_MS);
+            } else {
+                artworkTransitionProgress = 1.0f;
+            }
         }
 
         processAudioPulse();
@@ -362,10 +422,10 @@ public final class DynamicBackgroundView extends View {
 
         bufferCanvas.drawColor(0xFF1E1E28);
 
-        if (artworkTransitionProgress < 1.0f && previousArtwork != null) {
+        if (artworkTransitionProgress < 1.0f && previousArtwork != null && !previousArtwork.isRecycled()) {
             renderLayers(bufferCanvas, previousArtwork, 1.0f - artworkTransitionProgress);
         }
-        Bitmap activeArt = (currentArtwork != null) ? currentArtwork : defaultArtwork;
+        Bitmap activeArt = (currentArtwork != null && !currentArtwork.isRecycled()) ? currentArtwork : defaultArtwork;
         renderLayers(bufferCanvas, activeArt, (previousArtwork != null) ? artworkTransitionProgress : 1.0f);
 
         bufferBitmap.getPixels(pixelsSrc, 0, BUFFER_SIZE, 0, 0, BUFFER_SIZE, BUFFER_SIZE);
@@ -382,8 +442,8 @@ public final class DynamicBackgroundView extends View {
             lastGradientHeight = h;
             scrimGradient = new LinearGradient(
                     0f, 0f, 0f, (float) h,
-                    new int[] { 0xCC000000, 0x88000000, 0xCC000000 },
-                    new float[] { 0.0f, 0.5f, 1.0f },
+                    new int[]{0xCC000000, 0x88000000, 0xCC000000},
+                    new float[]{0.0f, 0.5f, 1.0f},
                     Shader.TileMode.CLAMP
             );
             scrimPaint.setShader(scrimGradient);
@@ -415,15 +475,10 @@ public final class DynamicBackgroundView extends View {
         }
     }
 
-    /**
-     * fast box blur in 2 passes directly on pixels
-     */
     private static void fastBoxBlur(int[] src, int[] temp, int[] dst, int w, int h, int radius) {
         if (radius < 1) return;
-        // first pass horiz and vert
         boxBlurH(src, temp, w, h, radius);
         boxBlurV(temp, dst, w, h, radius);
-        // second pass to make it look gaussian
         boxBlurH(dst, temp, w, h, radius);
         boxBlurV(temp, dst, w, h, radius);
     }
@@ -432,15 +487,14 @@ public final class DynamicBackgroundView extends View {
         final int div = 2 * radius + 1;
         for (int y = 0; y < h; y++) {
             final int row = y * w;
-            int rSum = 0, gSum = 0, bSum = 0;
             final int firstPixel = src[row];
             final int fr = (firstPixel >> 16) & 0xFF;
             final int fg = (firstPixel >> 8) & 0xFF;
             final int fb = firstPixel & 0xFF;
 
-            rSum = fr * (radius + 1);
-            gSum = fg * (radius + 1);
-            bSum = fb * (radius + 1);
+            int rSum = fr * (radius + 1);
+            int gSum = fg * (radius + 1);
+            int bSum = fb * (radius + 1);
 
             for (int i = 1; i <= radius; i++) {
                 int p = src[row + Math.min(i, w - 1)];
@@ -468,15 +522,14 @@ public final class DynamicBackgroundView extends View {
     private static void boxBlurV(int[] src, int[] dst, int w, int h, int radius) {
         final int div = 2 * radius + 1;
         for (int x = 0; x < w; x++) {
-            int rSum = 0, gSum = 0, bSum = 0;
             final int firstPixel = src[x];
             final int fr = (firstPixel >> 16) & 0xFF;
             final int fg = (firstPixel >> 8) & 0xFF;
             final int fb = firstPixel & 0xFF;
 
-            rSum = fr * (radius + 1);
-            gSum = fg * (radius + 1);
-            bSum = fb * (radius + 1);
+            int rSum = fr * (radius + 1);
+            int gSum = fg * (radius + 1);
+            int bSum = fb * (radius + 1);
 
             for (int i = 1; i <= radius; i++) {
                 int p = src[Math.min(i, h - 1) * w + x];

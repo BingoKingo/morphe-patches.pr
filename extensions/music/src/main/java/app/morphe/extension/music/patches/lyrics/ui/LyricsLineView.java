@@ -7,55 +7,54 @@
 package app.morphe.extension.music.patches.lyrics.ui;
 
 import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.TRANSLATION_RELATIVE_SIZE;
-import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.containsKanji;
 import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.TRANSITION_INTERPOLATOR;
-import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.auxiliaryTextColor;
 import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.lineTextColor;
 import static app.morphe.extension.music.patches.lyrics.ui.LyricsPanelView.unsungWordColor;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.os.Build;
-import android.os.SystemClock;
 import android.text.Layout;
-import android.text.Spannable;
 import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.style.ForegroundColorSpan;
+import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.animation.Interpolator;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
-import android.text.Spanned;
-import android.view.Gravity;
-import android.view.MotionEvent;
-import java.util.Arrays;
 import app.morphe.extension.music.patches.lyrics.LyricsManager;
-import app.morphe.extension.music.patches.lyrics.derive.LyricsRomanizer;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
-import app.morphe.extension.shared.Logger;
+import app.morphe.extension.music.patches.lyrics.model.Word;
+import app.morphe.extension.music.patches.lyrics.ui.SpringEasing.LyPlusSpring;
+import app.morphe.extension.music.patches.lyrics.ui.WordAnimationUtils.WordTimestamp;
 import app.morphe.extension.shared.ui.Dim;
 
 class LyricsLineView extends TextView {
+    private static final Interpolator FAST_OUT_SLOW_IN = new PathInterpolator(0.4f, 0f, 0.2f, 1f);
+    private static final Interpolator LINEAR_OUT_SLOW_IN = new PathInterpolator(0f, 0f, 0.2f, 1f);
+    public static final int LINE_VISIBILITY_MS = 250;
+
     public static record WordTiming(int start, int end, long startMs, long endMs,
             @Nullable String romaji) {
     }
@@ -108,21 +107,40 @@ class LyricsLineView extends TextView {
     }
 
     @Nullable
+    private LyricsLine rawLyricsLine = null;
+    @Nullable
+    private LyricsLine rawRomanizedLine = null;
+    @Nullable
     private List<WordUnit> wordUnits = null;
+    @Nullable
+    private AppleWordAnimator appleAnimator = null;
+    private LyricsAnimationStyle animationStyle = LyricsAnimationStyle.APPLE;
+    @Nullable
+    private Long adjustedEndTimeMs = null;
+    @Nullable
+    private LyricsScrollEngine scrollEngine = null;
+
     @Nullable
     private String translationText = null;
     private final TextPaint transPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private StaticLayout transLayout = null;
     private int transLayoutWidth = -1;
 
+    private final TextPaint romajiFallbackPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    @Nullable
+    private StaticLayout romajiFallbackLayout = null;
+
+    private final LyricsScrollEngine.LyricsItemFlip translationFlip = new LyricsScrollEngine.LyricsItemFlip();
+    private float translationFlipOffsetY = 0f;
+
     private final TextPaint romajiPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint unsungKanjiPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint unsungRomajiPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint sungKanjiPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint sungRomajiPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint glowPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private int cachedLayoutWidth = -1;
     private int totalMeasuredHeight = 0;
+    private int lyricsContentHeight = 0;
 
     private List<WordTiming> wordTimings = Collections.emptyList();
     private long positionMs = Long.MIN_VALUE;
@@ -133,15 +151,126 @@ class LyricsLineView extends TextView {
     private float[] lineMaxSungX;
     private boolean isLineActive = false;
     private boolean cachedHasWordTimings = false;
+    private boolean prewarmMasks = false;
 
-    private boolean computeHasWordTimings() {
+    public static final class PrebuiltWordLayout {
+        public final int wrapWidth;
+        @Nullable
+        public final AppleWordAnimator appleAnimator;
+        @Nullable
+        public final StaticLayout romajiFallbackLayout;
+        @Nullable
+        public final StaticLayout transLayout;
+        public final int lyricsContentHeight;
+        public final int totalMeasuredHeight;
+
+        public PrebuiltWordLayout(
+                int wrapWidth,
+                @Nullable AppleWordAnimator appleAnimator,
+                @Nullable StaticLayout romajiFallbackLayout,
+                @Nullable StaticLayout transLayout,
+                int lyricsContentHeight,
+                int totalMeasuredHeight) {
+            this.wrapWidth = wrapWidth;
+            this.appleAnimator = appleAnimator;
+            this.romajiFallbackLayout = romajiFallbackLayout;
+            this.transLayout = transLayout;
+            this.lyricsContentHeight = lyricsContentHeight;
+            this.totalMeasuredHeight = totalMeasuredHeight;
+        }
+    }
+
+    public void setPrewarmMasks(boolean prewarm) {
+        this.prewarmMasks = prewarm;
+        if (this.appleAnimator != null) {
+            this.appleAnimator.setPrewarmMasks(prewarm);
+        }
+    }
+
+    private float lookFromAlpha = 0.15f;
+    private float lookToAlpha = 0.15f;
+    private float lookCurAlpha = 0.15f;
+    private float lookFromTransAlpha = 0.15f;
+    private float lookToTransAlpha = 0.15f;
+    private float lookCurTransAlpha = 0.15f;
+    private float lookFromFocusedAlpha = 0.15f;
+    private float lookToFocusedAlpha = 0.15f;
+    private float lookCurFocusedAlpha = 0.15f;
+    private float lookFromVisibility = 0f;
+    private float lookToVisibility = 0f;
+    private float lookCurVisibility = 0f;
+    private float lookFromScale = 0.93f;
+    private float lookToScale = 0.93f;
+    private float lookCurScale = 0.93f;
+    private boolean lineLookInitialized = false;
+    @Nullable
+    private ValueAnimator lineLookAnimator = null;
+
+    public void setScrollEngine(@Nullable LyricsScrollEngine engine) {
+        this.scrollEngine = engine;
+    }
+
+    public void setAnimationStyle(@NonNull LyricsAnimationStyle style) {
+        if (this.animationStyle != style) {
+            this.animationStyle = style;
+            releaseAppleAnimator();
+            cachedLayoutWidth = -1;
+            requestLayout();
+            invalidate();
+        }
+    }
+
+    @NonNull
+    public LyricsAnimationStyle getAnimationStyle() {
+        return animationStyle;
+    }
+
+    public void setAdjustedEndTimeMs(@Nullable Long adjustedEndMs) {
+        this.adjustedEndTimeMs = adjustedEndMs;
+    }
+
+    public void setRawLyricsLine(@Nullable LyricsLine mainLine, @Nullable LyricsLine romanizedLine) {
+        this.rawLyricsLine = mainLine;
+        this.rawRomanizedLine = romanizedLine;
+        this.cachedHasWordTimings = computeHasWordTimings();
+    }
+
+    private void releaseAppleAnimator() {
+        if (appleAnimator != null) {
+            appleAnimator.release();
+            appleAnimator = null;
+        }
+    }
+
+    private boolean wordUnitsHaveTimings() {
         if (wordUnits != null && !wordUnits.isEmpty()) {
             for (int i = 0; i < wordUnits.size(); i++) {
                 if (wordUnits.get(i).startMs != LyricsLine.NO_TIME) {
                     return true;
                 }
             }
-            return false;
+        }
+        return false;
+    }
+
+    private boolean wordUnitsHaveRomaji() {
+        if (wordUnits != null && !wordUnits.isEmpty()) {
+            for (int i = 0; i < wordUnits.size(); i++) {
+                String r = wordUnits.get(i).romaji;
+                if (r != null && !r.trim().isEmpty() && !WordAnimationUtils.isCJK(r)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean computeHasWordTimings() {
+        if (rawLyricsLine != null && rawLyricsLine.hasWords()) {
+            return true;
+        }
+        if (wordUnitsHaveTimings()) {
+            return true;
         }
         return wordTimings != null && !wordTimings.isEmpty();
     }
@@ -153,8 +282,234 @@ class LyricsLineView extends TextView {
     public void setLineActive(boolean active) {
         if (this.isLineActive != active) {
             this.isLineActive = active;
+            if (active) {
+                this.allSung = false;
+                this.lastDrawnClockPos = Long.MIN_VALUE;
+                if (appleAnimator != null) {
+                    appleAnimator.reset();
+                }
+            }
             postInvalidateOnAnimation();
         }
+    }
+
+    public float getLineLookAlpha() {
+        return lookCurAlpha;
+    }
+
+    public float getLineLookTranslationAlpha() {
+        return lookCurTransAlpha;
+    }
+
+    public float getLineLookFocusedAlpha() {
+        return lookCurFocusedAlpha;
+    }
+
+    public float getLineLookScale() {
+        return lookCurScale;
+    }
+
+    private static int withAlpha(int color, float alpha) {
+        int a = Math.max(0, Math.min(255, Math.round(255f * alpha)));
+        return Color.argb(a, Color.red(color), Color.green(color), Color.blue(color));
+    }
+
+    public void updateLineLook(
+            boolean isActive,
+            int distance,
+            long staggerDelayMs,
+            boolean isAutoScrollEnabled,
+            boolean isLrcSynced,
+            boolean instant) {
+        final float targetFocusedAlpha = !isAutoScrollEnabled ? 0.6f : 0.15f;
+        final float targetInactiveAlpha;
+        if (!isAutoScrollEnabled) {
+            targetInactiveAlpha = 0.6f;
+        } else if (isLrcSynced) {
+            if (distance == 0) {
+                targetInactiveAlpha = targetFocusedAlpha;
+            } else if (distance == 1 || distance == 2) {
+                targetInactiveAlpha = 0.12f;
+            } else if (distance == 3) {
+                targetInactiveAlpha = 0.09f;
+            } else {
+                targetInactiveAlpha = 0.06f;
+            }
+        } else {
+            targetInactiveAlpha = 0.6f;
+        }
+
+        final float targetAlpha = isActive ? 1.0f : targetInactiveAlpha;
+        final float targetTranslationAlpha;
+        if (!isAutoScrollEnabled) {
+            targetTranslationAlpha = 0.6f;
+        } else if (isLrcSynced) {
+            targetTranslationAlpha = isActive ? 0.45f : targetInactiveAlpha;
+        } else {
+            targetTranslationAlpha = 0.6f;
+        }
+
+        final float targetVisibility = isActive ? 1.0f : 0.0f;
+        final float targetScale;
+        if (isActive || !isAutoScrollEnabled) {
+            targetScale = 1.0f;
+        } else if (isLrcSynced) {
+            if (distance == 0 || distance == 1) {
+                targetScale = 0.97f;
+            } else if (distance == 2 || distance == 3) {
+                targetScale = 0.93f;
+            } else if (distance == 4) {
+                targetScale = 0.90f;
+            } else {
+                targetScale = 0.85f;
+            }
+        } else {
+            targetScale = 0.92f;
+        }
+
+        if (instant || !lineLookInitialized) {
+            lineLookInitialized = true;
+            if (lineLookAnimator != null) {
+                lineLookAnimator.cancel();
+                lineLookAnimator = null;
+            }
+            lookFromAlpha = lookToAlpha = lookCurAlpha = targetAlpha;
+            lookFromTransAlpha = lookToTransAlpha = lookCurTransAlpha = targetTranslationAlpha;
+            lookFromFocusedAlpha = lookToFocusedAlpha = lookCurFocusedAlpha = targetFocusedAlpha;
+            lookFromVisibility = lookToVisibility = lookCurVisibility = targetVisibility;
+            lookFromScale = lookToScale = lookCurScale = targetScale;
+            applyCurrentLineLookToView();
+            return;
+        }
+
+        if (Math.abs(lookToAlpha - targetAlpha) < 0.001f
+                && Math.abs(lookToTransAlpha - targetTranslationAlpha) < 0.001f
+                && Math.abs(lookToFocusedAlpha - targetFocusedAlpha) < 0.001f
+                && Math.abs(lookToVisibility - targetVisibility) < 0.001f
+                && Math.abs(lookToScale - targetScale) < 0.001f) {
+            return;
+        }
+
+        if (lineLookAnimator != null) {
+            lineLookAnimator.cancel();
+            lineLookAnimator = null;
+        }
+
+        lookFromAlpha = lookCurAlpha;
+        lookFromTransAlpha = lookCurTransAlpha;
+        lookFromFocusedAlpha = lookCurFocusedAlpha;
+        lookFromVisibility = lookCurVisibility;
+        lookFromScale = lookCurScale;
+
+        lookToAlpha = targetAlpha;
+        lookToTransAlpha = targetTranslationAlpha;
+        lookToFocusedAlpha = targetFocusedAlpha;
+        lookToVisibility = targetVisibility;
+        lookToScale = targetScale;
+
+        final int alphaMs = Math.max(1, (int) (750L + staggerDelayMs));
+        final int scaleMs = Math.max(1, (int) (800L + staggerDelayMs * 2L));
+        final int totalMs = Math.max(Math.max(alphaMs, scaleMs), LINE_VISIBILITY_MS);
+
+        lineLookAnimator = ValueAnimator.ofFloat(0f, (float) totalMs);
+        lineLookAnimator.setDuration(totalMs);
+        lineLookAnimator.setInterpolator(new LinearInterpolator());
+        lineLookAnimator.addUpdateListener(anim -> {
+            float clockMs = (Float) anim.getAnimatedValue();
+            float fAlpha = FAST_OUT_SLOW_IN.getInterpolation(Math.max(0f, Math.min(1f, clockMs / alphaMs)));
+            float fVis = FAST_OUT_SLOW_IN.getInterpolation(Math.max(0f, Math.min(1f, clockMs / LINE_VISIBILITY_MS)));
+            float fScale = FAST_OUT_SLOW_IN.getInterpolation(Math.max(0f, Math.min(1f, clockMs / scaleMs)));
+
+            lookCurAlpha = lookFromAlpha + (lookToAlpha - lookFromAlpha) * fAlpha;
+            lookCurTransAlpha = lookFromTransAlpha + (lookToTransAlpha - lookFromTransAlpha) * fAlpha;
+            lookCurFocusedAlpha = lookFromFocusedAlpha + (lookToFocusedAlpha - lookFromFocusedAlpha) * fAlpha;
+            lookCurVisibility = lookFromVisibility + (lookToVisibility - lookFromVisibility) * fVis;
+            lookCurScale = lookFromScale + (lookToScale - lookFromScale) * fScale;
+
+            applyCurrentLineLookToView();
+        });
+        lineLookAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                lineLookAnimator = null;
+                lookCurAlpha = lookToAlpha;
+                lookCurTransAlpha = lookToTransAlpha;
+                lookCurFocusedAlpha = lookToFocusedAlpha;
+                lookCurVisibility = lookToVisibility;
+                lookCurScale = lookToScale;
+                applyCurrentLineLookToView();
+            }
+        });
+        lineLookAnimator.start();
+    }
+
+    // align lyric scale pivot with line text alignment (left / right).
+    // if forced at center (0.5w), inactive lyric when scaling down get pulled toward center and look crooked
+    private float computeLinePivotX(int w) {
+        if (isRightAligned) {
+            return w - getPaddingRight();
+        } else {
+            return getPaddingLeft();
+        }
+    }
+
+    private void applyCurrentLineLookToView() {
+        if (!isSecondary) {
+            if (getWidth() > 0 && getHeight() > 0) {
+                setPivotX(computeLinePivotX(getWidth()));
+                setPivotY(getHeight() * 0.5f);
+            }
+            setScaleX(lookCurScale);
+            setScaleY(lookCurScale);
+            if (getAlpha() != 1.0f) {
+                setAlpha(1.0f);
+            }
+            if (!hasWordUnits()) {
+                int baseCol = lineTextColor();
+                setTextColor(withAlpha(baseCol, lookCurAlpha));
+                updateSpanColorsForLineLook(baseCol);
+            }
+        }
+        invalidate();
+    }
+
+    public void resetInnerFlips() {
+        translationFlip.reset(Float.NaN);
+        translationFlipOffsetY = 0f;
+    }
+
+    public boolean syncInnerFlip(
+            @NonNull LyricsScrollEngine engine,
+            int rowIndex,
+            boolean enabled,
+            float now) {
+        if (transLayout != null) {
+            float transTop = totalMeasuredHeight - transLayout.getHeight();
+            engine.onInnerPlaced(translationFlip, rowIndex, transTop, enabled);
+            translationFlipOffsetY = enabled ? translationFlip.translation(now) : 0f;
+            boolean active = translationFlip.hasActiveLayers(now);
+            if (active || Math.abs(translationFlipOffsetY) > 0.1f) {
+                invalidate();
+            }
+            return active;
+        } else {
+            translationFlip.reset(Float.NaN);
+            translationFlipOffsetY = 0f;
+            return false;
+        }
+    }
+
+    public boolean updateInnerFlipTranslation(float now) {
+        if (transLayout == null) {
+            translationFlipOffsetY = 0f;
+            return false;
+        }
+        float newOff = translationFlip.translation(now);
+        if (Math.abs(newOff - translationFlipOffsetY) > 0.1f) {
+            translationFlipOffsetY = newOff;
+            invalidate();
+        }
+        return translationFlip.hasActiveLayers(now);
     }
 
     private boolean isSecondary = false;
@@ -177,16 +532,25 @@ class LyricsLineView extends TextView {
     }
 
     private float secondaryExpandFraction = 1f;
+    private boolean secondaryLayoutVisible = true;
+    private int lastSecondaryReportedH = -1;
     @Nullable
     private ValueAnimator secondaryExpandAnimator;
 
     public void setSecondaryExpandFraction(float fraction) {
         float clamped = Math.max(0f, Math.min(1f, fraction));
-        if (Math.abs(this.secondaryExpandFraction - clamped) > 0.001f) {
-            this.secondaryExpandFraction = clamped;
+        this.secondaryExpandFraction = clamped;
+        boolean shouldShowLayout = clamped > 0.001f;
+        float revealScale = 0.8f + 0.2f * clamped;
+        setPivotX(isGravityRightAligned() ? getWidth() : 0f);
+        setPivotY(0f);
+        setScaleX(revealScale);
+        setScaleY(revealScale);
+        if (this.secondaryLayoutVisible != shouldShowLayout) {
+            this.secondaryLayoutVisible = shouldShowLayout;
             requestLayout();
-            invalidate();
         }
+        invalidate();
     }
 
     public float getSecondaryExpandFraction() {
@@ -199,7 +563,7 @@ class LyricsLineView extends TextView {
             secondaryExpandAnimator.cancel();
             secondaryExpandAnimator = null;
         }
-        if (Math.abs(secondaryExpandFraction - target) < 0.001f) {
+        if (Math.abs(secondaryExpandFraction - target) < 0.001f && secondaryLayoutVisible == expand) {
             if (!expand) {
                 if (getVisibility() != View.GONE) {
                     setVisibility(View.GONE);
@@ -209,40 +573,117 @@ class LyricsLineView extends TextView {
                 if (getVisibility() != View.VISIBLE) {
                     setVisibility(View.VISIBLE);
                 }
-                setAlpha(0.90f);
+                setAlpha(0.8f);
+                setScaleX(1f);
+                setScaleY(1f);
             }
             return;
         }
-        if (expand && getVisibility() != View.VISIBLE) {
-            setVisibility(View.VISIBLE);
-        }
-        long duration = expand ? 450L : 350L;
-        secondaryExpandAnimator = ValueAnimator.ofFloat(secondaryExpandFraction, target);
-        secondaryExpandAnimator.setDuration(duration);
-        secondaryExpandAnimator.setInterpolator(TRANSITION_INTERPOLATOR);
-        secondaryExpandAnimator.addUpdateListener(animation -> {
-            float val = (Float) animation.getAnimatedValue();
-            setSecondaryExpandFraction(val);
-            setAlpha(val * 0.90f);
-        });
-        secondaryExpandAnimator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                secondaryExpandAnimator = null;
-                if (!expand) {
+
+        setPivotX(isGravityRightAligned() ? getWidth() : 0f);
+        setPivotY(0f);
+        float baseDuration = (scrollEngine != null)
+                ? Math.max(1f, (float) scrollEngine.getScrollDurationMs())
+                : 400f;
+
+        if (expand) {
+            secondaryLayoutVisible = true;
+            if (getVisibility() != View.VISIBLE) {
+                setVisibility(View.VISIBLE);
+            }
+            requestLayout();
+
+            LyPlusSpring spring = new LyPlusSpring(baseDuration);
+            long inScaleMs = Math.max(1L, Math.round(spring.totalMs));
+            long inAlphaMs = Math.max(300L, Math.min(450L, Math.round(baseDuration * 0.95f)));
+            final float startProgress = secondaryExpandFraction;
+            final float startAlpha = getAlpha();
+
+            secondaryExpandAnimator = ValueAnimator.ofFloat(0f, (float) inScaleMs);
+            secondaryExpandAnimator.setDuration(inScaleMs);
+            secondaryExpandAnimator.setInterpolator(new LinearInterpolator());
+            secondaryExpandAnimator.addUpdateListener(animation -> {
+                float tMs = (Float) animation.getAnimatedValue();
+                float scaleProgress = startProgress + (1f - startProgress) * spring.value(tMs);
+                secondaryExpandFraction = Math.max(0f, Math.min(1f, scaleProgress));
+                float scale = Math.max(0f, 0.8f + 0.2f * scaleProgress);
+                setPivotX(isGravityRightAligned() ? getWidth() : 0f);
+                setPivotY(0f);
+                setScaleX(scale);
+                setScaleY(scale);
+
+                float alphaFrac = Math.max(0f, Math.min(1f, tMs / (float) inAlphaMs));
+                float easedAlpha = LINEAR_OUT_SLOW_IN.getInterpolation(alphaFrac);
+                setAlpha(startAlpha + (0.8f - startAlpha) * easedAlpha);
+                invalidate();
+            });
+            secondaryExpandAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    secondaryExpandAnimator = null;
+                    secondaryExpandFraction = 1f;
+                    setAlpha(0.8f);
+                    setScaleX(1f);
+                    setScaleY(1f);
+                }
+            });
+            secondaryExpandAnimator.start();
+        } else {
+            secondaryLayoutVisible = false;
+            requestLayout();
+
+            long outMs = Math.max(260L, Math.min(360L, Math.round(baseDuration * 0.8f)));
+            final float startProgress = secondaryExpandFraction;
+            final float startAlpha = getAlpha();
+
+            secondaryExpandAnimator = ValueAnimator.ofFloat(0f, 1f);
+            secondaryExpandAnimator.setDuration(outMs);
+            secondaryExpandAnimator.setInterpolator(FAST_OUT_SLOW_IN);
+            secondaryExpandAnimator.addUpdateListener(animation -> {
+                float f = (Float) animation.getAnimatedValue();
+                float val = startProgress * (1f - f);
+                secondaryExpandFraction = val;
+                float scale = Math.max(0f, 0.8f + 0.2f * val);
+                setPivotX(isGravityRightAligned() ? getWidth() : 0f);
+                setPivotY(0f);
+                setScaleX(scale);
+                setScaleY(scale);
+                setAlpha(startAlpha * (1f - f));
+                invalidate();
+            });
+            secondaryExpandAnimator.addListener(new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animation) {
+                    secondaryExpandAnimator = null;
+                    secondaryExpandFraction = 0f;
                     setVisibility(View.GONE);
                     setAlpha(0f);
-                } else {
-                    setAlpha(0.90f);
                 }
-            }
-        });
-        secondaryExpandAnimator.start();
+            });
+            secondaryExpandAnimator.start();
+        }
+    }
+
+    private boolean isRightAligned = false;
+
+    public void setIsRightAligned(boolean rightAligned) {
+        this.isRightAligned = rightAligned;
+    }
+
+    public boolean isRightAligned() {
+        return isRightAligned;
     }
 
     boolean isGravityRightAligned() {
-        int absGravity = Gravity.getAbsoluteGravity(getGravity(), getLayoutDirection());
-        return (absGravity & Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT;
+        return isRightAligned;
+    }
+
+    public static Layout.Alignment resolveAlignment(boolean isRtl, boolean isRightAligned) {
+        if (isRightAligned) {
+            return isRtl ? Layout.Alignment.ALIGN_NORMAL : Layout.Alignment.ALIGN_OPPOSITE;
+        } else {
+            return isRtl ? Layout.Alignment.ALIGN_OPPOSITE : Layout.Alignment.ALIGN_NORMAL;
+        }
     }
 
     @Nullable
@@ -262,7 +703,7 @@ class LyricsLineView extends TextView {
         }
         scaleAnimator = ValueAnimator.ofFloat(getScaleX(), targetScale);
         scaleAnimator.setDuration(duration);
-        scaleAnimator.setInterpolator(TRANSITION_INTERPOLATOR);
+        scaleAnimator.setInterpolator(FAST_OUT_SLOW_IN);
         scaleAnimator.addUpdateListener(anim -> {
             float s = (Float) anim.getAnimatedValue();
             setScaleX(s);
@@ -281,6 +722,10 @@ class LyricsLineView extends TextView {
         if (scaleAnimator != null) {
             scaleAnimator.cancel();
             scaleAnimator = null;
+        }
+        if (lineLookAnimator != null) {
+            lineLookAnimator.cancel();
+            lineLookAnimator = null;
         }
     }
 
@@ -346,6 +791,10 @@ class LyricsLineView extends TextView {
             scaleAnimator.cancel();
             scaleAnimator = null;
         }
+        if (lineLookAnimator != null) {
+            lineLookAnimator.cancel();
+            lineLookAnimator = null;
+        }
         if (blurAnimator != null) {
             blurAnimator.cancel();
             blurAnimator = null;
@@ -354,10 +803,10 @@ class LyricsLineView extends TextView {
             secondaryExpandAnimator.cancel();
             secondaryExpandAnimator = null;
         }
+        releaseAppleAnimator();
     }
 
     private Layout cachedLayout;
-    /** Where the word starts and ends being sung, in the direction its script runs. */
     private float[] cachedWordLeadX;
     private float[] cachedWordTrailX;
     private int[] cachedWordLine;
@@ -389,27 +838,364 @@ class LyricsLineView extends TextView {
         super(context);
     }
 
+    private static boolean sameWordUnits(@Nullable List<WordUnit> a, @Nullable List<WordUnit> b) {
+        if (a == b) return true;
+        boolean aEmpty = (a == null || a.isEmpty());
+        boolean bEmpty = (b == null || b.isEmpty());
+        if (aEmpty && bEmpty) return true;
+        if (aEmpty != bEmpty || a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            WordUnit ua = a.get(i);
+            WordUnit ub = b.get(i);
+            if (ua.startMs != ub.startMs || ua.endMs != ub.endMs || ua.endsWithSpace != ub.endsWithSpace) {
+                return false;
+            }
+            if (!Objects.equals(ua.kanji, ub.kanji) || !Objects.equals(ua.romaji, ub.romaji)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     void setWordUnits(@Nullable List<WordUnit> units) {
-        this.wordUnits = (units != null && !units.isEmpty()) ? units : null;
+        List<WordUnit> normalized = (units != null && !units.isEmpty()) ? units : null;
+        if (sameWordUnits(this.wordUnits, normalized) && this.appleAnimator != null && this.cachedLayoutWidth > 0) {
+            this.wordUnits = normalized;
+            this.cachedHasWordTimings = computeHasWordTimings();
+            invalidate();
+            return;
+        }
+        releaseAppleAnimator();
+        this.wordUnits = normalized;
         this.cachedHasWordTimings = computeHasWordTimings();
         this.cachedLayoutWidth = -1;
         requestLayout();
         invalidate();
     }
 
+    // when translate button toggled, only rebuild translation text layout.
+    // no need rebuild word animator from scratch so zero lag/frame drop while enjoying music.
+    private void rebuildTranslationLayoutOnly(int wrapWidth) {
+        if (translationText != null && !translationText.isEmpty() && wrapWidth > 0) {
+            TextPaint mainP = getPaint();
+            int accentColor = (sungColor != 0) ? sungColor : lineTextColor();
+            transPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            transPaint.setColor(accentColor);
+            WordAnimationUtils.applyLyricsBoldPaint(transPaint);
+
+            boolean isTransRtl = WordAnimationUtils.isRtlText(translationText);
+            Layout.Alignment align = resolveAlignment(isTransRtl, isRightAligned());
+
+            StaticLayout.Builder tb = StaticLayout.Builder
+                    .obtain(translationText, 0, translationText.length(), transPaint, wrapWidth)
+                    .setAlignment(align)
+                    .setLineSpacing(Dim.dp(3), 1.15f)
+                    .setIncludePad(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                tb.setUseLineSpacingFromFallbacks(true);
+            }
+            transLayout = tb.build();
+            transLayoutWidth = wrapWidth;
+            totalMeasuredHeight = Math.round(lyricsContentHeight + Dim.dp(4f) + transLayout.getHeight());
+        } else {
+            transLayout = null;
+            totalMeasuredHeight = Math.round(lyricsContentHeight);
+        }
+    }
+
     void setTranslationText(@Nullable String text) {
-        this.translationText = (text != null && !text.trim().isEmpty()) ? text.trim() : null;
+        String normalized = (text != null && !text.trim().isEmpty()) ? text.trim() : null;
+        if (Objects.equals(this.translationText, normalized)) {
+            return;
+        }
+        this.translationText = normalized;
         this.transLayout = null;
+        if (this.cachedLayoutWidth > 0 && (this.appleAnimator != null || (this.wordUnits != null && !this.wordUnits.isEmpty()))) {
+            rebuildTranslationLayoutOnly(this.cachedLayoutWidth);
+            requestLayout();
+            invalidate();
+            return;
+        }
         this.cachedLayoutWidth = -1;
         requestLayout();
         invalidate();
     }
 
+    @Nullable
+    public static PrebuiltWordLayout buildPrebuiltWordLayout(
+            int availableWidth,
+            @NonNull TextPaint baseMainPaint,
+            boolean isRightAligned,
+            boolean isSecondary,
+            @NonNull LyricsAnimationStyle animationStyle,
+            int accentColor,
+            @Nullable Long adjustedEndTimeMs,
+            @Nullable LyricsLine rawLyricsLine,
+            @Nullable LyricsLine rawRomanizedLine,
+            @Nullable List<WordUnit> wordUnits,
+            @Nullable String translationText,
+            boolean prewarmMasks) {
+        if (availableWidth <= 0 || animationStyle == LyricsAnimationStyle.NONE) {
+            return null;
+        }
+        boolean hasUnitsTimings = false;
+        boolean hasUnitsRomaji = false;
+        if (wordUnits != null) {
+            for (int i = 0; i < wordUnits.size(); i++) {
+                WordUnit u = wordUnits.get(i);
+                if (u.startMs != LyricsLine.NO_TIME) hasUnitsTimings = true;
+                if (u.romaji != null && !u.romaji.trim().isEmpty() && !WordAnimationUtils.isCJK(u.romaji)) {
+                    hasUnitsRomaji = true;
+                }
+            }
+        }
+        boolean hasTimings = (rawLyricsLine != null && rawLyricsLine.hasWords()) || hasUnitsTimings;
+        if (!hasTimings) {
+            return null;
+        }
+
+        TextPaint mainP = new TextPaint(baseMainPaint);
+        WordAnimationUtils.applyLyricsBoldPaint(mainP);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mainP.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
+        }
+
+        boolean hasRomaji = hasUnitsRomaji;
+        if (!hasRomaji && rawRomanizedLine != null && rawRomanizedLine.text() != null
+                && !rawRomanizedLine.text().trim().isEmpty()
+                && !WordAnimationUtils.isCJK(rawRomanizedLine.text())) {
+            hasRomaji = true;
+        }
+
+        int wrapWidth = Math.max(1, availableWidth);
+        String builtMainText;
+        List<WordTimestamp> rawWords;
+        List<WordTimestamp> rawRomWords;
+        String romLineText = null;
+
+        if (rawRomanizedLine != null && rawRomanizedLine.text() != null) {
+            String candidateRom = isSecondary
+                    ? LyricsPanelView.stripParentheses(rawRomanizedLine.text()).trim()
+                    : rawRomanizedLine.text().trim();
+            if (!candidateRom.isEmpty() && !WordAnimationUtils.isCJK(candidateRom)) {
+                romLineText = candidateRom;
+            }
+        }
+        if ((romLineText == null || romLineText.isEmpty()) && hasUnitsRomaji && wordUnits != null) {
+            StringBuilder rSb = new StringBuilder();
+            for (int i = 0; i < wordUnits.size(); i++) {
+                String ur = wordUnits.get(i).romaji;
+                if (ur != null && !ur.trim().isEmpty() && !WordAnimationUtils.isCJK(ur)) {
+                    if (rSb.length() > 0) rSb.append(' ');
+                    rSb.append(ur.trim());
+                }
+            }
+            if (rSb.length() > 0) {
+                romLineText = rSb.toString();
+            }
+        }
+
+        boolean preferSegmentedWordUnits = hasRomaji
+                && wordUnits != null
+                && !wordUnits.isEmpty()
+                && hasUnitsTimings
+                && hasUnitsRomaji
+                && rawLyricsLine != null
+                && (!rawLyricsLine.hasWords() || rawLyricsLine.words().size() <= 1)
+                && WordAnimationUtils.isCJK(rawLyricsLine.text());
+
+        if (preferSegmentedWordUnits) {
+            String rawText = rawLyricsLine.text() != null ? rawLyricsLine.text() : "";
+            rawText = isSecondary ? LyricsPanelView.stripParentheses(rawText).trim() : rawText.trim();
+            if (rawText.isEmpty()) {
+                StringBuilder mainSb = new StringBuilder();
+                for (int i = 0; i < wordUnits.size(); i++) {
+                    WordUnit u = wordUnits.get(i);
+                    mainSb.append(u.kanji);
+                    if (u.endsWithSpace && i < wordUnits.size() - 1) {
+                        mainSb.append(' ');
+                    }
+                }
+                rawText = mainSb.toString();
+            }
+            builtMainText = rawText;
+            rawWords = WordTimestamp.fromWordUnits(wordUnits, isSecondary);
+            rawRomWords = WordTimestamp.buildRomanizedWords(wordUnits, isSecondary);
+        } else if (rawLyricsLine != null && rawLyricsLine.hasWords()) {
+            String rawText = rawLyricsLine.text() != null ? rawLyricsLine.text() : "";
+            rawText = isSecondary ? LyricsPanelView.stripParentheses(rawText).trim() : rawText.trim();
+            rawWords = WordTimestamp.fromLyricsLine(rawLyricsLine, isSecondary);
+            if (rawText.isEmpty() && !rawWords.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < rawWords.size(); i++) {
+                    WordTimestamp wt = rawWords.get(i);
+                    sb.append(wt.text);
+                    if (wt.hasTrailingSpace && i < rawWords.size() - 1) {
+                        sb.append(' ');
+                    }
+                }
+                rawText = sb.toString();
+            }
+            builtMainText = rawText;
+            rawRomWords = hasRomaji
+                    ? WordTimestamp.buildRomanizedWordsFromLines(rawLyricsLine, rawRomanizedLine, wordUnits, isSecondary)
+                    : null;
+        } else {
+            StringBuilder mainSb = new StringBuilder();
+            if (wordUnits != null) {
+                for (int i = 0; i < wordUnits.size(); i++) {
+                    WordUnit u = wordUnits.get(i);
+                    mainSb.append(u.kanji);
+                    if (u.endsWithSpace && i < wordUnits.size() - 1) {
+                        mainSb.append(' ');
+                    }
+                }
+            }
+            builtMainText = mainSb.toString();
+            rawWords = WordTimestamp.fromWordUnits(wordUnits, isSecondary);
+            rawRomWords = hasRomaji ? WordTimestamp.buildRomanizedWords(wordUnits, isSecondary) : null;
+        }
+
+        boolean isMainRtl = WordAnimationUtils.isRtlText(builtMainText);
+        Layout.Alignment mainAlign = resolveAlignment(isMainRtl, isRightAligned);
+        Layout.Alignment subAlign = resolveAlignment(false, isRightAligned);
+
+        boolean showSylRom = hasRomaji
+                && (rawRomWords != null || (romLineText != null && !romLineText.isEmpty()));
+
+        AppleWordAnimator builtAnimator = new AppleWordAnimator(
+                animationStyle,
+                builtMainText,
+                rawWords,
+                rawRomWords,
+                romLineText,
+                showSylRom,
+                isSecondary,
+                adjustedEndTimeMs,
+                mainP,
+                mainAlign,
+                wrapWidth,
+                accentColor,
+                prewarmMasks);
+        int contentH = builtAnimator.measuredHeight;
+
+        StaticLayout builtRomFallback = null;
+        if (hasRomaji && !builtAnimator.hasSyllableRomanization
+                && romLineText != null && !romLineText.isEmpty()
+                && !romLineText.equalsIgnoreCase(builtMainText.trim())) {
+            TextPaint rfPaint = new TextPaint(mainP);
+            rfPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            WordAnimationUtils.applyLyricsBoldPaint(rfPaint);
+            rfPaint.setColor(accentColor);
+
+            StaticLayout.Builder rb = StaticLayout.Builder
+                    .obtain(romLineText, 0, romLineText.length(), rfPaint, wrapWidth)
+                    .setAlignment(subAlign)
+                    .setLineSpacing(Dim.dp(2), 1.15f)
+                    .setIncludePad(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                rb.setUseLineSpacingFromFallbacks(true);
+            }
+            builtRomFallback = rb.build();
+            contentH += Dim.dp(4f) + builtRomFallback.getHeight();
+        }
+
+        StaticLayout builtTrans = null;
+        int totalH = contentH;
+        String cleanTrans = (translationText != null && !translationText.trim().isEmpty())
+                ? translationText.trim() : null;
+        if (cleanTrans != null) {
+            TextPaint tPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            tPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            tPaint.setColor(accentColor);
+            WordAnimationUtils.applyLyricsBoldPaint(tPaint);
+
+            boolean isTransRtl = WordAnimationUtils.isRtlText(cleanTrans);
+            Layout.Alignment transAlign = resolveAlignment(isTransRtl, isRightAligned);
+
+            StaticLayout.Builder tb = StaticLayout.Builder
+                    .obtain(cleanTrans, 0, cleanTrans.length(), tPaint, wrapWidth)
+                    .setAlignment(transAlign)
+                    .setLineSpacing(Dim.dp(3), 1.15f)
+                    .setIncludePad(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                tb.setUseLineSpacingFromFallbacks(true);
+            }
+            builtTrans = tb.build();
+            totalH = Math.round(contentH + Dim.dp(4f) + builtTrans.getHeight());
+        }
+
+        return new PrebuiltWordLayout(
+                wrapWidth,
+                builtAnimator,
+                builtRomFallback,
+                builtTrans,
+                contentH,
+                totalH);
+    }
+
+    void applyPrebuiltWordLayout(
+            @Nullable LyricsLine mainLine,
+            @Nullable LyricsLine romanizedLine,
+            @Nullable List<WordUnit> units,
+            @Nullable String transText,
+            @NonNull PrebuiltWordLayout prebuilt) {
+        releaseAppleAnimator();
+        this.rawLyricsLine = mainLine;
+        this.rawRomanizedLine = romanizedLine;
+        this.wordUnits = (units != null && !units.isEmpty()) ? units : null;
+        this.cachedHasWordTimings = computeHasWordTimings();
+        this.translationText = (transText != null && !transText.trim().isEmpty()) ? transText.trim() : null;
+        this.appleAnimator = prebuilt.appleAnimator;
+        if (this.appleAnimator != null) {
+            this.appleAnimator.setPrewarmMasks(this.prewarmMasks);
+        }
+        this.romajiFallbackLayout = prebuilt.romajiFallbackLayout;
+        if (this.romajiFallbackLayout != null) {
+            TextPaint mainP = getPaint();
+            romajiFallbackPaint.set(mainP);
+            romajiFallbackPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            WordAnimationUtils.applyLyricsBoldPaint(romajiFallbackPaint);
+        }
+        this.transLayout = prebuilt.transLayout;
+        if (this.transLayout != null) {
+            TextPaint mainP = getPaint();
+            transPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            WordAnimationUtils.applyLyricsBoldPaint(transPaint);
+            this.transLayoutWidth = prebuilt.wrapWidth;
+        }
+        this.lyricsContentHeight = prebuilt.lyricsContentHeight;
+        this.totalMeasuredHeight = prebuilt.totalMeasuredHeight;
+        this.cachedLayoutWidth = prebuilt.wrapWidth;
+        this.lastDrawnClockPos = Long.MIN_VALUE;
+        this.allSung = false;
+        requestLayout();
+        invalidate();
+    }
+
     public boolean hasWordUnits() {
-        return wordUnits != null && !wordUnits.isEmpty();
+        return (wordUnits != null && !wordUnits.isEmpty())
+                || (rawLyricsLine != null && rawLyricsLine.hasWords());
     }
 
     public long getLastWordEndMs() {
+        if (appleAnimator != null && appleAnimator.effectiveEndTimeMs > 0L) {
+            return appleAnimator.effectiveEndTimeMs;
+        }
+        if (rawLyricsLine != null && rawLyricsLine.hasWords()) {
+            long maxEnd = LyricsLine.NO_TIME;
+            List<Word> words = rawLyricsLine.words();
+            for (int i = 0; i < words.size(); i++) {
+                long e = words.get(i).endMs();
+                if (e != LyricsLine.NO_TIME) {
+                    maxEnd = (maxEnd == LyricsLine.NO_TIME) ? e : Math.max(maxEnd, e);
+                }
+            }
+            if (maxEnd != LyricsLine.NO_TIME) return maxEnd;
+        }
+        if (adjustedEndTimeMs != null && adjustedEndTimeMs > 0L) {
+            return adjustedEndTimeMs;
+        }
         if (wordUnits == null || wordUnits.isEmpty()) {
             return LyricsLine.NO_TIME;
         }
@@ -426,7 +1212,7 @@ class LyricsLineView extends TextView {
     }
 
     private void layoutWordUnits(int availableWidth) {
-        if (wordUnits == null || wordUnits.isEmpty() || availableWidth <= 0) {
+        if (!hasWordUnits() || availableWidth <= 0) {
             return;
         }
         if (availableWidth == cachedLayoutWidth) {
@@ -434,30 +1220,214 @@ class LyricsLineView extends TextView {
         }
         cachedLayoutWidth = availableWidth;
 
-        Paint mainP = getPaint();
+        TextPaint mainP = getPaint();
+        WordAnimationUtils.applyLyricsBoldPaint(mainP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             mainP.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
         }
-        romajiPaint.setTextSize(mainP.getTextSize() * 0.54f);
-        romajiPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        romajiPaint.setTextSize(mainP.getTextSize() * 0.7f);
+        WordAnimationUtils.applyLyricsBoldPaint(romajiPaint);
 
         unsungKanjiPaint.set(mainP);
         unsungKanjiPaint.clearShadowLayer();
-        unsungKanjiPaint.setFakeBoldText(false);
+        WordAnimationUtils.applyLyricsBoldPaint(unsungKanjiPaint);
         sungKanjiPaint.set(mainP);
         sungKanjiPaint.clearShadowLayer();
-        sungKanjiPaint.setFakeBoldText(false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            unsungKanjiPaint.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-            sungKanjiPaint.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-        }
+        WordAnimationUtils.applyLyricsBoldPaint(sungKanjiPaint);
 
         unsungRomajiPaint.set(romajiPaint);
         unsungRomajiPaint.clearShadowLayer();
-        unsungRomajiPaint.setFakeBoldText(false);
+        WordAnimationUtils.applyLyricsBoldPaint(unsungRomajiPaint);
         sungRomajiPaint.set(romajiPaint);
         sungRomajiPaint.clearShadowLayer();
-        sungRomajiPaint.setFakeBoldText(false);
+        WordAnimationUtils.applyLyricsBoldPaint(sungRomajiPaint);
+
+        boolean hasRomaji = wordUnitsHaveRomaji();
+        if (!hasRomaji && rawRomanizedLine != null && rawRomanizedLine.text() != null
+                && !rawRomanizedLine.text().trim().isEmpty()
+                && !WordAnimationUtils.isCJK(rawRomanizedLine.text())) {
+            hasRomaji = true;
+        }
+
+        final boolean isRightAligned = isGravityRightAligned();
+        int wrapWidth = Math.max(1, availableWidth);
+
+        releaseAppleAnimator();
+        romajiFallbackLayout = null;
+
+        if (cachedHasWordTimings && animationStyle != LyricsAnimationStyle.NONE) {
+            String builtMainText;
+            List<WordTimestamp> rawWords;
+            List<WordTimestamp> rawRomWords;
+            String romLineText = null;
+
+            if (rawRomanizedLine != null && rawRomanizedLine.text() != null) {
+                String candidateRom = isSecondary
+                        ? LyricsPanelView.stripParentheses(rawRomanizedLine.text()).trim()
+                        : rawRomanizedLine.text().trim();
+                if (!candidateRom.isEmpty() && !WordAnimationUtils.isCJK(candidateRom)) {
+                    romLineText = candidateRom;
+                }
+            }
+            if ((romLineText == null || romLineText.isEmpty()) && wordUnitsHaveRomaji() && wordUnits != null) {
+                StringBuilder rSb = new StringBuilder();
+                for (int i = 0; i < wordUnits.size(); i++) {
+                    String ur = wordUnits.get(i).romaji;
+                    if (ur != null && !ur.trim().isEmpty() && !WordAnimationUtils.isCJK(ur)) {
+                        if (rSb.length() > 0) rSb.append(' ');
+                        rSb.append(ur.trim());
+                    }
+                }
+                if (rSb.length() > 0) {
+                    romLineText = rSb.toString();
+                }
+            }
+
+            boolean preferSegmentedWordUnits = hasRomaji
+                    && wordUnits != null
+                    && !wordUnits.isEmpty()
+                    && wordUnitsHaveTimings()
+                    && wordUnitsHaveRomaji()
+                    && rawLyricsLine != null
+                    && (!rawLyricsLine.hasWords() || rawLyricsLine.words().size() <= 1)
+                    && WordAnimationUtils.isCJK(rawLyricsLine.text());
+
+            if (preferSegmentedWordUnits) {
+                String rawText = rawLyricsLine.text() != null ? rawLyricsLine.text() : "";
+                rawText = isSecondary ? LyricsPanelView.stripParentheses(rawText).trim() : rawText.trim();
+                if (rawText.isEmpty()) {
+                    StringBuilder mainSb = new StringBuilder();
+                    for (int i = 0; i < wordUnits.size(); i++) {
+                        WordUnit u = wordUnits.get(i);
+                        mainSb.append(u.kanji);
+                        if (u.endsWithSpace && i < wordUnits.size() - 1) {
+                            mainSb.append(' ');
+                        }
+                    }
+                    rawText = mainSb.toString();
+                }
+                builtMainText = rawText;
+                rawWords = WordTimestamp.fromWordUnits(wordUnits, isSecondary);
+                rawRomWords = WordTimestamp.buildRomanizedWords(wordUnits, isSecondary);
+            } else if (rawLyricsLine != null && rawLyricsLine.hasWords()) {
+                String rawText = rawLyricsLine.text() != null ? rawLyricsLine.text() : "";
+                if (isSecondary) {
+                    rawText = LyricsPanelView.stripParentheses(rawText).trim();
+                } else {
+                    rawText = rawText.trim();
+                }
+                rawWords = WordTimestamp.fromLyricsLine(rawLyricsLine, isSecondary);
+                if (rawText.isEmpty() && !rawWords.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < rawWords.size(); i++) {
+                        WordTimestamp wt = rawWords.get(i);
+                        sb.append(wt.text);
+                        if (wt.hasTrailingSpace && i < rawWords.size() - 1) {
+                            sb.append(' ');
+                        }
+                    }
+                    rawText = sb.toString();
+                }
+                builtMainText = rawText;
+                rawRomWords = hasRomaji
+                        ? WordTimestamp.buildRomanizedWordsFromLines(rawLyricsLine, rawRomanizedLine, wordUnits, isSecondary)
+                        : null;
+            } else {
+                StringBuilder mainSb = new StringBuilder();
+                if (wordUnits != null) {
+                    for (int i = 0; i < wordUnits.size(); i++) {
+                        WordUnit u = wordUnits.get(i);
+                        mainSb.append(u.kanji);
+                        if (u.endsWithSpace && i < wordUnits.size() - 1) {
+                            mainSb.append(' ');
+                        }
+                    }
+                }
+                builtMainText = mainSb.toString();
+                rawWords = WordTimestamp.fromWordUnits(wordUnits, isSecondary);
+                rawRomWords = hasRomaji ? WordTimestamp.buildRomanizedWords(wordUnits, isSecondary) : null;
+            }
+
+            boolean isRtl = WordAnimationUtils.isRtlText(builtMainText);
+            Layout.Alignment mainAlign = resolveAlignment(isRtl, isRightAligned);
+            Layout.Alignment subAlign = resolveAlignment(false, isRightAligned);
+            boolean isTransRtl = translationText != null && WordAnimationUtils.isRtlText(translationText);
+            Layout.Alignment transAlign = resolveAlignment(isTransRtl, isRightAligned);
+
+            int accentColor = (sungColor != 0) ? sungColor : lineTextColor();
+            Long adjEnd = adjustedEndTimeMs;
+            if (adjEnd == null) {
+                long lastEnd = getLastWordEndMs();
+                if (lastEnd != LyricsLine.NO_TIME) {
+                    adjEnd = lastEnd;
+                }
+            }
+            boolean showSylRom = hasRomaji
+                    && (rawRomWords != null || (romLineText != null && !romLineText.isEmpty()));
+
+            appleAnimator = new AppleWordAnimator(
+                    animationStyle,
+                    builtMainText,
+                    rawWords,
+                    rawRomWords,
+                    romLineText,
+                    showSylRom,
+                    isSecondary,
+                    adjEnd,
+                    mainP,
+                    mainAlign,
+                    wrapWidth,
+                    accentColor,
+                    prewarmMasks);
+            lyricsContentHeight = appleAnimator.measuredHeight;
+
+            if (hasRomaji && !appleAnimator.hasSyllableRomanization
+                    && romLineText != null && !romLineText.isEmpty()
+                    && !romLineText.equalsIgnoreCase(builtMainText.trim())) {
+                romajiFallbackPaint.set(mainP);
+                romajiFallbackPaint.setTextSize(mainP.getTextSize() * 0.7f);
+                WordAnimationUtils.applyLyricsBoldPaint(romajiFallbackPaint);
+                romajiFallbackPaint.setColor(accentColor);
+
+                StaticLayout.Builder rb = StaticLayout.Builder
+                        .obtain(romLineText, 0, romLineText.length(), romajiFallbackPaint, wrapWidth)
+                        .setAlignment(subAlign)
+                        .setLineSpacing(Dim.dp(2), 1.15f)
+                        .setIncludePad(false);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    rb.setUseLineSpacingFromFallbacks(true);
+                }
+                romajiFallbackLayout = rb.build();
+                lyricsContentHeight += Dim.dp(4f) + romajiFallbackLayout.getHeight();
+            }
+
+            if (translationText != null && !translationText.isEmpty()) {
+                transPaint.setTextSize(mainP.getTextSize() * 0.7f);
+                transPaint.setColor(accentColor);
+                WordAnimationUtils.applyLyricsBoldPaint(transPaint);
+
+                StaticLayout.Builder tb = StaticLayout.Builder
+                        .obtain(translationText, 0, translationText.length(), transPaint, wrapWidth)
+                        .setAlignment(transAlign)
+                        .setLineSpacing(Dim.dp(3), 1.15f)
+                        .setIncludePad(false);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    tb.setUseLineSpacingFromFallbacks(true);
+                }
+                transLayout = tb.build();
+                transLayoutWidth = wrapWidth;
+
+                totalMeasuredHeight = Math.round(lyricsContentHeight + Dim.dp(4f) + transLayout.getHeight());
+            } else {
+                transLayout = null;
+                totalMeasuredHeight = Math.round(lyricsContentHeight);
+            }
+            return;
+        }
+
+        if (wordUnits == null || wordUnits.isEmpty()) {
+            return;
+        }
 
         Paint.FontMetrics kanjiFm = mainP.getFontMetrics();
         float kanjiHeight = kanjiFm.descent - kanjiFm.ascent;
@@ -467,14 +1437,6 @@ class LyricsLineView extends TextView {
         float romajiHeight = romajiFm.descent - romajiFm.ascent;
         float romajiBaseline = -romajiFm.ascent;
 
-        boolean hasRomaji = false;
-        for (int i = 0; i < wordUnits.size(); i++) {
-            if (!wordUnits.get(i).romaji.isEmpty()) {
-                hasRomaji = true;
-                break;
-            }
-        }
-
         float romajiMargin = hasRomaji ? Dim.dp(4f) : 0f;
         float effectiveRomajiHeight = hasRomaji ? romajiHeight : 0f;
         float singleLineHeight = kanjiHeight + romajiMargin + effectiveRomajiHeight;
@@ -483,270 +1445,42 @@ class LyricsLineView extends TextView {
                 : (singleLineHeight * 1.15f + Dim.dp(4f));
         float baseSpaceWidth = mainP.measureText(" ");
 
-        // measure all word width first
         for (int i = 0; i < wordUnits.size(); i++) {
             WordUnit u = wordUnits.get(i);
             u.kanjiWidth = mainP.measureText(u.kanji);
-            u.romajiWidth = (!u.romaji.isEmpty()) ? romajiPaint.measureText(u.romaji) : 0f;
-            int kLen = u.kanji.length();
-            if (kLen > 0) {
-                u.charWidths = new float[kLen];
-                u.charOffsets = new float[kLen];
-                mainP.getTextWidths(u.kanji, u.charWidths);
-                boolean hasLigature = false;
-                for (int c = 0; c < kLen; c++) {
-                    if (u.charWidths[c] <= 0f) {
-                        hasLigature = true;
-                        break;
-                    }
-                }
-                if (hasLigature) {
-                    for (int c = 0; c < kLen; ) {
-                        int cp = u.kanji.codePointAt(c);
-                        int cc = Character.charCount(cp);
-                        float cw = mainP.measureText(u.kanji, c, c + cc);
-                        for (int k = 0; k < cc; k++) {
-                            u.charWidths[c + k] = (k == 0) ? cw : 0f;
-                        }
-                        c += cc;
-                    }
-                }
-                float off = 0f;
-                for (int c = 0; c < kLen; c++) {
-                    u.charOffsets[c] = off;
-                    off += u.charWidths[c];
-                }
-                u.kanjiWidth = Math.max(u.kanjiWidth, off);
-            } else {
-                u.charWidths = null;
-                u.charOffsets = null;
-            }
-
-            int rLen = u.romaji.length();
-            if (rLen > 0) {
-                u.romajiCharWidths = new float[rLen];
-                u.romajiCharOffsets = new float[rLen];
-                romajiPaint.getTextWidths(u.romaji, u.romajiCharWidths);
-                boolean hasLigature = false;
-                for (int c = 0; c < rLen; c++) {
-                    if (u.romajiCharWidths[c] <= 0f) {
-                        hasLigature = true;
-                        break;
-                    }
-                }
-                if (hasLigature) {
-                    for (int c = 0; c < rLen; ) {
-                        int cp = u.romaji.codePointAt(c);
-                        int cc = Character.charCount(cp);
-                        float cw = romajiPaint.measureText(u.romaji, c, c + cc);
-                        for (int k = 0; k < cc; k++) {
-                            u.romajiCharWidths[c + k] = (k == 0) ? cw : 0f;
-                        }
-                        c += cc;
-                    }
-                }
-                float rOff = 0f;
-                for (int c = 0; c < rLen; c++) {
-                    u.romajiCharOffsets[c] = rOff;
-                    rOff += u.romajiCharWidths[c];
-                }
-                u.romajiWidth = Math.max(u.romajiWidth, rOff);
-            } else {
-                u.romajiCharWidths = null;
-                u.romajiCharOffsets = null;
-            }
-        }
-
-        boolean isRtlLine = false;
-        for (int i = 0; i < wordUnits.size(); i++) {
-            WordUnit u = wordUnits.get(i);
-            if (LyricsRomanizer.containsArabic(u.kanji) || LyricsRomanizer.containsHebrew(u.kanji)) {
-                isRtlLine = true;
-                break;
-            }
-        }
-
-        if (isRtlLine) {
-            layoutRtlWordUnits(availableWidth, mainP, kanjiHeight, kanjiBaseline,
-                    romajiHeight, romajiBaseline, baseSpaceWidth, hasRomaji);
-            return;
+            u.romajiWidth = (!u.romaji.isEmpty() && !WordAnimationUtils.isCJK(u.romaji))
+                    ? romajiPaint.measureText(u.romaji) : 0f;
         }
 
         float curX = 0f;
         float curY = 0f;
         int currentLine = 0;
-        float lastRomajiEndX = 0f;
-        int wrapWidth = Math.max(1, Math.round(availableWidth / 1.08f));
-
-        int i = 0;
-        while (i < wordUnits.size()) {
-            WordUnit firstInGroup = wordUnits.get(i);
-            boolean isContinuousScript = LyricsRomanizer.containsJapanese(firstInGroup.kanji)
-                    || containsKanji(firstInGroup.kanji)
-                    || LyricsRomanizer.containsHanzi(firstInGroup.kanji)
-                    || LyricsRomanizer.isSongJapanese();
-
-            if (isContinuousScript) {
-                WordUnit u = firstInGroup;
-                float romajiMinGap = (!u.romaji.isEmpty()) ? Dim.dp(6f) : 0f;
-                float pillarW = Math.max(u.kanjiWidth, u.romajiWidth + romajiMinGap);
-                if (curX > 0f && curX + pillarW > wrapWidth) {
-                    curX = 0f;
-                    currentLine++;
-                    curY += lineSpacing;
-                    lastRomajiEndX = 0f;
-                }
-                u.unitLeft = curX;
-                u.unitRight = curX + pillarW;
-                u.lineIndex = currentLine;
-                u.lineTop = curY;
-                u.lineBottom = curY + singleLineHeight;
-
-                u.kanjiX = curX;
-                u.romajiX = curX;
-                u.kanjiY = curY + kanjiBaseline;
-                u.romajiY = curY + kanjiHeight + romajiMargin + romajiBaseline;
-
-                if (!u.romaji.isEmpty()) {
-                    lastRomajiEndX = u.romajiX + u.romajiWidth;
-                }
-                float spacing = u.endsWithSpace ? (baseSpaceWidth * 0.6f) : 0f;
-                curX += pillarW + spacing;
-
-                u.wordStartMs = u.startMs;
-                u.wordEndMs = u.endMs;
-                u.wordCenterX = (u.unitLeft + u.unitRight) / 2f;
-                u.wordCenterY = curY + singleLineHeight / 2f;
-                u.kanjiCenterX = u.kanjiX + u.kanjiWidth / 2f;
-                u.kanjiCenterY = u.wordCenterY;
-                u.romajiCenterX = u.romajiX + u.romajiWidth / 2f;
-                u.romajiCenterY = u.wordCenterY;
-
-                i++;
-            } else {
-                // non cjk text
-                // group syllable in same word
-                int groupEnd = i;
-                float wordTotalW = 0f;
-                while (groupEnd < wordUnits.size()) {
-                    WordUnit wu = wordUnits.get(groupEnd);
-                    wordTotalW += Math.max(wu.kanjiWidth, wu.romajiWidth);
-                    if (wu.endsWithSpace || groupEnd == wordUnits.size() - 1) {
-                        break;
-                    }
-                    groupEnd++;
-                }
-
-                // wrap line if word too wide
-                if (curX > 0f && curX + wordTotalW > wrapWidth) {
-                    curX = 0f;
-                    currentLine++;
-                    curY += lineSpacing;
-                    lastRomajiEndX = 0f;
-                }
-
-                int wordStartIdx = i;
-                float wordGroupLeft = curX;
-                long wordStartMs = Long.MAX_VALUE;
-                long wordEndMs = Long.MIN_VALUE;
-
-                for (int wi = i; wi <= groupEnd; wi++) {
-                    WordUnit u = wordUnits.get(wi);
-                    float pillarW = Math.max(u.kanjiWidth, u.romajiWidth);
-
-                    // fallback if one word wider than screen
-                    if (curX > 0f && curX + pillarW > wrapWidth) {
-                        curX = 0f;
-                        currentLine++;
-                        curY += lineSpacing;
-                        lastRomajiEndX = 0f;
-                    }
-
-                    final float spacing;
-                    if (LyricsRomanizer.containsHangul(u.kanji)) {
-                        spacing = u.endsWithSpace ? baseSpaceWidth : 0f;
-                    } else if (LyricsRomanizer.containsCyrillic(u.kanji) || LyricsRomanizer.containsArabic(u.kanji)
-                            || LyricsRomanizer.containsHebrew(u.kanji) || LyricsRomanizer.containsGreek(u.kanji)
-                            || LyricsRomanizer.containsDevanagari(u.kanji) || LyricsRomanizer.containsThai(u.kanji)) {
-                        spacing = u.endsWithSpace ? (hasRomaji ? (baseSpaceWidth * 0.75f) : baseSpaceWidth) : 0f;
-                    } else {
-                        spacing = u.endsWithSpace ? baseSpaceWidth : 0f;
-                    }
-
-                    u.unitLeft = curX;
-                    u.unitRight = curX + pillarW;
-                    u.lineIndex = currentLine;
-                    u.lineTop = curY;
-                    u.lineBottom = curY + singleLineHeight;
-
-                    u.kanjiX = curX;
-                    u.romajiX = curX;
-                    u.kanjiY = curY + kanjiBaseline;
-                    u.romajiY = curY + kanjiHeight + romajiMargin + romajiBaseline;
-
-                    u.kanjiCenterX = curX + u.kanjiWidth / 2f;
-                    u.kanjiCenterY = curY + singleLineHeight / 2f;
-                    u.romajiCenterX = curX + u.romajiWidth / 2f;
-                    u.romajiCenterY = curY + singleLineHeight / 2f;
-
-                    if (!u.romaji.isEmpty()) {
-                        lastRomajiEndX = u.romajiX + u.romajiWidth;
-                    }
-                    curX += pillarW + spacing;
-
-                    if (u.startMs != LyricsLine.NO_TIME) {
-                        wordStartMs = Math.min(wordStartMs, u.startMs);
-                    }
-                    if (u.endMs != LyricsLine.NO_TIME) {
-                        wordEndMs = Math.max(wordEndMs, u.endMs);
-                    }
-                }
-
-                float wordGroupRight = wordUnits.get(groupEnd).unitRight;
-                float wordCenterX = (wordGroupLeft + wordGroupRight) / 2f;
-                float wordCenterY = (wordUnits.get(wordStartIdx).lineTop + wordUnits.get(wordStartIdx).lineBottom) / 2f;
-                if (wordStartMs == Long.MAX_VALUE) wordStartMs = LyricsLine.NO_TIME;
-                if (wordEndMs == Long.MIN_VALUE) wordEndMs = LyricsLine.NO_TIME;
-
-                for (int wi = i; wi <= groupEnd; wi++) {
-                    WordUnit u = wordUnits.get(wi);
-                    u.wordStartMs = wordStartMs;
-                    u.wordEndMs = wordEndMs;
-                    u.wordCenterX = wordCenterX;
-                    u.wordCenterY = wordCenterY;
-                }
-
-                i = groupEnd + 1;
+        for (int i = 0; i < wordUnits.size(); i++) {
+            WordUnit u = wordUnits.get(i);
+            float pillarW = Math.max(u.kanjiWidth, u.romajiWidth);
+            if (curX > 0f && curX + pillarW > wrapWidth) {
+                curX = 0f;
+                currentLine++;
+                curY += lineSpacing;
             }
+            u.unitLeft = curX;
+            u.unitRight = curX + pillarW;
+            u.lineIndex = currentLine;
+            u.lineTop = curY;
+            u.lineBottom = curY + singleLineHeight;
+            u.kanjiX = curX;
+            u.romajiX = curX;
+            u.kanjiY = curY + kanjiBaseline;
+            u.romajiY = curY + kanjiHeight + romajiMargin + romajiBaseline;
+            curX += pillarW + (u.endsWithSpace ? baseSpaceWidth : 0f);
         }
 
-        final boolean isRightAligned = isGravityRightAligned();
-        if (isRightAligned && currentLine >= 0) {
-            float[] lineWidths = new float[currentLine + 1];
-            for (int j = 0; j < wordUnits.size(); j++) {
-                WordUnit u = wordUnits.get(j);
-                if (u.lineIndex <= currentLine) {
-                    lineWidths[u.lineIndex] = Math.max(lineWidths[u.lineIndex], u.unitRight);
-                }
-            }
-            for (int j = 0; j < wordUnits.size(); j++) {
-                WordUnit u = wordUnits.get(j);
-                float xShift = Math.max(0f, availableWidth - lineWidths[u.lineIndex]);
-                u.unitLeft += xShift;
-                u.unitRight += xShift;
-                u.kanjiX += xShift;
-                u.romajiX += xShift;
-                u.wordCenterX += xShift;
-                u.kanjiCenterX += xShift;
-                u.romajiCenterX += xShift;
-            }
-        }
+        lyricsContentHeight = Math.round(curY + singleLineHeight);
 
         if (translationText != null && !translationText.isEmpty()) {
-            transPaint.setTextSize(mainP.getTextSize() * TRANSLATION_RELATIVE_SIZE);
-            transPaint.setColor(auxiliaryTextColor());
-            transPaint.setAlpha(Math.round(255 * 0.58f));
-            transPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+            transPaint.setTextSize(mainP.getTextSize() * 0.7f);
+            transPaint.setColor(lineTextColor());
+            WordAnimationUtils.applyLyricsBoldPaint(transPaint);
 
             Layout.Alignment align = isRightAligned
                     ? Layout.Alignment.ALIGN_OPPOSITE
@@ -770,169 +1504,10 @@ class LyricsLineView extends TextView {
         }
     }
 
-    private void layoutRtlWordUnits(int availableWidth, Paint mainP,
-                                    float kanjiHeight, float kanjiBaseline,
-                                    float romajiHeight, float romajiBaseline,
-                                    float baseSpaceWidth, boolean hasRomaji) {
-        final boolean isRightAligned = isGravityRightAligned();
-        int wrapWidth = Math.max(1, Math.round(availableWidth / 1.08f));
-
-        // wrap arabic words
-        float arabicLineSpacing = kanjiHeight * 1.25f;
-        List<List<WordUnit>> arabicLines = new ArrayList<>();
-        List<WordUnit> curArabicLine = new ArrayList<>();
-        float curLineWidth = 0f;
-
-        for (int i = 0; i < wordUnits.size(); i++) {
-            WordUnit u = wordUnits.get(i);
-            float wordW = u.kanjiWidth;
-            float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
-
-            if (!curArabicLine.isEmpty() && curLineWidth + wordW > wrapWidth) {
-                arabicLines.add(curArabicLine);
-                curArabicLine = new ArrayList<>();
-                curLineWidth = 0f;
-            }
-            curArabicLine.add(u);
-            curLineWidth += wordW + spaceW;
-        }
-        if (!curArabicLine.isEmpty()) {
-            arabicLines.add(curArabicLine);
-        }
-
-        // rtl word position right to left
-        for (int ln = 0; ln < arabicLines.size(); ln++) {
-            List<WordUnit> lineWords = arabicLines.get(ln);
-            float lineY = ln * arabicLineSpacing;
-            float kanjiY = lineY + kanjiBaseline;
-
-            float totalW = 0f;
-            for (int w = 0; w < lineWords.size(); w++) {
-                WordUnit u = lineWords.get(w);
-                totalW += u.kanjiWidth;
-                if (w < lineWords.size() - 1 && u.endsWithSpace) {
-                    totalW += baseSpaceWidth;
-                }
-            }
-
-            float currentRight = isRightAligned ? availableWidth : Math.min(availableWidth, totalW);
-
-            for (int w = 0; w < lineWords.size(); w++) {
-                WordUnit u = lineWords.get(w);
-                u.kanjiX = currentRight - u.kanjiWidth;
-                u.kanjiY = kanjiY;
-                u.kanjiCenterX = u.kanjiX + u.kanjiWidth / 2f;
-                u.kanjiCenterY = lineY + kanjiHeight / 2f;
-                u.wordCenterX = u.kanjiCenterX;
-                u.wordCenterY = u.kanjiCenterY;
-                u.unitLeft = u.kanjiX;
-                u.unitRight = currentRight;
-                u.lineIndex = ln;
-                u.lineTop = lineY;
-                u.lineBottom = lineY + kanjiHeight;
-
-                float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
-                currentRight = u.kanjiX - spaceW;
-            }
-        }
-
-        float arabicSectionHeight = arabicLines.size() * arabicLineSpacing;
-        float bottomOfLyrics = arabicSectionHeight;
-
-        // wrap romaji text
-        if (hasRomaji) {
-            float romajiMargin = Dim.dp(6f);
-            float romajiSectionTop = arabicSectionHeight + romajiMargin;
-            float romajiLineSpacing = romajiHeight * 1.2f;
-
-            List<List<WordUnit>> romajiLines = new ArrayList<>();
-            List<WordUnit> curRomajiLine = new ArrayList<>();
-            float curRLineWidth = 0f;
-
-            for (int i = 0; i < wordUnits.size(); i++) {
-                WordUnit u = wordUnits.get(i);
-                if (u.romaji.isEmpty()) continue;
-                float wordW = u.romajiWidth;
-                float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
-
-                if (!curRomajiLine.isEmpty() && curRLineWidth + wordW > wrapWidth) {
-                    romajiLines.add(curRomajiLine);
-                    curRomajiLine = new ArrayList<>();
-                    curRLineWidth = 0f;
-                }
-                curRomajiLine.add(u);
-                curRLineWidth += wordW + spaceW;
-            }
-            if (!curRomajiLine.isEmpty()) {
-                romajiLines.add(curRomajiLine);
-            }
-
-            // ltr word position left to right
-            for (int rln = 0; rln < romajiLines.size(); rln++) {
-                List<WordUnit> rWords = romajiLines.get(rln);
-                float rLineY = romajiSectionTop + rln * romajiLineSpacing;
-                float romajiY = rLineY + romajiBaseline;
-
-                float totalRW = 0f;
-                for (int w = 0; w < rWords.size(); w++) {
-                    WordUnit u = rWords.get(w);
-                    totalRW += u.romajiWidth;
-                    if (w < rWords.size() - 1 && u.endsWithSpace) {
-                        totalRW += baseSpaceWidth;
-                    }
-                }
-
-                float currentLeft = isRightAligned ? Math.max(0f, availableWidth - totalRW) : 0f;
-
-                for (int w = 0; w < rWords.size(); w++) {
-                    WordUnit u = rWords.get(w);
-                    u.romajiX = currentLeft;
-                    u.romajiY = romajiY;
-                    u.romajiCenterX = currentLeft + u.romajiWidth / 2f;
-                    u.romajiCenterY = rLineY + romajiHeight / 2f;
-
-                    float spaceW = u.endsWithSpace ? baseSpaceWidth : 0f;
-                    currentLeft += u.romajiWidth + spaceW;
-                }
-            }
-
-            if (!romajiLines.isEmpty()) {
-                bottomOfLyrics = romajiSectionTop + romajiLines.size() * romajiLineSpacing;
-            }
-        }
-
-        // translation text layout
-        if (translationText != null && !translationText.isEmpty()) {
-            transPaint.setTextSize(mainP.getTextSize() * TRANSLATION_RELATIVE_SIZE);
-            transPaint.setColor(auxiliaryTextColor());
-            transPaint.setAlpha(Math.round(255 * 0.58f));
-            transPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-
-            Layout.Alignment align = isRightAligned
-                    ? Layout.Alignment.ALIGN_OPPOSITE
-                    : Layout.Alignment.ALIGN_NORMAL;
-
-            StaticLayout.Builder tb = StaticLayout.Builder
-                    .obtain(translationText, 0, translationText.length(), transPaint, wrapWidth)
-                    .setAlignment(align)
-                    .setLineSpacing(Dim.dp(3), 1.15f)
-                    .setIncludePad(false);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                tb.setUseLineSpacingFromFallbacks(true);
-            }
-            transLayout = tb.build();
-            transLayoutWidth = wrapWidth;
-
-            totalMeasuredHeight = Math.round(bottomOfLyrics + Dim.dp(6f) + transLayout.getHeight());
-        } else {
-            transLayout = null;
-            totalMeasuredHeight = Math.round(bottomOfLyrics);
-        }
-    }
-
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        if (wordUnits != null && !wordUnits.isEmpty()) {
+        if (hasWordUnits() && ((cachedHasWordTimings && animationStyle != LyricsAnimationStyle.NONE)
+                || (wordUnits != null && !wordUnits.isEmpty()))) {
             int width = MeasureSpec.getSize(widthMeasureSpec);
             int padH = getCompoundPaddingLeft() + getCompoundPaddingRight();
             int availableW = Math.max(0, width - padH);
@@ -940,17 +1515,28 @@ class LyricsLineView extends TextView {
                 layoutWordUnits(availableW);
             }
             int padV = getExtendedPaddingTop() + getExtendedPaddingBottom();
-            int measuredH = Math.max(totalMeasuredHeight + padV, getSuggestedMinimumHeight());
+            int fullH = Math.max(totalMeasuredHeight + padV, getSuggestedMinimumHeight());
+            int reportedH = (isSecondary && !secondaryLayoutVisible) ? 0 : fullH;
             if (isSecondary) {
-                measuredH = Math.round(measuredH * secondaryExpandFraction);
+                if (lastSecondaryReportedH >= 0 && lastSecondaryReportedH != reportedH && scrollEngine != null) {
+                    scrollEngine.recordLayoutShift(this, reportedH - lastSecondaryReportedH);
+                }
+                lastSecondaryReportedH = reportedH;
             }
-            setMeasuredDimension(width, measuredH);
+            setMeasuredDimension(width, reportedH);
             return;
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         if (isSecondary) {
-            int measuredH = Math.round(getMeasuredHeight() * secondaryExpandFraction);
-            setMeasuredDimension(getMeasuredWidth(), measuredH);
+            int fullH = getMeasuredHeight();
+            int reportedH = secondaryLayoutVisible ? fullH : 0;
+            if (lastSecondaryReportedH >= 0 && lastSecondaryReportedH != reportedH && scrollEngine != null) {
+                scrollEngine.recordLayoutShift(this, reportedH - lastSecondaryReportedH);
+            }
+            lastSecondaryReportedH = reportedH;
+            if (!secondaryLayoutVisible) {
+                setMeasuredDimension(getMeasuredWidth(), 0);
+            }
         }
     }
 
@@ -958,18 +1544,22 @@ class LyricsLineView extends TextView {
 
     public void resetClockPos() {
         this.lastDrawnClockPos = Long.MIN_VALUE;
+        this.allSung = false;
+        if (appleAnimator != null) {
+            appleAnimator.reset();
+        }
         invalidate();
     }
 
+    // monotonic clock guard: keep drawing clock position from ever going backwards suddenly.
+    // if small jitter (< 600ms) on play or pause, clamp to last drawn position so words dont glitch jump.
     private long getLiveClockPositionMs() {
-        if (positionMs == Long.MIN_VALUE) {
-            lastDrawnClockPos = Long.MIN_VALUE;
-            return Long.MIN_VALUE;
-        }
         long rawPos = LyricsManager.getInstance().getPositionMs();
-        // hold drawn time from jumping backwards while playing, unless user actually seeks
-        if (LyricsManager.getInstance().isPlaying() && lastDrawnClockPos != Long.MIN_VALUE) {
-            if (rawPos < lastDrawnClockPos - 200L || (rawPos < 200L && lastDrawnClockPos >= 400L)) {
+        boolean isPlaying = LyricsManager.getInstance().isPlaying();
+        if (lastDrawnClockPos != Long.MIN_VALUE) {
+            if (!isPlaying) {
+                rawPos = Math.max(lastDrawnClockPos, rawPos);
+            } else if (rawPos < lastDrawnClockPos - 600L || (rawPos < 200L && lastDrawnClockPos >= 600L)) {
                 lastDrawnClockPos = rawPos;
             } else {
                 rawPos = Math.max(lastDrawnClockPos, rawPos);
@@ -980,730 +1570,101 @@ class LyricsLineView extends TextView {
     }
 
     private void onDrawWordUnits(Canvas canvas) {
-        if (wordUnits == null || wordUnits.isEmpty()) {
-            return;
-        }
-        if (isSecondary && secondaryExpandFraction <= 0.001f) {
+        if (isSecondary && secondaryExpandFraction <= 0.001f && !secondaryLayoutVisible) {
             return;
         }
 
-        final boolean active = isLineActive || (positionMs != Long.MIN_VALUE && !allSung);
+        final boolean active = isLineActive;
 
         canvas.save();
-        if (isSecondary) {
-            canvas.clipRect(0, 0, getWidth(), getHeight());
-        }
         canvas.translate(getCompoundPaddingLeft(), getExtendedPaddingTop());
 
-        TextPaint mainP = getPaint();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            mainP.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-            unsungKanjiPaint.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-            sungKanjiPaint.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-            glowPaint.setFontFeatureSettings("\"liga\" 0, \"clig\" 0, \"dlig\" 0");
-        }
-
-        final boolean lineHasTimings = hasWordTimings();
-
-        // setup colors
         int baseSung = (sungColor != 0) ? sungColor : lineTextColor();
-        sungKanjiPaint.setColor(baseSung);
-        sungKanjiPaint.setFakeBoldText(false);
+        int dynamicLineColor = isSecondary
+                ? baseSung
+                : withAlpha(baseSung, lookCurAlpha);
+        float dynamicFocusedAlpha = lookCurFocusedAlpha;
 
-        final int sungRomajiColor = Color.argb(
-                Math.round(255 * 0.85f),
-                Color.red(baseSung),
-                Color.green(baseSung),
-                Color.blue(baseSung));
-        sungRomajiPaint.setColor(sungRomajiColor);
-        sungRomajiPaint.setFakeBoldText(false);
+        if (appleAnimator != null && cachedHasWordTimings && animationStyle != LyricsAnimationStyle.NONE) {
+            long livePos = getLiveClockPositionMs();
+            float speed = LyricsManager.getInstance().getPlaybackSpeed();
+            boolean playing = LyricsManager.getInstance().isPlaying();
 
-        glowPaint.set(sungKanjiPaint);
-        glowPaint.setShader(null);
-        glowPaint.clearShadowLayer();
-
-        int baseUnsung = (unsungColor != 0) ? unsungColor : unsungWordColor();
-        unsungKanjiPaint.setColor(baseUnsung);
-        unsungKanjiPaint.setFakeBoldText(false);
-
-        int rAlpha = Color.alpha(baseUnsung);
-        final int unsungRomajiColor = Color.argb(
-                Math.round(rAlpha * 0.85f),
-                Color.red(baseUnsung),
-                Color.green(baseUnsung),
-                Color.blue(baseUnsung));
-        unsungRomajiPaint.setColor(unsungRomajiColor);
-        unsungRomajiPaint.setFakeBoldText(false);
-
-        final int wordCount = wordUnits.size();
-
-        // layer 1 base text
-        final long baseLivePos = (active && lineHasTimings && !allSung) ? getLiveClockPositionMs() : Long.MIN_VALUE;
-        final float restingLift = 0f;
-
-        for (int i = 0; i < wordCount; i++) {
-            WordUnit u = wordUnits.get(i);
-            final boolean timed = baseLivePos != Long.MIN_VALUE && u.startMs != LyricsLine.NO_TIME;
-            // past words stay solid white
-            if (timed && baseLivePos >= u.endMs) {
-                continue;
-            }
-            final boolean isKanjiRtl = LyricsRomanizer.containsArabic(u.kanji) || LyricsRomanizer.containsHebrew(u.kanji);
-            int numChars = u.kanji.length();
-
-            if (!isKanjiRtl && numChars > 0 && u.charWidths != null && u.charOffsets != null) {
-                for (int c = 0; c < numChars; ) {
-                    int cp = u.kanji.codePointAt(c);
-                    int cc = Character.charCount(cp);
-                    EmphasisState state = timed
-                            ? computeCharEmphasisState(u, c, numChars, baseLivePos, restingLift, mainP.getTextSize(), isSecondary)
-                            : null;
-                    float lift = state != null ? state.lift : 0f;
-                    float scale = state != null ? state.scale : 1f;
-                    float spreadX = state != null ? state.spreadX : 0f;
-                    float chX = u.kanjiX + u.charOffsets[c] + spreadX;
-                    float chW = u.charWidths[c];
-                    float chCenterX = chX + chW / 2f;
-                    String chStr = u.kanji.substring(c, c + cc);
-
+            if (isGravityRightAligned() && getWidth() > 0) {
+                int availW = Math.max(0, getWidth() - getCompoundPaddingLeft() - getCompoundPaddingRight());
+                float rightShift = Math.max(0f, availW - appleAnimator.measuredWidth);
+                if (rightShift > 0f) {
                     canvas.save();
-                    if (lift > 0f) {
-                        canvas.translate(0f, -lift);
-                    }
-                    if (scale != 1f) {
-                        canvas.scale(scale, scale, chCenterX, u.kanjiCenterY);
-                    }
-                    canvas.drawText(chStr, chX, u.kanjiY, unsungKanjiPaint);
+                    canvas.translate(rightShift, 0f);
+                    appleAnimator.draw(canvas, livePos, active, allSung, baseSung, dynamicLineColor, dynamicFocusedAlpha, speed, playing);
                     canvas.restore();
-                    c += cc;
+                } else {
+                    appleAnimator.draw(canvas, livePos, active, allSung, baseSung, dynamicLineColor, dynamicFocusedAlpha, speed, playing);
                 }
             } else {
-                EmphasisState state = timed ? computeEmphasisState(u, baseLivePos, restingLift, mainP.getTextSize(), isSecondary) : null;
-                float lift = state != null ? state.lift : 0f;
-                float scale = state != null ? state.scale : 1f;
-
-                canvas.save();
-                if (lift > 0f) {
-                    canvas.translate(0f, -lift);
-                }
-                if (scale != 1f) {
-                    canvas.scale(scale, scale, u.wordCenterX, u.wordCenterY);
-                }
-                canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, unsungKanjiPaint);
-                canvas.restore();
+                appleAnimator.draw(canvas, livePos, active, allSung, baseSung, dynamicLineColor, dynamicFocusedAlpha, speed, playing);
             }
 
-            if (!u.romaji.isEmpty() && u.romajiWidth > 0f) {
-                int rLen = u.romaji.length();
-                if (rLen > 0 && u.romajiCharWidths != null && u.romajiCharOffsets != null) {
-                    for (int c = 0; c < rLen; ) {
-                        int cp = u.romaji.codePointAt(c);
-                        int cc = Character.charCount(cp);
-                        EmphasisState state = timed
-                                ? computeCharEmphasisState(u, c, rLen, baseLivePos, restingLift, romajiPaint.getTextSize(), isSecondary)
-                                : null;
-                        float lift = state != null ? state.lift : 0f;
-                        float scale = state != null ? state.scale : 1f;
-                        float spreadX = state != null ? state.spreadX : 0f;
-                        float chX = u.romajiX + u.romajiCharOffsets[c] + spreadX;
-                        float chW = u.romajiCharWidths[c];
-                        float chCenterX = chX + chW / 2f;
-                        String chStr = u.romaji.substring(c, c + cc);
+            drawRomajiFallbackLayout(canvas, dynamicLineColor);
+            drawTranslationLayout(canvas, baseSung);
+            canvas.restore();
 
-                        canvas.save();
-                        if (lift > 0f) canvas.translate(0f, -lift);
-                        if (scale != 1f) canvas.scale(scale, scale, chCenterX, u.romajiCenterY);
-                        canvas.drawText(chStr, chX, u.romajiY, unsungRomajiPaint);
-                        canvas.restore();
-                        c += cc;
-                    }
-                } else {
-                    canvas.save();
-                    EmphasisState state = timed ? computeEmphasisState(u, baseLivePos, restingLift, romajiPaint.getTextSize(), isSecondary) : null;
-                    float lift = state != null ? state.lift : 0f;
-                    float scale = state != null ? state.scale : 1f;
-                    if (lift > 0f) {
-                        canvas.translate(0f, -lift);
-                    }
-                    if (scale != 1f) {
-                        canvas.scale(scale, scale, u.romajiCenterX, u.romajiCenterY);
-                    }
-                    canvas.drawText(u.romaji, u.romajiX, u.romajiY, unsungRomajiPaint);
-                    canvas.restore();
-                }
+            if ((active || appleAnimator.isStillAnimating()) && LyricsManager.getInstance().isPlaying()) {
+                postInvalidateOnAnimation();
             }
+            return;
         }
 
-        // inactive line only need base layer
-        if (!active) {
-            drawTranslationLayout(canvas);
+        if (wordUnits == null || wordUnits.isEmpty()) {
             canvas.restore();
             return;
         }
 
-        // layer 2 active text
-        if (allSung || !lineHasTimings) {
-            for (int i = 0; i < wordCount; i++) {
-                WordUnit u = wordUnits.get(i);
-                canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, sungKanjiPaint);
-                if (!u.romaji.isEmpty() && u.romajiWidth > 0f) {
-                    canvas.drawText(u.romaji, u.romajiX, u.romajiY, sungRomajiPaint);
-                }
-            }
-        } else {
-            final long livePosMs = getLiveClockPositionMs();
+        sungKanjiPaint.setColor(dynamicLineColor);
+        sungRomajiPaint.setColor(withAlpha(baseSung, lookCurAlpha * 0.85f));
+        unsungKanjiPaint.setColor(dynamicLineColor);
+        unsungRomajiPaint.setColor(withAlpha(baseSung, lookCurAlpha * 0.85f));
 
-            // find syllable currently playing
-            int activeWordIndex = -1;
-            for (int i = 0; i < wordCount; i++) {
-                WordUnit u = wordUnits.get(i);
-                if (u.startMs != LyricsLine.NO_TIME && livePosMs < u.endMs) {
-                    if (livePosMs >= u.startMs) {
-                        activeWordIndex = i;
-                    }
-                    break;
-                }
-            }
-
-            for (int i = 0; i < wordCount; i++) {
-                WordUnit u = wordUnits.get(i);
-                if (u.startMs == LyricsLine.NO_TIME) {
-                    continue;
-                }
-                if (activeWordIndex != -1 && i > activeWordIndex) {
-                    continue;
-                }
-                if (activeWordIndex == -1 && livePosMs < u.startMs) {
-                    continue;
-                }
-
-                final boolean isKanjiRtl = LyricsRomanizer.containsArabic(u.kanji) || LyricsRomanizer.containsHebrew(u.kanji);
-                int numChars = u.kanji.length();
-
-                if (i == activeWordIndex) {
-                    final long dur = Math.max(1L, u.endMs - u.startMs);
-                    final float progress = Math.max(0f, Math.min(1f, (float) (livePosMs - u.startMs) / (float) dur));
-
-                    if (!isKanjiRtl && numChars > 0 && u.charWidths != null && u.charOffsets != null) {
-                        final float wiperX = progress * u.kanjiWidth;
-                        for (int c = 0; c < numChars; ) {
-                            int cp = u.kanji.codePointAt(c);
-                            int cc = Character.charCount(cp);
-                            float chLeft = u.charOffsets[c];
-                            float chW = u.charWidths[c];
-                            float chRight = chLeft + chW;
-
-                            EmphasisState state = computeCharEmphasisState(u, c, numChars, livePosMs, restingLift, mainP.getTextSize(), isSecondary);
-                            float lift = state.lift;
-                            float scale = state.scale;
-                            float glowAlpha = state.glowAlpha;
-                            float spreadX = state.spreadX;
-
-                            float chX = u.kanjiX + chLeft + spreadX;
-                            float chCenterX = chX + chW / 2f;
-                            String chStr = u.kanji.substring(c, c + cc);
-
-                            canvas.save();
-                            if (lift > 0f) {
-                                canvas.translate(0f, -lift);
-                            }
-                            if (scale != 1f) {
-                                canvas.scale(scale, scale, chCenterX, u.kanjiCenterY);
-                            }
-
-                            if (wiperX >= chRight) {
-                                if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
-                                    int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
-                                    glowPaint.set(sungKanjiPaint);
-                                    glowPaint.setShader(null);
-                                    glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                    glowPaint.setColor(glowColor);
-                                    glowPaint.setAlpha(Math.round(glowAlpha * 0.40f));
-                                    canvas.drawText(chStr, chX, u.kanjiY, glowPaint);
-                                    glowPaint.clearShadowLayer();
-                                }
-                                canvas.drawText(chStr, chX, u.kanjiY, sungKanjiPaint);
-                            } else if (wiperX > chLeft) {
-                                float chProgress = (wiperX - chLeft) / Math.max(0.001f, chW);
-                                if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
-                                    int glowColor = Color.argb(Math.round(glowAlpha * chProgress), 255, 255, 255);
-                                    glowPaint.set(sungKanjiPaint);
-                                    glowPaint.setShader(null);
-                                    glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                    glowPaint.setColor(glowColor);
-                                    glowPaint.setAlpha(Math.round(glowAlpha * chProgress * 0.40f));
-                                    canvas.drawText(chStr, chX, u.kanjiY, glowPaint);
-                                    glowPaint.clearShadowLayer();
-                                }
-                                drawFeatheredFill(canvas, chStr, chX, u.kanjiY, chW,
-                                        chProgress, sungKanjiPaint, sungKanjiPaint.getColor(), false);
-                            }
-                            canvas.restore();
-                            c += cc;
-                        }
-                    } else {
-                        EmphasisState state = computeEmphasisState(u, livePosMs, restingLift, mainP.getTextSize(), isSecondary);
-                        float lift = state.lift;
-                        float scale = state.scale;
-                        float glowAlpha = state.glowAlpha;
-
-                        if (glowAlpha > 1f && progress > 0f) {
-                            float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
-                            int glowColor = Color.argb(Math.round(glowAlpha * progress), 255, 255, 255);
-                            glowPaint.set(sungKanjiPaint);
-                            glowPaint.setShader(null);
-                            glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                            glowPaint.setColor(glowColor);
-                            glowPaint.setAlpha(Math.round(glowAlpha * progress * 0.40f));
-                            canvas.save();
-                            if (lift > 0f) canvas.translate(0f, -lift);
-                            if (scale != 1f) canvas.scale(scale, scale, u.wordCenterX, u.wordCenterY);
-                            canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, glowPaint);
-                            canvas.restore();
-                            glowPaint.clearShadowLayer();
-                        }
-
-                        canvas.save();
-                        if (lift > 0f) {
-                            canvas.translate(0f, -lift);
-                        }
-                        if (scale != 1f) {
-                            canvas.scale(scale, scale, u.wordCenterX, u.wordCenterY);
-                        }
-                        drawFeatheredFill(canvas, u.kanji, u.kanjiX, u.kanjiY, u.kanjiWidth,
-                                progress, sungKanjiPaint, sungKanjiPaint.getColor(), isKanjiRtl);
-                        canvas.restore();
-                    }
-
-                    // romaji text
-                    if (!u.romaji.isEmpty() && u.romajiWidth > 0f) {
-                        int rNumChars = u.romaji.length();
-                        if (rNumChars > 0 && u.romajiCharWidths != null && u.romajiCharOffsets != null) {
-                            final float wiperX = progress * u.romajiWidth;
-                            for (int c = 0; c < rNumChars; ) {
-                                int cp = u.romaji.codePointAt(c);
-                                int cc = Character.charCount(cp);
-                                float chLeft = u.romajiCharOffsets[c];
-                                float chW = u.romajiCharWidths[c];
-                                float chRight = chLeft + chW;
-
-                                EmphasisState state = computeCharEmphasisState(u, c, rNumChars, livePosMs, restingLift, romajiPaint.getTextSize(), isSecondary);
-                                float lift = state.lift;
-                                float scale = state.scale;
-                                float glowAlpha = state.glowAlpha;
-                                float spreadX = state.spreadX;
-
-                                float chX = u.romajiX + chLeft + spreadX;
-                                float chCenterX = chX + chW / 2f;
-                                String chStr = u.romaji.substring(c, c + cc);
-
-                                canvas.save();
-                                if (lift > 0f) {
-                                    canvas.translate(0f, -lift);
-                                }
-                                if (scale != 1f) {
-                                    canvas.scale(scale, scale, chCenterX, u.romajiCenterY);
-                                }
-
-                                if (wiperX >= chRight) {
-                                    if (glowAlpha > 1f) {
-                                        float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
-                                        int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
-                                        glowPaint.set(sungRomajiPaint);
-                                        glowPaint.setShader(null);
-                                        glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                        glowPaint.setColor(glowColor);
-                                        glowPaint.setAlpha(Math.round(glowAlpha * 0.40f));
-                                        canvas.drawText(chStr, chX, u.romajiY, glowPaint);
-                                        glowPaint.clearShadowLayer();
-                                    }
-                                    canvas.drawText(chStr, chX, u.romajiY, sungRomajiPaint);
-                                } else if (wiperX > chLeft) {
-                                    float chProgress = (wiperX - chLeft) / Math.max(0.001f, chW);
-                                    if (glowAlpha > 1f) {
-                                        float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
-                                        int glowColor = Color.argb(Math.round(glowAlpha * chProgress), 255, 255, 255);
-                                        glowPaint.set(sungRomajiPaint);
-                                        glowPaint.setShader(null);
-                                        glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                        glowPaint.setColor(glowColor);
-                                        glowPaint.setAlpha(Math.round(glowAlpha * chProgress * 0.40f));
-                                        canvas.drawText(chStr, chX, u.romajiY, glowPaint);
-                                        glowPaint.clearShadowLayer();
-                                    }
-                                    drawFeatheredFill(canvas, chStr, chX, u.romajiY, chW,
-                                            chProgress, sungRomajiPaint, sungRomajiPaint.getColor(), false);
-                                }
-                                canvas.restore();
-                                c += cc;
-                            }
-                        } else {
-                            EmphasisState state = computeEmphasisState(u, livePosMs, restingLift, romajiPaint.getTextSize(), isSecondary);
-                            float lift = state.lift;
-                            float scale = state.scale;
-                            float glowAlpha = state.glowAlpha;
-                            if (glowAlpha > 1f && progress > 0f) {
-                                float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
-                                int glowColor = Color.argb(Math.round(glowAlpha * progress), 255, 255, 255);
-                                glowPaint.set(sungRomajiPaint);
-                                glowPaint.setShader(null);
-                                glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                glowPaint.setColor(glowColor);
-                                glowPaint.setAlpha(Math.round(glowAlpha * progress * 0.40f));
-                                canvas.save();
-                                if (lift > 0f) canvas.translate(0f, -lift);
-                                if (scale != 1f) canvas.scale(scale, scale, u.romajiCenterX, u.romajiCenterY);
-                                canvas.drawText(u.romaji, u.romajiX, u.romajiY, glowPaint);
-                                canvas.restore();
-                                glowPaint.clearShadowLayer();
-                            }
-                            canvas.save();
-                            if (lift > 0f) {
-                                canvas.translate(0f, -lift);
-                            }
-                            if (scale != 1f) {
-                                canvas.scale(scale, scale, u.romajiCenterX, u.romajiCenterY);
-                            }
-                            drawFeatheredFill(canvas, u.romaji, u.romajiX, u.romajiY, u.romajiWidth,
-                                    progress, sungRomajiPaint, sungRomajiPaint.getColor(), false);
-                            canvas.restore();
-                        }
-                    }
-                } else {
-                    // already finished words
-                    if (!isKanjiRtl && numChars > 0 && u.charWidths != null && u.charOffsets != null) {
-                        for (int c = 0; c < numChars; ) {
-                            int cp = u.kanji.codePointAt(c);
-                            int cc = Character.charCount(cp);
-                            EmphasisState state = computeCharEmphasisState(u, c, numChars, livePosMs, restingLift, mainP.getTextSize(), isSecondary);
-                            float lift = state.lift;
-                            float scale = state.scale;
-                            float glowAlpha = state.glowAlpha;
-                            float spreadX = state.spreadX;
-
-                            float chX = u.kanjiX + u.charOffsets[c] + spreadX;
-                            float chW = u.charWidths[c];
-                            float chCenterX = chX + chW / 2f;
-                            String chStr = u.kanji.substring(c, c + cc);
-
-                            canvas.save();
-                            if (lift > 0f) {
-                                canvas.translate(0f, -lift);
-                            }
-                            if (scale != 1f) {
-                                canvas.scale(scale, scale, chCenterX, u.kanjiCenterY);
-                            }
-
-                            if (glowAlpha > 1f) {
-                                float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
-                                int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
-                                glowPaint.set(sungKanjiPaint);
-                                glowPaint.setShader(null);
-                                glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                glowPaint.setColor(glowColor);
-                                glowPaint.setAlpha(Math.round(glowAlpha * 0.40f));
-                                canvas.drawText(chStr, chX, u.kanjiY, glowPaint);
-                                glowPaint.clearShadowLayer();
-                            }
-
-                            canvas.drawText(chStr, chX, u.kanjiY, sungKanjiPaint);
-                            canvas.restore();
-                            c += cc;
-                        }
-                    } else {
-                        EmphasisState state = computeEmphasisState(u, livePosMs, restingLift, mainP.getTextSize(), isSecondary);
-                        float lift = state.lift;
-                        float scale = state.scale;
-                        float glowAlpha = state.glowAlpha;
-
-                        if (glowAlpha > 1f) {
-                            float bloomRadius = Math.max(2f, 0.20f * mainP.getTextSize());
-                            int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
-                            glowPaint.set(sungKanjiPaint);
-                            glowPaint.setShader(null);
-                            glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                            glowPaint.setColor(glowColor);
-                            glowPaint.setAlpha(Math.round(glowAlpha * 0.40f));
-                            canvas.save();
-                            if (lift > 0f) canvas.translate(0f, -lift);
-                            if (scale != 1f) canvas.scale(scale, scale, u.wordCenterX, u.wordCenterY);
-                            canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, glowPaint);
-                            canvas.restore();
-                            glowPaint.clearShadowLayer();
-                        }
-
-                        canvas.save();
-                        if (lift > 0f) {
-                            canvas.translate(0f, -lift);
-                        }
-                        if (scale != 1f) {
-                            canvas.scale(scale, scale, u.wordCenterX, u.wordCenterY);
-                        }
-                        canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, sungKanjiPaint);
-                        canvas.restore();
-                    }
-
-                    if (!u.romaji.isEmpty() && u.romajiWidth > 0f) {
-                        int rNumChars = u.romaji.length();
-                        if (rNumChars > 0 && u.romajiCharWidths != null && u.romajiCharOffsets != null) {
-                            for (int c = 0; c < rNumChars; ) {
-                                int cp = u.romaji.codePointAt(c);
-                                int cc = Character.charCount(cp);
-                                EmphasisState state = computeCharEmphasisState(u, c, rNumChars, livePosMs, restingLift, romajiPaint.getTextSize(), isSecondary);
-                                float lift = state.lift;
-                                float scale = state.scale;
-                                float glowAlpha = state.glowAlpha;
-                                float spreadX = state.spreadX;
-
-                                float chX = u.romajiX + u.romajiCharOffsets[c] + spreadX;
-                                float chW = u.romajiCharWidths[c];
-                                float chCenterX = chX + chW / 2f;
-                                String chStr = u.romaji.substring(c, c + cc);
-
-                                canvas.save();
-                                if (lift > 0f) canvas.translate(0f, -lift);
-                                if (scale != 1f) canvas.scale(scale, scale, chCenterX, u.romajiCenterY);
-
-                                if (glowAlpha > 1f) {
-                                    float bloomRadius = Math.max(2f, 0.20f * romajiPaint.getTextSize());
-                                    int glowColor = Color.argb(Math.round(glowAlpha), 255, 255, 255);
-                                    glowPaint.set(sungRomajiPaint);
-                                    glowPaint.setShader(null);
-                                    glowPaint.setShadowLayer(bloomRadius, 0f, 0f, glowColor);
-                                    glowPaint.setColor(glowColor);
-                                    glowPaint.setAlpha(Math.round(glowAlpha * 0.40f));
-                                    canvas.drawText(chStr, chX, u.romajiY, glowPaint);
-                                    glowPaint.clearShadowLayer();
-                                }
-
-                                canvas.drawText(chStr, chX, u.romajiY, sungRomajiPaint);
-                                canvas.restore();
-                                c += cc;
-                            }
-                        } else {
-                            EmphasisState state = computeEmphasisState(u, livePosMs, restingLift, romajiPaint.getTextSize(), isSecondary);
-                            float lift = state.lift;
-                            float scale = state.scale;
-                            canvas.save();
-                            if (lift > 0f) {
-                                canvas.translate(0f, -lift);
-                            }
-                            if (scale != 1f) {
-                                canvas.scale(scale, scale, u.romajiCenterX, u.romajiCenterY);
-                            }
-                            canvas.drawText(u.romaji, u.romajiX, u.romajiY, sungRomajiPaint);
-                            canvas.restore();
-                        }
-                    }
-                }
+        final int wordCount = wordUnits.size();
+        for (int i = 0; i < wordCount; i++) {
+            WordUnit u = wordUnits.get(i);
+            canvas.drawText(u.kanji, u.kanjiX, u.kanjiY, sungKanjiPaint);
+            if (!u.romaji.isEmpty() && u.romajiWidth > 0f) {
+                canvas.drawText(u.romaji, u.romajiX, u.romajiY, sungRomajiPaint);
             }
         }
 
-        drawTranslationLayout(canvas);
+        drawTranslationLayout(canvas, baseSung);
         canvas.restore();
-
-        if (active && lineHasTimings && LyricsManager.getInstance().isPlaying()) {
-            postInvalidateOnAnimation();
-        }
     }
 
-    private static class EmphasisState {
-        final float scale;
-        final float lift;
-        final float glowAlpha;
-        final float spreadX;
-
-        EmphasisState(float scale, float lift, float glowAlpha) {
-            this(scale, lift, glowAlpha, 0f);
-        }
-
-        EmphasisState(float scale, float lift, float glowAlpha, float spreadX) {
-            this.scale = scale;
-            this.lift = lift;
-            this.glowAlpha = glowAlpha;
-            this.spreadX = spreadX;
-        }
-    }
-
-    private static EmphasisState computeCharEmphasisState(
-            WordUnit u, int charIndex, int numChars, long livePosMs,
-            float restingLift, float textSize, boolean isSecondary) {
-
-        long refStart = (u.wordStartMs != LyricsLine.NO_TIME) ? u.wordStartMs : u.startMs;
-        long refEnd = (u.wordEndMs != LyricsLine.NO_TIME) ? u.wordEndMs : u.endMs;
-        if (refStart == LyricsLine.NO_TIME) {
-            return new EmphasisState(1f, 0f, 0f, 0f);
-        }
-
-        final boolean growable = isWordGrowable(u, isSecondary);
-
-        if (growable) {
-            double duration = Math.max(0.001, (refEnd - refStart) / 1000.0);
-            int count = Math.max(1, numChars);
-            double delay = Math.min((duration / count) * 0.4, 0.4);
-            double hold = (2.0 * duration) / count;
-            double response = Math.min(3.0, duration);
-            double emphasis = Math.min(1.0, Math.max(0.0, duration - 1.0));
-            double glow = 0.45 * Math.min(1.0, Math.max(0.0, (duration - 1.0) / 0.5));
-            double spanDuration = hold + response * 2.0;
-
-            double elapsed = (livePosMs - refStart) / 1000.0;
-            double startDelay = (charIndex + 1) * delay;
-            double time = elapsed - startDelay;
-
-            if (time <= 0.0) {
-                return new EmphasisState(1f, 0f, 0f, 0f);
-            }
-
-            double half = Math.max(1.0, (count - 1) / 2.0);
-            double side = (charIndex - (count - 1) / 2.0) / half; // -1 .. 1
-
-            if (time < spanDuration) {
-                float rise = SpringEasing.springProgress(time, response);
-                float envelope = SpringEasing.springProgress(time, response)
-                        * (1f - SpringEasing.springProgress(time - hold, response));
-
-                float spreadX = (float) (side * 0.05 * emphasis * envelope * textSize);
-                float lift = (float) ((0.05 * rise + 0.035 * emphasis * envelope) * textSize);
-                float scale = (float) (1.0 + 0.10 * emphasis * envelope);
-                float glowAlpha = (float) (255.0 * glow * envelope);
-
-                return new EmphasisState(scale, lift, glowAlpha, spreadX);
-            } else {
-                float lift = 0.05f * textSize;
-                return new EmphasisState(1.0f, lift, 0f, 0f);
-            }
-        } else {
-            // normal lyrics glide up slightly and stay elevated
-            long sylStart = (u.startMs != LyricsLine.NO_TIME) ? u.startMs : refStart;
-            if (livePosMs < sylStart) {
-                return new EmphasisState(1f, 0f, 0f, 0f);
-            }
-
-            double elapsed = (livePosMs - sylStart) / 1000.0;
-            float rise = SpringEasing.springProgress(elapsed, 0.45);
-            float lift = 0.05f * rise * textSize;
-            return new EmphasisState(1.0f, lift, 0f, 0f);
-        }
-    }
-
-    private static EmphasisState computeEmphasisState(WordUnit u, long livePosMs, float restingLift, float textSize, boolean isSecondary) {
-        long refStart = (u.wordStartMs != LyricsLine.NO_TIME) ? u.wordStartMs : u.startMs;
-        long refEnd = (u.wordEndMs != LyricsLine.NO_TIME) ? u.wordEndMs : u.endMs;
-        if (refStart == LyricsLine.NO_TIME || livePosMs < refStart) {
-            return new EmphasisState(1f, 0f, 0f, 0f);
-        }
-
-        final boolean growable = isWordGrowable(u, isSecondary);
-        if (growable) {
-            double duration = Math.max(0.001, (refEnd - refStart) / 1000.0);
-            int count = 1;
-            double hold = 2.0 * duration;
-            double response = Math.min(3.0, duration);
-            double emphasis = Math.min(1.0, Math.max(0.0, duration - 1.0));
-            double glow = 0.45 * Math.min(1.0, Math.max(0.0, (duration - 1.0) / 0.5));
-            double spanDuration = hold + response * 2.0;
-
-            double elapsed = (livePosMs - refStart) / 1000.0;
-            if (elapsed <= 0.0) {
-                return new EmphasisState(1f, 0f, 0f, 0f);
-            }
-            if (elapsed < spanDuration) {
-                float rise = SpringEasing.springProgress(elapsed, response);
-                float envelope = SpringEasing.springProgress(elapsed, response)
-                        * (1f - SpringEasing.springProgress(elapsed - hold, response));
-
-                float lift = (float) ((0.05 * rise + 0.035 * emphasis * envelope) * textSize);
-                float scale = (float) (1.0 + 0.10 * emphasis * envelope);
-                float glowAlpha = (float) (255.0 * glow * envelope);
-
-                return new EmphasisState(scale, lift, glowAlpha, 0f);
-            } else {
-                float lift = 0.05f * textSize;
-                return new EmphasisState(1.0f, lift, 0f, 0f);
-            }
-        } else {
-            long sylStart = (u.startMs != LyricsLine.NO_TIME) ? u.startMs : refStart;
-            if (livePosMs < sylStart) {
-                return new EmphasisState(1f, 0f, 0f, 0f);
-            }
-
-            double elapsed = (livePosMs - sylStart) / 1000.0;
-            float rise = SpringEasing.springProgress(elapsed, 0.45);
-            float lift = 0.05f * rise * textSize;
-            return new EmphasisState(1.0f, lift, 0f, 0f);
-        }
-    }
-
-    private static boolean isWordGrowable(WordUnit u, boolean isSecondary) {
-        if (isSecondary) return false;
-        long dur = (u.wordEndMs != LyricsLine.NO_TIME && u.wordStartMs != LyricsLine.NO_TIME)
-                ? (u.wordEndMs - u.wordStartMs)
-                : (u.endMs - u.startMs);
-        if (dur < 1000L) return false;
-        String text = u.kanji.trim();
-        if (text.length() > 7) return false;
-        if (LyricsRomanizer.containsArabic(text) || LyricsRomanizer.containsHebrew(text)) return false;
-        return true;
-    }
-
-    private static final float WORD_FEATHER_PX = 8f;
-
-    /**
-     * Draws text with a horizontal LinearGradient: solid inside the filled region, soft feathered
-     * drop-off to transparent in the unfilled region.
-     */
-    private void drawFeatheredFill(Canvas canvas, String text, float x, float y, float width,
-                                   float progress, TextPaint paint, int color, boolean isRtl) {
-        if (width <= 0f || progress <= 0f) {
-            return;
-        }
-        final int solid = color | 0xFF000000;
-        if (progress >= 1f) {
-            paint.setColor(solid);
-            canvas.drawText(text, x, y, paint);
-            return;
-        }
-        final float p = Math.max(0f, Math.min(1f, progress));
-        final float feather = Math.min(Math.max(6f, paint.getTextSize() * 0.35f), width / 2f);
-        final int clear = color & 0x00FFFFFF;
-
-        final float wiperX;
-        final int[] colors;
-        final float[] stops;
-
-        if (isRtl) {
-            wiperX = (1f - p) * width;
-            final float curFeather = Math.min(feather, Math.min(wiperX, width - wiperX));
-            final float solidEnd = Math.max(0f, Math.min(1f, (wiperX - curFeather) / width));
-            final float fadeEnd = Math.max(solidEnd, Math.min(1f, (wiperX + curFeather) / width));
-            colors = new int[]{clear, clear, solid, solid};
-            stops = new float[]{0f, solidEnd, fadeEnd, 1f};
-        } else {
-            wiperX = p * width;
-            final float curFeather = Math.min(feather, Math.min(wiperX, width - wiperX));
-            final float solidEnd = Math.max(0f, Math.min(1f, (wiperX - curFeather) / width));
-            final float fadeEnd = Math.max(solidEnd, Math.min(1f, (wiperX + curFeather) / width));
-            colors = new int[]{solid, solid, clear, clear};
-            stops = new float[]{0f, solidEnd, fadeEnd, 1f};
-        }
-
-        final LinearGradient shader = new LinearGradient(x, 0f, x + width, 0f,
-                colors,
-                stops,
-                Shader.TileMode.CLAMP);
-        paint.setShader(shader);
-        canvas.drawText(text, x, y, paint);
-        paint.setShader(null);
-    }
-
-    private void drawTranslationLayout(Canvas canvas) {
-        if (transLayout != null) {
-            float transTop = totalMeasuredHeight - transLayout.getHeight();
+    private void drawRomajiFallbackLayout(Canvas canvas, int lineCol) {
+        if (romajiFallbackLayout != null && appleAnimator != null) {
+            float top = appleAnimator.measuredHeight + Dim.dp(4f);
+            romajiFallbackPaint.setColor(lineCol);
+            romajiFallbackLayout.getPaint().setColor(lineCol);
+            int availW = Math.max(0, getWidth() - getCompoundPaddingLeft() - getCompoundPaddingRight());
+            float rightShift = (isGravityRightAligned() && availW > romajiFallbackLayout.getWidth())
+                    ? (availW - romajiFallbackLayout.getWidth()) : 0f;
             canvas.save();
-            canvas.translate(0, transTop);
+            canvas.translate(rightShift, top);
+            romajiFallbackLayout.draw(canvas);
+            canvas.restore();
+        }
+    }
+
+    private void drawTranslationLayout(Canvas canvas, int baseTextColor) {
+        if (transLayout != null) {
+            float transTop = totalMeasuredHeight - transLayout.getHeight() + translationFlipOffsetY;
+            float tAlpha = isSecondary ? (0.45f * secondaryExpandFraction) : lookCurTransAlpha;
+            int transCol = withAlpha(baseTextColor, tAlpha);
+            transPaint.setColor(transCol);
+            transLayout.getPaint().setColor(transCol);
+            int availW = Math.max(0, getWidth() - getCompoundPaddingLeft() - getCompoundPaddingRight());
+            float rightShift = (isGravityRightAligned() && availW > transLayout.getWidth())
+                    ? (availW - transLayout.getWidth()) : 0f;
+            canvas.save();
+            canvas.translate(rightShift, transTop);
             transLayout.draw(canvas);
             canvas.restore();
         }
@@ -1712,12 +1673,41 @@ class LyricsLineView extends TextView {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        if (isGravityRightAligned()) {
-            setPivotX(w - getPaddingRight());
+        if (isSecondary) {
+            setPivotX(isGravityRightAligned() ? w : 0f);
+            setPivotY(0f);
         } else {
-            setPivotX(getPaddingLeft());
+            setPivotX(computeLinePivotX(w));
+            setPivotY(h * 0.5f);
         }
-        setPivotY(h / 2f);
+    }
+
+    private void updateSpanColorsForLineLook(int baseCol) {
+        CharSequence text = getText();
+        if (!(text instanceof android.text.Spannable sp)) {
+            return;
+        }
+        int len = sp.length();
+        if (romaStart >= 0 && romaEnd > romaStart && romaEnd <= len) {
+            ForegroundColorSpan[] romSpans = sp.getSpans(romaStart, romaEnd, ForegroundColorSpan.class);
+            for (ForegroundColorSpan s : romSpans) {
+                if (sp.getSpanStart(s) == romaStart && sp.getSpanEnd(s) == romaEnd) {
+                    sp.removeSpan(s);
+                }
+            }
+            sp.setSpan(new ForegroundColorSpan(withAlpha(baseCol, lookCurAlpha * 0.85f)),
+                    romaStart, romaEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        if (transStart >= 0 && transEnd > transStart && transEnd <= len) {
+            ForegroundColorSpan[] transSpans = sp.getSpans(transStart, transEnd, ForegroundColorSpan.class);
+            for (ForegroundColorSpan s : transSpans) {
+                if (sp.getSpanStart(s) == transStart && sp.getSpanEnd(s) == transEnd) {
+                    sp.removeSpan(s);
+                }
+            }
+            sp.setSpan(new ForegroundColorSpan(withAlpha(baseCol, lookCurTransAlpha)),
+                    transStart, transEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
     }
 
     void setTranslationBounds(int start, int end) {
@@ -1728,10 +1718,16 @@ class LyricsLineView extends TextView {
     void setRomanizationBounds(int start, int end) {
         romaStart = start;
         romaEnd = end;
+        if (!hasWordUnits()) {
+            updateSpanColorsForLineLook(lineTextColor());
+        }
     }
 
     @Nullable
     String getCopyTextForTouch(float touchY) {
+        if (transLayout != null && touchY >= lyricsContentHeight) {
+            return translationText;
+        }
         Layout layout = getLayout();
         if (layout == null) {
             return null;
@@ -1777,15 +1773,20 @@ class LyricsLineView extends TextView {
         final boolean sungChanged = (this.allSung != sung);
         final boolean colorChanged = (this.unsungColor != unsungCol || this.sungColor != sungCol);
         final boolean timingChanged = (this.wordTimings != timings || this.originalTextStart != origStart);
-        // reset line clock if user seek backward or rewind track to start
         final boolean backwardSeek = (this.positionMs != Long.MIN_VALUE && posMs != Long.MIN_VALUE
-                && (posMs < this.positionMs - 200L || (posMs < 200L && this.positionMs >= 400L)));
+                && (posMs < this.positionMs - 600L || (posMs < 200L && this.positionMs >= 600L)));
 
         this.wordTimings = timings != null ? timings : Collections.emptyList();
         this.cachedHasWordTimings = computeHasWordTimings();
         this.positionMs = posMs;
         if (posMs == Long.MIN_VALUE || backwardSeek) {
             this.lastDrawnClockPos = Long.MIN_VALUE;
+            if (backwardSeek) {
+                this.allSung = false;
+                if (appleAnimator != null) {
+                    appleAnimator.reset();
+                }
+            }
         }
         this.allSung = sung;
         this.unsungColor = unsungCol;
@@ -1797,12 +1798,12 @@ class LyricsLineView extends TextView {
             sungLayout = null;
         }
 
-
         if (activeChanged) {
             postInvalidateOnAnimation();
-        } else if (wordUnits == null || wordUnits.isEmpty()) {
+        } else if (!hasWordUnits()) {
             invalidate();
-        } else if (sungChanged || colorChanged || (posMs != Long.MIN_VALUE)) {
+        } else if (sungChanged || colorChanged || (posMs != Long.MIN_VALUE)
+                || (appleAnimator != null && appleAnimator.isStillAnimating())) {
             invalidate();
         }
     }
@@ -1893,7 +1894,6 @@ class LyricsLineView extends TextView {
         return sungLayout;
     }
 
-    /** End of the lyric line itself, before any translation or romanization below it. */
     private int originalEnd(CharSequence text, int origStart) {
         if (text != cachedText) {
             cachedText = text;
@@ -1905,20 +1905,16 @@ class LyricsLineView extends TextView {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (isSecondary && secondaryExpandFraction <= 0.001f) {
+        if (isSecondary && secondaryExpandFraction <= 0.001f && !secondaryLayoutVisible) {
             return;
         }
-        if (wordUnits != null && !wordUnits.isEmpty()) {
+        if (hasWordUnits() && ((cachedHasWordTimings && animationStyle != LyricsAnimationStyle.NONE)
+                || (wordUnits != null && !wordUnits.isEmpty()))) {
             onDrawWordUnits(canvas);
             return;
         }
 
-        final boolean active = isLineActive || (positionMs != Long.MIN_VALUE && !allSung);
-
         canvas.save();
-        if (isSecondary) {
-            canvas.clipRect(0, 0, getWidth(), getHeight());
-        }
 
         super.onDraw(canvas);
         if (unsungColor == 0 || !hasWordTimings()) {
@@ -2048,8 +2044,8 @@ class LyricsLineView extends TextView {
                 }
             }
         }
-        canvas.restore(); // restore translate
-        canvas.restore(); // restore scale
+        canvas.restore();
+        canvas.restore();
 
         if (firstSungLine >= 0 && !allSung && LyricsManager.getInstance().isPlaying()) {
             postInvalidateOnAnimation();
@@ -2060,7 +2056,6 @@ class LyricsLineView extends TextView {
         return layout.getParagraphDirection(line) == Layout.DIR_RIGHT_TO_LEFT;
     }
 
-    /** Right to left lines fill leftwards, so their furthest point is the smallest one. */
     private static float extendSung(float current, float edge, boolean rightToLeft) {
         if (Float.isNaN(current)) {
             return edge;

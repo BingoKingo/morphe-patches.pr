@@ -229,6 +229,9 @@ public final class LyricsManager {
 
     private long positionMs;
     private long positionUpdatedAtUptimeMs;
+    private long smoothPositionMs = 0L;
+    private long lastSmoothFrameUptimeMs = 0L;
+    private long lastSampledPlaybackPosMs = -1L;
     private long lastVideoTimeSample = -1;
     private long lastPlaybackSampleUptimeMs;
     private float playbackSpeed = 1f;
@@ -378,9 +381,13 @@ public final class LyricsManager {
     }
 
     private void resetPosition() {
+        long now = SystemClock.uptimeMillis();
         positionMs = 0;
-        positionUpdatedAtUptimeMs = SystemClock.uptimeMillis();
-        lastVideoTimeSample = -1;
+        positionUpdatedAtUptimeMs = 0;
+        smoothPositionMs = 0L;
+        lastSmoothFrameUptimeMs = now;
+        lastSampledPlaybackPosMs = -1L;
+        lastVideoTimeSample = -1L;
         lastPlaybackSampleUptimeMs = 0;
         lastHighlightedIndex = -1;
     }
@@ -399,33 +406,80 @@ public final class LyricsManager {
         return computeExpectedPositionMs();
     }
 
+    /**
+     * 1:1 port of {@code advanceSmoothPlaybackPosition} from {@code LyricsSmoothPosition.kt}.
+     */
+    public static long advanceSmoothPlaybackPosition(
+            long lastAnchorPositionMs,
+            long elapsedRealtimeDeltaMs,
+            boolean isPlaying,
+            float playbackSpeed,
+            long durationMs) {
+        if (!isPlaying || elapsedRealtimeDeltaMs <= 0L) {
+            return Math.max(0L, lastAnchorPositionMs);
+        }
+        long clampedElapsed = Math.max(0L, Math.min(500L, elapsedRealtimeDeltaMs));
+        double advanced = lastAnchorPositionMs + clampedElapsed * Math.max(0.1f, playbackSpeed);
+        if (durationMs > 0L) {
+            return Math.max(0L, Math.min(durationMs, Math.round(advanced)));
+        }
+        return Math.max(0L, Math.round(advanced));
+    }
+
+    public static long correctSmoothEstimate(long currentSmoothMs, long reportedPositionMs) {
+        double error = (double) reportedPositionMs - (double) currentSmoothMs;
+        double absError = Math.abs(error);
+        double corrected;
+        if (absError > 150.0) {
+            corrected = currentSmoothMs + error;
+        } else if (absError > 30.0) {
+            corrected = currentSmoothMs + error * 0.85;
+        } else {
+            corrected = currentSmoothMs + error * 0.5;
+        }
+        return Math.max(0L, Math.round(corrected));
+    }
+
     private long computeExpectedPositionMs() {
         final long now = SystemClock.uptimeMillis();
-        long expected = positionMs;
-        // extrapolate song position with monotonic clock so it doesn't freeze or stutter
-        if (playing && positionUpdatedAtUptimeMs != 0) {
-            expected += (long) ((now - positionUpdatedAtUptimeMs) * playbackSpeed);
-        }
+        final long elapsedDelta = (lastSmoothFrameUptimeMs > 0L) ? Math.max(0L, now - lastSmoothFrameUptimeMs) : 0L;
+        final TrackInfo track = currentTrack;
+        final long durationMs = (track != null && track.durationSeconds() > 0)
+                ? track.durationSeconds() * 1000L : 0L;
+        smoothPositionMs = advanceSmoothPlaybackPosition(
+                smoothPositionMs, elapsedDelta, playing, playbackSpeed, durationMs);
+        lastSmoothFrameUptimeMs = now;
+        positionMs = smoothPositionMs;
+        positionUpdatedAtUptimeMs = now;
 
         final long videoTime = VideoInformation.getVideoTime();
         if (videoTime >= 0 && videoTime != lastVideoTimeSample) {
+            final boolean wasAdvancing = (lastVideoTimeSample >= 0 && videoTime > lastVideoTimeSample);
             lastVideoTimeSample = videoTime;
-            // reset time base immediately if user seek backward or rewind track to start
-            final boolean isBackwardSeek = (expected > 0 && videoTime < expected - 500L);
-            // reanchor time base if user seek forward or drift too far from playback
-            final boolean isForwardSeek = (videoTime > expected + 1500L);
-            final boolean isInitial = (positionUpdatedAtUptimeMs == 0 || (positionMs == 0 && expected == 0));
-            final boolean isStaleDrift = (Math.abs(videoTime - expected) > 1000L
-                    && (now - lastPlaybackSampleUptimeMs > 1000L));
+            if (wasAdvancing || videoTime > 0) {
+                playing = true;
+            }
 
+            final boolean isInitial = (lastPlaybackSampleUptimeMs == 0 || (positionMs == 0 && smoothPositionMs == 0));
+            final boolean isBackwardSeek = (smoothPositionMs > 0 && videoTime < smoothPositionMs - 500L);
+            final boolean isForwardSeek = (videoTime > smoothPositionMs + 1000L);
+            final boolean isStaleDrift = (Math.abs(videoTime - smoothPositionMs) > 1000L
+                    && (now - lastPlaybackSampleUptimeMs > PLAYBACK_STALE_MS));
+
+            // if seek backward or forward too far or audio sample already stale af, hard re-anchor right away
             if (isInitial || isBackwardSeek || isForwardSeek || isStaleDrift) {
+                smoothPositionMs = videoTime;
                 positionMs = videoTime;
                 positionUpdatedAtUptimeMs = now;
-                expected = videoTime;
+            } else if (Math.abs(videoTime - smoothPositionMs) > 100L) {
+                // small drift we smooth it slowly so drawing dont stutter like crazy
+                smoothPositionMs = correctSmoothEstimate(smoothPositionMs, videoTime);
+                positionMs = smoothPositionMs;
+                positionUpdatedAtUptimeMs = now;
             }
         }
 
-        return Math.max(0L, expected);
+        return Math.max(0L, smoothPositionMs);
     }
 
     public int getTemporaryOffsetMs() { return temporaryOffsetMs; }
@@ -742,14 +796,46 @@ public final class LyricsManager {
                 || state == PlaybackState.STATE_STOPPED
                 || state == PlaybackState.STATE_NONE
                 || state == PlaybackState.STATE_ERROR);
-        playing = !isPausedOrStopped;
+        final boolean wasPlaying = playing;
+        final boolean nowPlaying = !isPausedOrStopped;
+        final long now = SystemClock.uptimeMillis();
+        if (wasPlaying && lastSmoothFrameUptimeMs > 0L) {
+            final TrackInfo track = currentTrack;
+            final long durationMs = (track != null && track.durationSeconds() > 0)
+                    ? track.durationSeconds() * 1000L : 0L;
+            smoothPositionMs = advanceSmoothPlaybackPosition(
+                    smoothPositionMs, Math.max(0L, now - lastSmoothFrameUptimeMs), true, playbackSpeed, durationMs);
+        }
+        lastSmoothFrameUptimeMs = now;
+        playing = nowPlaying;
 
         final long newPosition = playbackState.getPosition();
-        final long now = SystemClock.uptimeMillis();
         if (newPosition >= 0) {
-            positionMs = newPosition;
+            boolean stateJustToggled = (wasPlaying != nowPlaying);
+            final long currentVideoTime = VideoInformation.getVideoTime();
+            boolean isStaleZero = (newPosition == 0 && currentVideoTime > 1000L);
+            if (!isStaleZero) {
+                if (lastSampledPlaybackPosMs < 0L || Math.abs(newPosition - smoothPositionMs) > 1200L) {
+                    smoothPositionMs = newPosition;
+                } else if (stateJustToggled) {
+                    // when just pause or play, dont trust coarse rounded PlaybackState sample
+                    // keep extrapolated ms position so it dont look jumping back or lag when play again
+                } else if (!nowPlaying) {
+                    if (newPosition != lastSampledPlaybackPosMs) {
+                        smoothPositionMs = newPosition;
+                    }
+                } else if (newPosition != lastSampledPlaybackPosMs) {
+                    // smooth drift blended gradually
+                    smoothPositionMs = correctSmoothEstimate(smoothPositionMs, newPosition);
+                }
+                lastSampledPlaybackPosMs = newPosition;
+                positionMs = smoothPositionMs;
+                positionUpdatedAtUptimeMs = now;
+                lastPlaybackSampleUptimeMs = now;
+            }
+        } else {
+            positionMs = smoothPositionMs;
             positionUpdatedAtUptimeMs = now;
-            lastPlaybackSampleUptimeMs = now;
         }
 
         final float speed = playbackState.getPlaybackSpeed();
@@ -2484,6 +2570,7 @@ private void reorderQueueByRemembered() {
         return providers;
     }
 
+    /** Canonical provider ids, in the default priority order. */
     private static final List<String> PROVIDER_ORDER = Arrays.asList(
             "Apple", "BiniLyrics", "LrcRed", "bLyrics", "Lyricify", "Unison",
             "PetitLyrics", "AMLL", "QQ", "SimpMusic", "KuGou", "Musixmatch",

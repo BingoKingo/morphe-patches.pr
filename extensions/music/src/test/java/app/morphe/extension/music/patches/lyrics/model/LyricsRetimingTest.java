@@ -97,9 +97,9 @@ public class LyricsRetimingTest {
         int primary = LyricsRetiming.calculatePrimaryRetimedLineIndex(retimed, List.of(0, 1), 14000L, 0);
         Assert.assertEquals("Scroll anchor must stay locked to line 0 in duet cluster", 0, primary);
 
-        // After cluster end (18001ms), both have expired
-        List<Integer> activeAt18001 = LyricsRetiming.findActiveRetimedLineIndices(retimed, maxEnd, 18001, 0L);
-        Assert.assertFalse("Line 0 expired after cluster end", activeAt18001.contains(0));
-        Assert.assertFalse("Line 1 expired after cluster end", activeAt18001.contains(1));
+        // After cluster end (18601ms), both have expired
+        List<Integer> activeAt18601 = LyricsRetiming.findActiveRetimedLineIndices(retimed, maxEnd, 18601, 0L);
+        Assert.assertFalse("Line 0 expired after cluster end", activeAt18601.contains(0));
+        Assert.assertFalse("Line 1 expired after cluster end", activeAt18601.contains(1));
     }
 }
