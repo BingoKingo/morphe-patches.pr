@@ -601,23 +601,7 @@ public final class AppleMusicProvider implements LyricsProvider {
             final int code = connection.getResponseCode();
             if (code == 200) {
                 JSONObject root = LyricsRequests.parseGzipJsonObject(connection);
-                JSONArray data = root.optJSONArray("data");
-                if (data != null) {
-                    for (int i = 0; i < data.length(); i++) {
-                        JSONObject sf = data.optJSONObject(i);
-                        if (sf == null) continue;
-                        JSONObject attrs = sf.optJSONObject("attributes");
-                        if (attrs == null) continue;
-                        JSONArray tags = attrs.optJSONArray("supportedLanguageTags");
-                        if (tags == null) continue;
-                        for (int j = 0; j < tags.length(); j++) {
-                            String tag = tags.optString(j, null);
-                            if (tag != null && !tag.isEmpty()) {
-                                merged.add(tag);
-                            }
-                        }
-                    }
-                }
+                merged.addAll(supportedTags(root.optJSONArray("data")));
             }
         } catch (Exception ex) {
             Logger.printDebug(() -> "Could not read the Apple Music lyrics tags", ex);
@@ -633,6 +617,29 @@ public final class AppleMusicProvider implements LyricsProvider {
         }
     }
 
+    /** The language tags every storefront in an Apple Music answer lists, in order. */
+    private static List<String> supportedTags(@Nullable JSONArray data) {
+        List<String> tags = new ArrayList<>();
+        if (data == null) {
+            return tags;
+        }
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject sf = data.optJSONObject(i);
+            if (sf == null) continue;
+            JSONObject attrs = sf.optJSONObject("attributes");
+            if (attrs == null) continue;
+            JSONArray supported = attrs.optJSONArray("supportedLanguageTags");
+            if (supported == null) continue;
+            for (int j = 0; j < supported.length(); j++) {
+                String tag = supported.optString(j, null);
+                if (tag != null && !tag.isEmpty()) {
+                    tags.add(tag);
+                }
+            }
+        }
+        return tags;
+    }
+
     @Nullable
     private Lyrics fetchLyrics(String userToken, String storefront, String language, String songId) {
         String sourceUrl = "https://music.apple.com/song/" + songId;
@@ -646,9 +653,22 @@ public final class AppleMusicProvider implements LyricsProvider {
         Lyrics includeResult = fetchLyricsInclude(userToken, storefront, language, songId, sourceUrl);
         final int includeRank = rankOfLyrics(includeResult);
 
-        return syllableRank >= dedicatedRank && syllableRank >= includeRank
-                ? syllableResult
-                : dedicatedRank >= includeRank ? dedicatedResult : includeResult;
+        return bestOf(syllableResult, syllableRank, dedicatedResult, dedicatedRank,
+                includeResult, includeRank);
+    }
+
+    /**
+     * The best ranked of the three endpoints. A tie keeps the earlier one, which is the more
+     * detailed source.
+     */
+    @Nullable
+    private static Lyrics bestOf(@Nullable Lyrics syllable, int syllableRank,
+                                 @Nullable Lyrics dedicated, int dedicatedRank,
+                                 @Nullable Lyrics include, int includeRank) {
+        if (syllableRank >= dedicatedRank && syllableRank >= includeRank) {
+            return syllable;
+        }
+        return dedicatedRank >= includeRank ? dedicated : include;
     }
 
     @Nullable

@@ -68,33 +68,13 @@ public final class RMMProvider implements LyricsProvider {
 
             List<ScoredItem> scored = new ArrayList<>();
             for (int i = 0; i < results.length(); i++) {
-                JSONObject item = results.optJSONObject(i);
-                if (item == null) {
-                    continue;
+                ScoredItem entry = scoredItem(results.optJSONObject(i), title, artist, track);
+                if (entry != null) {
+                    scored.add(entry);
                 }
-                final long trackId = item.optLong("trackId", 0);
-                if (trackId == 0) {
-                    continue;
-                }
-                String itemTitle = item.optString("trackName", "");
-                String itemArtist = item.optString("artistName", "");
-                int score = LyricsRequests.scoreTrackCandidate(itemTitle, itemArtist,
-                        item.optLong("trackTimeMillis", 0) / 1000, track);
-                if (score < LyricsRequests.SOFT_MIN) {
-                    continue;
-                }
-                boolean exact = !title.isEmpty() && !artist.isEmpty()
-                        && itemTitle.toLowerCase(Locale.ROOT).contains(title)
-                        && itemArtist.toLowerCase(Locale.ROOT).contains(artist);
-                scored.add(new ScoredItem(item, score, exact));
             }
 
-            scored.sort((a, b) -> {
-                if (a.exact != b.exact) {
-                    return a.exact ? -1 : 1;
-                }
-                return Integer.compare(b.score, a.score);
-            });
+            scored.sort(RMMProvider::compareScored);
 
             List<JSONObject> ordered = new ArrayList<>(scored.size());
             for (ScoredItem entry : scored) {
@@ -109,6 +89,39 @@ public final class RMMProvider implements LyricsProvider {
                 connection.disconnect();
             }
         }
+    }
+
+    /**
+     * One search result, or null when it has no id or falls below the shared match floor.
+     *
+     * @param title  The track title, already lower-cased and trimmed.
+     * @param artist The track artist, already lower-cased and trimmed.
+     */
+    @Nullable
+    private static ScoredItem scoredItem(@Nullable JSONObject item, String title, String artist,
+                                         TrackInfo track) {
+        if (item == null || item.optLong("trackId", 0) == 0) {
+            return null;
+        }
+        String itemTitle = item.optString("trackName", "");
+        String itemArtist = item.optString("artistName", "");
+        int score = LyricsRequests.scoreTrackCandidate(itemTitle, itemArtist,
+                item.optLong("trackTimeMillis", 0) / 1000, track);
+        if (score < LyricsRequests.SOFT_MIN) {
+            return null;
+        }
+        boolean exact = !title.isEmpty() && !artist.isEmpty()
+                && itemTitle.toLowerCase(Locale.ROOT).contains(title)
+                && itemArtist.toLowerCase(Locale.ROOT).contains(artist);
+        return new ScoredItem(item, score, exact);
+    }
+
+    /** Exact title and artist matches first, then the higher score. */
+    private static int compareScored(ScoredItem a, ScoredItem b) {
+        if (a.exact != b.exact) {
+            return a.exact ? -1 : 1;
+        }
+        return Integer.compare(b.score, a.score);
     }
 
     @Nullable
@@ -207,15 +220,26 @@ public final class RMMProvider implements LyricsProvider {
                                              @Nullable List<String> ttmlSongwriters,
                                              @Nullable List<String> jsonSongwriters) {
         List<String> credits = new ArrayList<>();
-        if (ttmlSongwriters != null && !ttmlSongwriters.isEmpty()) {
-            credits.addAll(ttmlSongwriters);
-        } else if (jsonSongwriters != null && !jsonSongwriters.isEmpty()) {
-            credits.addAll(jsonSongwriters);
+        List<String> songwriters = hasAny(ttmlSongwriters) ? ttmlSongwriters
+                : hasAny(jsonSongwriters) ? jsonSongwriters : null;
+        if (songwriters != null) {
+            credits.addAll(songwriters);
         }
         if (uploader != null) {
             credits.add("Uploaded by " + uploader.username());
         }
         return credits.isEmpty() ? null : credits;
+    }
+
+    private static boolean hasAny(@Nullable List<String> values) {
+        return values != null && !values.isEmpty();
+    }
+
+    /** The credits of a JSON-derived payload, which never names its own writers. */
+    @Nullable
+    private static List<String> buildCredits(@Nullable Uploader uploader,
+                                             @Nullable List<String> jsonSongwriters) {
+        return buildCredits(uploader, null, jsonSongwriters);
     }
 
     @Nullable
@@ -226,23 +250,31 @@ public final class RMMProvider implements LyricsProvider {
         }
         List<LyricsLine> lines = new ArrayList<>(array.length());
         for (int i = 0; i < array.length(); i++) {
-            JSONObject entry = array.optJSONObject(i);
-            if (entry == null) {
-                continue;
+            LyricsLine line = lineEntry(array.optJSONObject(i));
+            if (line != null) {
+                lines.add(line);
             }
-            String text = entry.optString("text", "").trim();
-            if (text.isEmpty()) {
-                continue;
-            }
-            double seconds = entry.optDouble("time", -1);
-            if (seconds < 0) {
-                continue;
-            }
-            String agent = LyricsRequests.optString(entry, "speakerLabel");
-            lines.add(new LyricsLine(Math.round(seconds * 1000), text, List.of(),
-                    agent, false, false));
         }
         return lines.isEmpty() ? null : lines;
+    }
+
+    /** One timed line of a JSON {@code lineLyrics} array, or null when it is unusable. */
+    @Nullable
+    private static LyricsLine lineEntry(@Nullable JSONObject entry) {
+        if (entry == null) {
+            return null;
+        }
+        String text = entry.optString("text", "").trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        double seconds = entry.optDouble("time", -1);
+        if (seconds < 0) {
+            return null;
+        }
+        String agent = LyricsRequests.optString(entry, "speakerLabel");
+        return new LyricsLine(Math.round(seconds * 1000), text, List.of(),
+                agent, false, false);
     }
 
     @Nullable
@@ -261,13 +293,8 @@ public final class RMMProvider implements LyricsProvider {
         if (!ttml.isEmpty()) {
             Lyrics parsed = TTMLParser.ttmlToLyrics(ttml, providerName, sourceUrl);
             if (parsed != null && !parsed.isEmpty()) {
-                List<String> credits = buildCredits(uploader, parsed.songwriters(), jsonSongwriters);
-                if (credits == null) {
-                    return parsed;
-                }
-                return new Lyrics(parsed.lines(), providerName, parsed.synced(),
-                        parsed.romanization(), parsed.translations(), parsed.romanizations(),
-                        credits, parsed.rawFormat(), parsed.formatType(), sourceUrl);
+                return withCredits(parsed, providerName,
+                        buildCredits(uploader, parsed.songwriters(), jsonSongwriters), sourceUrl);
             }
         }
 
@@ -275,31 +302,57 @@ public final class RMMProvider implements LyricsProvider {
         if (lineLevel != null) {
             String raw = lrcFormat(lineLevel);
             return new Lyrics(lineLevel, providerName, true, null, null, null,
-                    buildCredits(uploader, null, jsonSongwriters),
+                    buildCredits(uploader, jsonSongwriters),
                     raw, "lrc", sourceUrl);
         }
 
-        String syncedLyrics = root.optString("syncedLyrics", "");
-        if (!syncedLyrics.isEmpty()) {
-            List<LyricsLine> lines = LRCParser.parseSynced(syncedLyrics);
-            if (!lines.isEmpty()) {
-                return new Lyrics(lines, providerName, true, null, null, null,
-                        buildCredits(uploader, null, jsonSongwriters),
-                        syncedLyrics, "lrc", sourceUrl);
-            }
+        Lyrics synced = parsedLines(root, "syncedLyrics", "lrc", providerName, true);
+        if (synced != null) {
+            String raw = root.optString("syncedLyrics", "");
+            return new Lyrics(synced.lines(), providerName, true, null, null, null,
+                    buildCredits(uploader, jsonSongwriters),
+                    raw, "lrc", sourceUrl);
         }
 
-        String plainLyrics = root.optString("lyrics", "");
-        if (!plainLyrics.isEmpty()) {
-            List<LyricsLine> lines = LRCParser.parsePlain(plainLyrics);
-            if (!lines.isEmpty()) {
-                return new Lyrics(lines, providerName, false, null, null, null,
-                        buildCredits(uploader, null, jsonSongwriters),
-                        plainLyrics, "txt", sourceUrl);
-            }
+        Lyrics plain = parsedLines(root, "lyrics", "txt", providerName, false);
+        if (plain != null) {
+            String raw = root.optString("lyrics", "");
+            return new Lyrics(plain.lines(), providerName, false, null, null, null,
+                    buildCredits(uploader, jsonSongwriters),
+                    raw, "txt", sourceUrl);
         }
 
         return null;
+    }
+
+    /**
+     * Returns {@code parsed} unchanged when it has no extra credits, and otherwise a copy of it
+     * that carries them.
+     */
+    private static Lyrics withCredits(Lyrics parsed, String providerName,
+                                      @Nullable List<String> credits, @Nullable String sourceUrl) {
+        if (credits == null) {
+            return parsed;
+        }
+        return new Lyrics(parsed.lines(), providerName, parsed.synced(),
+                parsed.romanization(), parsed.translations(), parsed.romanizations(),
+                credits, parsed.rawFormat(), parsed.formatType(), sourceUrl);
+    }
+
+    /** The lines of one raw-text field parsed for its own format, or null when it has none. */
+    @Nullable
+    private static Lyrics parsedLines(JSONObject root, String key, String formatType,
+                                      String providerName, boolean synced) {
+        String raw = root.optString(key, "");
+        if (raw.isEmpty()) {
+            return null;
+        }
+        List<LyricsLine> lines = synced ? LRCParser.parseSynced(raw) : LRCParser.parsePlain(raw);
+        if (lines.isEmpty()) {
+            return null;
+        }
+        return new Lyrics(lines, providerName, synced, null, null, null, null,
+                raw, formatType, null);
     }
 
     @Override
@@ -347,33 +400,44 @@ public final class RMMProvider implements LyricsProvider {
             if (scored.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
-            final long trackId = item.optLong("trackId", 0);
-            if (trackId == 0) {
+            Lyrics.ScoredLyrics entry = scoredCandidate(item, track);
+            if (entry == null) {
                 continue;
             }
-            try {
-                JSONObject root = fetchRmmJson(trackId);
-                if (root == null) {
-                    continue;
-                }
-                Lyrics lyrics = buildLyrics(root, trackId);
-                if (lyrics == null) {
-                    continue;
-                }
-                int score = LyricsRequests.scoreLyricsCandidate(
-                        item.optString("trackName", ""),
-                        item.optString("artistName", ""),
-                        item.optLong("trackTimeMillis", 0) / 1000,
-                        lyrics, track);
-                scored.add(new Lyrics.ScoredLyrics(score, lyrics));
-                if (score >= HIGH_MATCH_SCORE) {
-                    break;
-                }
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Could not fetch RMM Revival lyrics for a candidate", ex);
+            scored.add(entry);
+            if (entry.score() >= HIGH_MATCH_SCORE) {
+                break;
             }
         }
         return Lyrics.sortScoredByScore(scored);
+    }
+
+    /** The scored lyrics one search result yields, or null when it has none. */
+    @Nullable
+    private static Lyrics.ScoredLyrics scoredCandidate(JSONObject item, TrackInfo track) {
+        final long trackId = item.optLong("trackId", 0);
+        if (trackId == 0) {
+            return null;
+        }
+        try {
+            JSONObject root = fetchRmmJson(trackId);
+            if (root == null) {
+                return null;
+            }
+            Lyrics lyrics = buildLyrics(root, trackId);
+            if (lyrics == null) {
+                return null;
+            }
+            int score = LyricsRequests.scoreLyricsCandidate(
+                    item.optString("trackName", ""),
+                    item.optString("artistName", ""),
+                    item.optLong("trackTimeMillis", 0) / 1000,
+                    lyrics, track);
+            return new Lyrics.ScoredLyrics(score, lyrics);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not fetch RMM Revival lyrics for a candidate", ex);
+            return null;
+        }
     }
 
     private record ScoredItem(JSONObject item, int score, boolean exact) {

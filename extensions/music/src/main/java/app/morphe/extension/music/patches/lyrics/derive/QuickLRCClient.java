@@ -121,37 +121,35 @@ public final class QuickLRCClient {
 
         cancel();
         running = executor.submit(() -> {
-            Failure failure = null;
+            Failure failure;
             Lyrics result = null;
             try {
                 if (stillWanted.getAsBoolean()) {
-                    final String ttml = post(source, text, key.trim());
-                    if (ttml == null) {
-                        failure = Failure.FAILED;
-                    } else {
-                        result = toLyrics(ttml);
-                        if (result == null) {
-                            failure = Failure.FAILED;
-                        }
-                    }
+                    result = toLyrics(post(source, text, key.trim()));
                 }
+                failure = result == null ? Failure.FAILED : null;
             } catch (OutOfCreditsException ex) {
                 failure = Failure.OUT_OF_CREDITS;
             } catch (Exception ex) {
-                // Cancelling interrupts rather than unwinds, so an interrupted read can surface as
-                // an ordinary IO failure. That is a cancellation, not something to report.
-                if (stillWanted.getAsBoolean()) {
-                    failure = Failure.FAILED;
-                } else {
-                    Thread.currentThread().interrupt();
-                    failure = Failure.CANCELLED;
-                }
+                failure = failureAfterError(stillWanted);
             }
 
             final Lyrics deliver = result;
             final Failure reason = failure;
             Utils.runOnMainThread(() -> callback.onTranscribed(deliver, reason));
         });
+    }
+
+    /**
+     * Cancelling interrupts rather than unwinds, so an interrupted read can surface as an
+     * ordinary IO failure. That is a cancellation, not something to report.
+     */
+    private static Failure failureAfterError(BooleanSupplier stillWanted) {
+        if (stillWanted.getAsBoolean()) {
+            return Failure.FAILED;
+        }
+        Thread.currentThread().interrupt();
+        return Failure.CANCELLED;
     }
 
     private static String post(String videoId, String lyrics, String apiKey)
@@ -171,16 +169,9 @@ public final class QuickLRCClient {
             final Attempt attempt = sendOnce(target, json, apiKey);
             final int code = attempt.code();
 
-            if (code == 307 || code == 308 || code == 301 || code == 302) {
-                final String location = attempt.location();
-                if (location == null || location.isEmpty()) {
-                    return null;
-                }
-                final String next = resolve(target, location);
+            if (isRedirect(code)) {
+                final String next = safeRedirect(target, attempt.location());
                 if (next == null) {
-                    return null;
-                }
-                if (next.startsWith("http://")) {
                     return null;
                 }
                 // Followed by hand: HttpURLConnection downgrades the POST to a GET, which is
@@ -191,7 +182,7 @@ public final class QuickLRCClient {
             if (code == 303) {
                 return null;
             }
-            if (code == 402 || code == 403) {
+            if (isOutOfCredits(code)) {
                 // How the daily per-IP cap surfaces.
                 throw new OutOfCreditsException();
             }
@@ -202,6 +193,30 @@ public final class QuickLRCClient {
             return attempt.body();
         }
         return null;
+    }
+
+    private static boolean isRedirect(int code) {
+        return code == 307 || code == 308 || code == 301 || code == 302;
+    }
+
+    private static boolean isOutOfCredits(int code) {
+        return code == 402 || code == 403;
+    }
+
+    /**
+     * The absolute target a redirect names, or null when it names none, cannot be resolved, or
+     * would leave HTTPS.
+     */
+    @Nullable
+    private static String safeRedirect(String target, @Nullable String location) {
+        if (location == null || location.isEmpty()) {
+            return null;
+        }
+        final String next = resolve(target, location);
+        if (next == null || next.startsWith("http://")) {
+            return null;
+        }
+        return next;
     }
 
     private static Attempt sendOnce(String url, String json, String apiKey) throws IOException {
@@ -276,14 +291,16 @@ public final class QuickLRCClient {
         if (before < 0) {
             return false;
         }
-        final int after = firstNonSpaceAfter(lrc, skipWhitespace(lrc, start));
+        final int after = skipWhitespace(lrc, start);
         if (after >= lrc.length()) {
             // At the end of body or line the character before decides alone.
             return isCjk(lrc.charAt(before));
         }
-        return isCjk(lrc.charAt(before)) && isCjk(lrc.charAt(after))
-                || lrc.charAt(before) == '>' && isCjk(lrc.charAt(after))
-                || lrc.charAt(after) == '<' && isCjk(lrc.charAt(before))
+        final char beforeChar = lrc.charAt(before);
+        final char afterChar = lrc.charAt(after);
+        return isCjk(beforeChar) && isCjk(afterChar)
+                || beforeChar == '>' && isCjk(afterChar)
+                || afterChar == '<' && isCjk(beforeChar)
                 && isCjk(charAfterTag(lrc, after));
     }
 
@@ -296,7 +313,7 @@ public final class QuickLRCClient {
         if (close < 0) {
             return '\0';
         }
-        final int token = firstNonSpaceAfter(lrc, close + 1);
+        final int token = skipWhitespace(lrc, close + 1);
         return token < lrc.length() ? lrc.charAt(token) : '\0';
     }
 
@@ -314,10 +331,6 @@ public final class QuickLRCClient {
             i--;
         }
         return i;
-    }
-
-    private static int firstNonSpaceAfter(String text, int index) {
-        return skipWhitespace(text, index);
     }
 
     // Punctuation included: {@code ，} is U+FF0C, script COMMON, so a script-based check calls
@@ -341,27 +354,6 @@ public final class QuickLRCClient {
             final List<LyricsLine> lines = LRCParser.parseSynced(body);
             if (lines == null || lines.isEmpty()) {
                 return null;
-            }
-            long firstBegin = Long.MAX_VALUE;
-            long lastEnd = Long.MIN_VALUE;
-            for (LyricsLine line : lines) {
-                if (line.startTimeMs() < firstBegin) {
-                    firstBegin = line.startTimeMs();
-                }
-                if (line.endTimeMs() > lastEnd) {
-                    lastEnd = line.endTimeMs();
-                }
-            }
-            for (LyricsLine line : lines) {
-                if (!line.hasWords() || line.words().size() > 6) {
-                    continue;
-                }
-                StringBuilder sb = new StringBuilder();
-                for (Word word : line.words()) {
-                    sb.append('[').append(word.startMs()).append('-')
-                            .append(word.endMs()).append(']').append(word.text());
-                }
-                break;
             }
             return new Lyrics(lines, PROVIDER_NAME, true, null, null, null,
                     null, body, "lrc", null);

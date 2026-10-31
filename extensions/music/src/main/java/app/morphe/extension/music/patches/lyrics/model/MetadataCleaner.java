@@ -15,8 +15,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
@@ -59,22 +58,16 @@ public final class MetadataCleaner {
 
     public static String resolveSetting(@Nullable String value) {
         SettingLookup lookup = classifySetting(value);
-        if (!lookup.remote()) {
+        if (!lookup.remote() || lookup.local() != null) {
             return lookup.local();
         }
-        if (lookup.local() == null) {
-            pendingResolves.computeIfAbsent(lookup.trimmed(), ResolveTask::new).schedule();
-            return "";
-        }
-        return lookup.local();
+        pendingResolves.computeIfAbsent(lookup.trimmed(), ResolveTask::new).schedule();
+        return "";
     }
 
     public static void resolveSettingBlocking(@Nullable String value) {
         SettingLookup lookup = classifySetting(value);
-        if (!lookup.remote()) {
-            return;
-        }
-        if (lookup.local() != null) {
+        if (!lookup.remote() || lookup.local() != null) {
             return;
         }
 
@@ -82,30 +75,36 @@ public final class MetadataCleaner {
         task.schedule();
 
         task.await();
-        String cached = resolveCache.get(lookup.trimmed());
-        if (cached != null) {
+        if (resolveCache.get(lookup.trimmed()) != null) {
             return;
         }
 
         try {
-            cached = download(lookup.trimmed());
-            resolveCache.put(lookup.trimmed(), cached);
+            resolveCache.put(lookup.trimmed(), download(lookup.trimmed()));
         } catch (Exception ex) {
             Logger.printDebug(() -> "Failed to download setting: " + lookup.trimmed(), ex);
         }
     }
 
     private static SettingLookup classifySetting(@Nullable String value) {
-        if (value == null || value.trim().isEmpty()) {
+        if (!hasText(value)) {
             return new SettingLookup("", false, value == null ? "" : value);
         }
 
         String trimmed = value.trim();
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        if (!isRemoteUrl(trimmed)) {
             return new SettingLookup(trimmed, false, trimmed);
         }
 
         return new SettingLookup(trimmed, true, resolveCache.get(trimmed));
+    }
+
+    private static boolean hasText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private static boolean isRemoteUrl(String value) {
+        return value.startsWith("http://") || value.startsWith("https://");
     }
 
     static String cleanTitle(@Nullable String title) {
@@ -141,10 +140,7 @@ public final class MetadataCleaner {
     }
 
     static String applyRegex(String input, String regex) {
-        if (regex == null || regex.trim().isEmpty()) {
-            return input;
-        }
-        final Pattern pattern = compiled(regex);
+        final Pattern pattern = usablePattern(regex);
         if (pattern == null) {
             return input;
         }
@@ -162,10 +158,7 @@ public final class MetadataCleaner {
      * fullwidth punctuation ({@code ，！？～（）} …) to ASCII even when the filter never fired.
      */
     public static String applyRegexPreserveOriginal(String input, String regex) {
-        if (regex == null || regex.trim().isEmpty()) {
-            return input;
-        }
-        final Pattern pattern = compiled(regex);
+        final Pattern pattern = usablePattern(regex);
         if (pattern == null) {
             return input;
         }
@@ -179,6 +172,15 @@ public final class MetadataCleaner {
             Logger.printDebug(() -> "Failed to apply regex", ex);
             return input;
         }
+    }
+
+    /** The compiled pattern, or null when the filter is blank or does not compile. */
+    @Nullable
+    private static Pattern usablePattern(@Nullable String regex) {
+        if (regex == null || regex.trim().isEmpty()) {
+            return null;
+        }
+        return compiled(regex);
     }
 
     @Nullable
@@ -210,7 +212,7 @@ public final class MetadataCleaner {
         }
         String left = rawTitle.substring(0, idx).trim();
         String right = rawTitle.substring(idx + DASH_SEPARATOR.length()).trim();
-        if (left.isEmpty() || right.isEmpty()) {
+        if (!hasText(left) || !hasText(right)) {
             return null;
         }
         return new String[]{left, right};
@@ -224,7 +226,7 @@ public final class MetadataCleaner {
     public static TrackInfo trustedDashSplit(@Nullable String rawTitle, @Nullable String rawArtist,
                                              @Nullable String album, int durationSeconds) {
         String[] sides = splitDashRaw(rawTitle);
-        if (sides == null || rawArtist == null || rawArtist.trim().isEmpty()) {
+        if (sides == null || !hasText(rawArtist)) {
             return null;
         }
         String left = sides[0];
@@ -261,7 +263,7 @@ public final class MetadataCleaner {
     @Nullable
     private static TrackInfo buildSplit(String title, String artist, String album,
                                         int durationSeconds) {
-        if (title.isEmpty() || artist.isEmpty()) {
+        if (!hasText(title) || !hasText(artist)) {
             return null;
         }
         return new TrackInfo(title, artist, album == null ? "" : album, durationSeconds);
@@ -286,14 +288,10 @@ public final class MetadataCleaner {
 
     public static String[] splitArtists(String artist) {
         String[] raw = artist.split("\\s*(?:和|&|feat\\.?|ft\\.?|,|/|×)\\s*");
-        List<String> parts = new ArrayList<>();
-        for (String part : raw) {
-            String trimmed = part.trim();
-            if (!trimmed.isEmpty()) {
-                parts.add(trimmed);
-            }
-        }
-        return parts.toArray(new String[0]);
+        return Arrays.stream(raw)
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
+                .toArray(String[]::new);
     }
 
     @NonNull
@@ -304,22 +302,23 @@ public final class MetadataCleaner {
         conn.setRequestProperty("User-Agent", "MorpheMusic/1.0");
 
         try {
-            String charset = "UTF-8";
-            String contentType = conn.getContentType();
-            if (contentType != null) {
-                for (String part : contentType.split(";")) {
-                    part = part.trim();
-                    if (part.regionMatches(true, 0, "charset=", 0, 8)) {
-                        charset = part.substring(8).trim();
-                        break;
-                    }
-                }
-            }
-
-            return readBody(conn, charset).toString().trim();
+            return readBody(conn, charsetOf(conn.getContentType())).toString().trim();
         } finally {
             conn.disconnect();
         }
+    }
+
+    /** The charset named by the content type, or UTF-8 when it names none. */
+    private static String charsetOf(@Nullable String contentType) {
+        if (contentType != null) {
+            for (String part : contentType.split(";")) {
+                part = part.trim();
+                if (part.regionMatches(true, 0, "charset=", 0, 8)) {
+                    return part.substring(8).trim();
+                }
+            }
+        }
+        return "UTF-8";
     }
 
     private static StringBuilder readBody(HttpURLConnection conn, String charset) throws IOException {

@@ -37,39 +37,46 @@ final class LyricsFit {
                     break;
                 }
             }
-            if (segmentEnd > segmentStart) {
-                final int firstLine = layout.getLineForOffset(segmentStart);
-                final int lastLine = layout.getLineForOffset(segmentEnd - 1);
-                if (lastLine > firstLine) {
-                    int start = layout.getLineStart(lastLine);
-                    int end = Math.min(layout.getLineEnd(lastLine), segmentEnd);
-                    while (start < end && Character.isWhitespace(text.charAt(start))) {
-                        start++;
-                    }
-                    while (end > start && Character.isWhitespace(text.charAt(end - 1))) {
-                        end--;
-                    }
-                    final int tailLength = end - start;
-                    if (tailLength > 0) {
-                        if (tailLength <= ORPHAN_MAX_CHARS) {
-                            return true;
-                        }
-                        boolean letterOrDigit = false;
-                        for (int i = start; i < end; i++) {
-                            if (Character.isLetterOrDigit(text.charAt(i))) {
-                                letterOrDigit = true;
-                                break;
-                            }
-                        }
-                        if (!letterOrDigit) {
-                            return true;
-                        }
-                    }
-                }
+            if (segmentEnd > segmentStart && segmentHasOrphanTail(layout, text, segmentStart, segmentEnd)) {
+                return true;
             }
             segmentStart = segmentEnd + 1;
         }
         return false;
+    }
+
+    /**
+     * Whether a line of text that wrapped leaves too little on its last line: a word that broke
+     * off, or only punctuation.
+     */
+    private static boolean segmentHasOrphanTail(Layout layout, CharSequence text, int segmentStart,
+                                                int segmentEnd) {
+        final int firstLine = layout.getLineForOffset(segmentStart);
+        final int lastLine = layout.getLineForOffset(segmentEnd - 1);
+        if (lastLine <= firstLine) {
+            return false;
+        }
+        int start = layout.getLineStart(lastLine);
+        int end = Math.min(layout.getLineEnd(lastLine), segmentEnd);
+        while (start < end && Character.isWhitespace(text.charAt(start))) {
+            start++;
+        }
+        while (end > start && Character.isWhitespace(text.charAt(end - 1))) {
+            end--;
+        }
+        final int tailLength = end - start;
+        if (tailLength <= 0) {
+            return false;
+        }
+        if (tailLength <= ORPHAN_MAX_CHARS) {
+            return true;
+        }
+        for (int i = start; i < end; i++) {
+            if (Character.isLetterOrDigit(text.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Layout buildCandidateLayout(TextView view, int sizePx, int width,

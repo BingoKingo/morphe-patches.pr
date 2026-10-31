@@ -101,25 +101,25 @@ final class LyricsPrefetcher {
 
         final String[] nextVideoId = new String[1];
         TrackInfo track = SessionQueue.nextTrackOf(currentVideoId, nextVideoId);
-        if (superseded(currentVideoId)) return;
-        if (track == null) return;
+        if (superseded(currentVideoId) || track == null) return;
 
         // A successor the queue names by the video that is already playing is a repeat,
         // which has nothing to prepare for. A successor it can only name by title and
         // artist has no video id, which is no reason to skip it: the providers keyed by
         // one are not asked here anyway.
-        if (nextVideoId[0] != null && nextVideoId[0].equals(currentVideoId)) {
-            return;
-        }
+        if (isRepeat(nextVideoId[0], currentVideoId)) return;
 
         // The providers keyed by the video of the playing track only know that track,
         // so the successor is asked with the ones that search by title and artist.
         final List<LyricsProvider> providers = LyricsProviders.searchableProviders(
                 LyricsProviders.providersInOrder(Settings.LYRICS_SOURCE.get()));
-        if (providers.isEmpty()) return;
-        if (allKnown(track, providers)) return;
+        if (providers.isEmpty() || allKnown(track, providers)) return;
 
         fetchIntoCache(currentVideoId, track, providers);
+    }
+
+    private static boolean isRepeat(@Nullable String nextVideoId, String currentVideoId) {
+        return nextVideoId != null && nextVideoId.equals(currentVideoId);
     }
 
     /**
@@ -135,25 +135,44 @@ final class LyricsPrefetcher {
             // answer for the default terms of another.
             if (LyricsRequests.isCustomMatchMode()) return;
 
-            try {
-                LyricsProvider.FetchResult result = provider.fetch(track);
-                if (result == null || result.lyrics() == null
-                        || result.lyrics() == Lyrics.NOT_FOUND) {
-                    continue;
-                }
-                Lyrics lyrics = result.lyrics();
-                if (!LyricsMatch.isValidLyrics(lyrics, track)) continue;
-
-                LyricsCache.put(track, LyricsMatch.cacheSourceFor(lyrics), lyrics, null);
-                Logger.printDebug(() -> "Lyrics prefetched: " + track + " via " + provider.name());
-                return;
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Lyrics prefetch failed: " + provider.name(), ex);
-            }
+            final FetchOutcome outcome = fetchFrom(provider, track);
+            if (outcome != FetchOutcome.NEXT_PROVIDER) return;
         }
+    }
+
+    private enum FetchOutcome {
+        /** Nothing worth keeping; ask the next provider. */
+        NEXT_PROVIDER,
+        SAVED,
+        INTERRUPTED,
+    }
+
+    private static FetchOutcome fetchFrom(LyricsProvider provider, TrackInfo track) {
+        try {
+            Lyrics lyrics = answerOf(provider, track);
+            if (lyrics == null) return FetchOutcome.NEXT_PROVIDER;
+
+            LyricsCache.put(track, LyricsMatch.cacheSourceFor(lyrics), lyrics, null);
+            Logger.printDebug(() -> "Lyrics prefetched: " + track + " via " + provider.name());
+            return FetchOutcome.SAVED;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return FetchOutcome.INTERRUPTED;
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Lyrics prefetch failed: " + provider.name(), ex);
+            return FetchOutcome.NEXT_PROVIDER;
+        }
+    }
+
+    /** The provider's usable answer for this track, or null when it has none. */
+    @Nullable
+    private static Lyrics answerOf(LyricsProvider provider, TrackInfo track) throws Exception {
+        LyricsProvider.FetchResult result = provider.fetch(track);
+        if (result == null || result.lyrics() == null || result.lyrics() == Lyrics.NOT_FOUND) {
+            return null;
+        }
+        final Lyrics lyrics = result.lyrics();
+        return LyricsMatch.isValidLyrics(lyrics, track) ? lyrics : null;
     }
 
     /** Whether every provider that could answer already has an answer stored. */

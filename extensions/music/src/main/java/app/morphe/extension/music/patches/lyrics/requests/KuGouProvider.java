@@ -80,11 +80,7 @@ public final class KuGouProvider implements LyricsProvider {
         int bestScore = -1;
         for (int i = 0; i < info.length(); i++) {
             JSONObject item = info.optJSONObject(i);
-            if (item == null) {
-                continue;
-            }
-            String hash = item.optString("hash", "");
-            if (hash.isEmpty()) {
+            if (item == null || item.optString("hash", "").isEmpty()) {
                 continue;
             }
 
@@ -94,7 +90,7 @@ public final class KuGouProvider implements LyricsProvider {
                     item.optInt("duration", 0), track);
             if (score > bestScore) {
                 bestScore = score;
-                bestHash = hash;
+                bestHash = item.optString("hash", "");
                 bestId = item.optString("id", "");
                 bestTitle = title;
                 bestArtist = artist;
@@ -157,19 +153,21 @@ public final class KuGouProvider implements LyricsProvider {
                 } else if (name.equals("language")) {
                     languageTag = value;
                 } else if (LRCParser.CREDIT_META_KEYS.contains(name)) {
-                    String trimmed = value.trim();
-                    if (!trimmed.isEmpty()) {
-                        creditLines.add(key + ":" + trimmed);
-                    }
+                    addCreditLine(key, value, creditLines);
                 }
             }
         }
 
         List<LyricsLine> lines = applyFileOffset(KRCParser.parse(krc), fileOffsetMs);
         KrcAuxiliary auxiliary = languageTag == null ? null : parseKrcLanguageTag(languageTag, lines);
-        return new KrcResult(lines, creditLines,
-                auxiliary == null ? null : auxiliary.romanization(),
-                auxiliary == null ? null : auxiliary.translation());
+        return KrcResult.of(lines, creditLines, auxiliary);
+    }
+
+    private static void addCreditLine(String key, String value, List<String> creditLines) {
+        String trimmed = value.trim();
+        if (!trimmed.isEmpty()) {
+            creditLines.add(key + ":" + trimmed);
+        }
     }
 
     /**
@@ -228,46 +226,8 @@ public final class KuGouProvider implements LyricsProvider {
                 }
             }
 
-            List<LyricsLine> romaLines = null;
-            if (romaContent != null) {
-                romaLines = new ArrayList<>();
-                int skippedEmpty = 0;
-                for (int li = 0; li < original.size(); li++) {
-                    LyricsLine line = original.get(li);
-                    if (!lineHasText(line)) {
-                        skippedEmpty++;
-                        continue;
-                    }
-                    int contentIndex = li - skippedEmpty;
-                    if (contentIndex >= 0 && contentIndex < romaContent.length()) {
-                        String text = joinKrcRomaEntry(romaContent.optJSONArray(contentIndex));
-                        if (!text.isEmpty()) {
-                            romaLines.add(new LyricsLine(line.startTimeMs(), text));
-                        }
-                    }
-                }
-                if (romaLines.isEmpty()) {
-                    romaLines = null;
-                }
-            }
-
-            List<LyricsLine> transLines = null;
-            if (transContent != null) {
-                transLines = new ArrayList<>();
-                for (int li = 0; li < original.size(); li++) {
-                    LyricsLine line = original.get(li);
-                    if (li < transContent.length()) {
-                        JSONArray entry = transContent.optJSONArray(li);
-                        String text = (entry != null && entry.length() > 0) ? entry.optString(0, "") : "";
-                        if (text != null && !text.isEmpty()) {
-                            transLines.add(new LyricsLine(line.startTimeMs(), text));
-                        }
-                    }
-                }
-                if (transLines.isEmpty()) {
-                    transLines = null;
-                }
-            }
+            List<LyricsLine> romaLines = romaContent == null ? null : krcRomaLines(original, romaContent);
+            List<LyricsLine> transLines = transContent == null ? null : krcTransLines(original, transContent);
 
             if (romaLines == null && transLines == null) {
                 return null;
@@ -276,6 +236,46 @@ public final class KuGouProvider implements LyricsProvider {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    /**
+     * The romanization of each line that has text. Empty lines are skipped without consuming a
+     * romanization entry, so the entry index counts only the lines that carry words.
+     */
+    @Nullable
+    private static List<LyricsLine> krcRomaLines(List<LyricsLine> original, JSONArray romaContent) {
+        List<LyricsLine> romaLines = new ArrayList<>();
+        int skippedEmpty = 0;
+        for (int li = 0; li < original.size(); li++) {
+            LyricsLine line = original.get(li);
+            if (!lineHasText(line)) {
+                skippedEmpty++;
+                continue;
+            }
+            int contentIndex = li - skippedEmpty;
+            if (contentIndex >= 0 && contentIndex < romaContent.length()) {
+                String text = joinKrcRomaEntry(romaContent.optJSONArray(contentIndex));
+                if (!text.isEmpty()) {
+                    romaLines.add(new LyricsLine(line.startTimeMs(), text));
+                }
+            }
+        }
+        return romaLines.isEmpty() ? null : romaLines;
+    }
+
+    /** The first entry of each line's translation array, matched by line index. */
+    @Nullable
+    private static List<LyricsLine> krcTransLines(List<LyricsLine> original, JSONArray transContent) {
+        List<LyricsLine> transLines = new ArrayList<>();
+        for (int li = 0; li < original.size() && li < transContent.length(); li++) {
+            LyricsLine line = original.get(li);
+            JSONArray entry = transContent.optJSONArray(li);
+            String text = entry != null && entry.length() > 0 ? entry.optString(0, "") : "";
+            if (!text.isEmpty()) {
+                transLines.add(new LyricsLine(line.startTimeMs(), text));
+            }
+        }
+        return transLines.isEmpty() ? null : transLines;
     }
 
     private static boolean lineHasText(LyricsLine line) {
@@ -322,13 +322,8 @@ public final class KuGouProvider implements LyricsProvider {
         if (songInfo == null || songInfo.hash().isEmpty()) {
             return null;
         }
-        String hash = songInfo.hash();
-        String id = songInfo.id();
-        if (id.isEmpty()) {
-            id = hash;
-        }
 
-        JSONArray candidates = searchCandidates(hash, true);
+        JSONArray candidates = searchCandidates(songInfo.hash(), true);
         if (candidates == null || candidates.length() == 0) {
             return null;
         }
@@ -338,8 +333,7 @@ public final class KuGouProvider implements LyricsProvider {
             return null;
         }
 
-        String sourceUrl = "https://www.kugou.com/song/" + id + ".html";
-        Lyrics lyrics = fetchFromCandidate(candidate, sourceUrl, true);
+        Lyrics lyrics = fetchFromCandidate(candidate, songInfo.sourceUrl(), true);
         if (lyrics == null) {
             return null;
         }
@@ -353,13 +347,8 @@ public final class KuGouProvider implements LyricsProvider {
         if (songInfo == null || songInfo.hash().isEmpty()) {
             return new ArrayList<>();
         }
-        String hash = songInfo.hash();
-        String id = songInfo.id();
-        if (id.isEmpty()) {
-            id = hash;
-        }
 
-        JSONArray candidates = searchCandidates(hash, false);
+        JSONArray candidates = searchCandidates(songInfo.hash(), false);
         if (candidates == null || candidates.length() == 0) {
             return new ArrayList<>();
         }
@@ -369,23 +358,31 @@ public final class KuGouProvider implements LyricsProvider {
             if (scored.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
-            JSONObject candidate = candidates.optJSONObject(i);
-            if (candidate == null) {
-                continue;
-            }
-            try {
-                String sourceUrl = "https://www.kugou.com/song/" + id + ".html";
-                Lyrics lyrics = fetchFromCandidate(candidate, sourceUrl, false);
-                if (lyrics != null) {
-                    int score = LyricsRequests.scoreSingleResult(lyrics);
-                    scored.add(new Lyrics.ScoredLyrics(score, lyrics));
-                }
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Could not fetch KuGou lyrics for a candidate", ex);
+            Lyrics.ScoredLyrics entry = scoredCandidate(candidates.optJSONObject(i), songInfo.sourceUrl());
+            if (entry != null) {
+                scored.add(entry);
             }
         }
 
         return Lyrics.sortScoredByScore(scored);
+    }
+
+    /** The scored lyrics of one queue candidate, or null when it yields none. */
+    @Nullable
+    private Lyrics.ScoredLyrics scoredCandidate(@Nullable JSONObject candidate, String sourceUrl) {
+        if (candidate == null) {
+            return null;
+        }
+        try {
+            Lyrics lyrics = fetchFromCandidate(candidate, sourceUrl, false);
+            if (lyrics == null) {
+                return null;
+            }
+            return new Lyrics.ScoredLyrics(LyricsRequests.scoreSingleResult(lyrics), lyrics);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not fetch KuGou lyrics for a candidate", ex);
+            return null;
+        }
     }
 
     /**
@@ -448,10 +445,12 @@ public final class KuGouProvider implements LyricsProvider {
     @Nullable
     private DecodedKrc decodeContent(String content) throws IOException {
         byte[] raw = Base64.decode(content, Base64.DEFAULT);
-        KrcResult krcResult;
+        final boolean isKrc = raw.length > 4 && raw[0] == 'k' && raw[1] == 'r'
+                && raw[2] == 'c' && raw[3] == '1';
         String rawFormat;
+        KrcResult krcResult;
         String formatType;
-        if (raw.length > 4 && raw[0] == 'k' && raw[1] == 'r' && raw[2] == 'c' && raw[3] == '1') {
+        if (isKrc) {
             rawFormat = decryptKrc(raw);
             krcResult = parseKrc(rawFormat);
             formatType = "krc";
@@ -466,20 +465,29 @@ public final class KuGouProvider implements LyricsProvider {
             return null;
         }
         List<String> creditLines = new ArrayList<>(krcResult.creditLines());
-        final boolean simplifiedChinese = LyricsRequests.isSimplifiedChinese();
-        List<LyricsLine> attachedRomanization = null;
-        Map<String, List<LyricsLine>> translations = null;
-        if (simplifiedChinese) {
-            List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, krcResult.romanization());
-            if (LyricsMerge.hasText(romanization)) {
-                attachedRomanization = romanization;
-            }
-            List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, krcResult.translation());
-            translations = LyricsMerge.singleLanguageTranslations(
-                    translation, LyricsRequests.SIMPLIFIED_CHINESE);
-        }
+        Languages languages = languagesOf(lines, krcResult);
         return new DecodedKrc(lines, creditLines.isEmpty() ? null : creditLines,
-                attachedRomanization, translations, rawFormat, formatType);
+                languages.romanization(), languages.translations(), rawFormat, formatType);
+    }
+
+    /**
+     * The romanization and translation KuGou attached to the file. Both are only kept when the
+     * user reads simplified Chinese, since KuGou writes them in the Chinese the mainland uses.
+     */
+    private static Languages languagesOf(List<LyricsLine> lines, KrcResult krcResult) {
+        if (!LyricsRequests.isSimplifiedChinese()) {
+            return new Languages(null, null);
+        }
+        List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, krcResult.romanization());
+        List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, krcResult.translation());
+        return new Languages(
+                LyricsMerge.hasText(romanization) ? romanization : null,
+                LyricsMerge.singleLanguageTranslations(translation, LyricsRequests.SIMPLIFIED_CHINESE));
+    }
+
+    /** The romanization and translation attached to one file, either of which may be absent. */
+    private record Languages(@Nullable List<LyricsLine> romanization,
+                             @Nullable Map<String, List<LyricsLine>> translations) {
     }
 
     /** The decoded payload of a download, ready to be turned into lyrics. */
@@ -496,6 +504,11 @@ public final class KuGouProvider implements LyricsProvider {
             title = title != null ? title : "";
             artist = artist != null ? artist : "";
         }
+
+        /** The song page the resolved song is downloaded from, using the hash when it has no id. */
+        String sourceUrl() {
+            return "https://www.kugou.com/song/" + (id.isEmpty() ? hash : id) + ".html";
+        }
     }
 
     private record KrcResult(List<LyricsLine> lines, List<String> creditLines,
@@ -503,6 +516,14 @@ public final class KuGouProvider implements LyricsProvider {
                              @Nullable List<LyricsLine> translation) {
         KrcResult {
             creditLines = creditLines != null ? creditLines : List.of();
+        }
+
+        /** The result of one KRC payload, with a null auxiliary leaving both fields null. */
+        static KrcResult of(List<LyricsLine> lines, List<String> creditLines,
+                            @Nullable KrcAuxiliary auxiliary) {
+            return new KrcResult(lines, creditLines,
+                    auxiliary == null ? null : auxiliary.romanization(),
+                    auxiliary == null ? null : auxiliary.translation());
         }
     }
 

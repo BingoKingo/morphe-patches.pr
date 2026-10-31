@@ -85,7 +85,7 @@ public final class SkipSegments {
 
     /** Backgrounds a fetch. Cheap when cached or in flight. Never throws or blocks. */
     public static void prefetch(@Nullable String videoId) {
-        if (videoId == null || videoId.isEmpty() || !Settings.LYRICS_SB_MATCHING.get()) {
+        if (!canUseSegments(videoId)) {
             return;
         }
         synchronized (LOCK) {
@@ -94,6 +94,14 @@ public final class SkipSegments {
             }
             startFetchLocked(videoId);
         }
+    }
+
+    /**
+     * Whether the segments of this video may be used at all: matching is on and there is a
+     * video id to ask about. Every entry point starts with this.
+     */
+    private static boolean canUseSegments(@Nullable String videoId) {
+        return videoId != null && !videoId.isEmpty() && Settings.LYRICS_SB_MATCHING.get();
     }
 
     public static void invalidate(@NonNull String videoId) {
@@ -114,7 +122,7 @@ public final class SkipSegments {
      */
     @Nullable
     public static List<Seg> await(@Nullable String videoId, long durationMs) {
-        if (videoId == null || videoId.isEmpty() || !Settings.LYRICS_SB_MATCHING.get()) {
+        if (!canUseSegments(videoId)) {
             return null;
         }
         FutureTask<List<Seg>> task;
@@ -128,18 +136,7 @@ public final class SkipSegments {
                 }
             }
         }
-        List<Seg> segs = null;
-        if (task != null) {
-            try {
-                segs = task.get(AWAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            } catch (TimeoutException ignored) {
-                // Still running; the next await picks it up.
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            } catch (ExecutionException ignored) {
-                // Safety net only.
-            }
-        }
+        List<Seg> segs = awaitTask(task);
         if (segs == null) {
             synchronized (LOCK) {
                 segs = CACHE.get(videoId);
@@ -153,9 +150,29 @@ public final class SkipSegments {
         return applicable(segs, durationMs);
     }
 
+    /** The task's segments, or null when it timed out, failed or there was no task. */
+    @Nullable
+    private static List<Seg> awaitTask(@Nullable FutureTask<List<Seg>> task) {
+        if (task == null) {
+            return null;
+        }
+        try {
+            return task.get(AWAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException ignored) {
+            // Still running; the next await picks it up.
+            return null;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException ignored) {
+            // Safety net only.
+            return null;
+        }
+    }
+
     @Nullable
     public static List<Seg> peek(@Nullable String videoId, long durationMs) {
-        if (videoId == null || videoId.isEmpty() || !Settings.LYRICS_SB_MATCHING.get()) {
+        if (!canUseSegments(videoId)) {
             return null;
         }
         List<Seg> segs;
@@ -232,35 +249,34 @@ public final class SkipSegments {
      */
     @Nullable
     private static List<Seg> applicable(@Nullable List<Seg> segs, long durationMs) {
-        if (segs == null) {
-            return null;
-        }
-        if (segs.isEmpty()) {
-            return List.of();
-        }
-        if (durationMs <= 0) {
+        if (segs == null || segs.isEmpty() || durationMs <= 0) {
             return segs;
         }
-        boolean stale = false;
-        for (Seg seg : segs) {
-            final long reported = seg.reportedDurationMs();
-            if (reported > 0 && Math.abs(reported - durationMs) > REPORTED_DURATION_TOLERANCE_MS) {
-                stale = true;
-                break;
-            }
-        }
-        if (!stale) {
+        if (!hasStaleSegment(segs, durationMs)) {
             return segs;
         }
         final List<Seg> kept = new ArrayList<>(segs.size());
         for (Seg seg : segs) {
-            final long reported = seg.reportedDurationMs();
-            if (reported > 0 && Math.abs(reported - durationMs) > REPORTED_DURATION_TOLERANCE_MS) {
-                continue;
+            if (!isStale(seg, durationMs)) {
+                kept.add(seg);
             }
-            kept.add(seg);
         }
         return kept.isEmpty() ? List.of() : List.copyOf(kept);
+    }
+
+    /** A segment recorded against another video duration is stale: the video was recut. */
+    private static boolean isStale(@NonNull Seg seg, long durationMs) {
+        final long reported = seg.reportedDurationMs();
+        return reported > 0 && Math.abs(reported - durationMs) > REPORTED_DURATION_TOLERANCE_MS;
+    }
+
+    private static boolean hasStaleSegment(@NonNull List<Seg> segs, long durationMs) {
+        for (Seg seg : segs) {
+            if (isStale(seg, durationMs)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -338,36 +354,44 @@ public final class SkipSegments {
      */
     @Nullable
     private static List<Seg> fetch(String videoId) throws IOException, JSONException {
-        List<Seg> segments = new ArrayList<>();
         HttpURLConnection connection = Requester.getConnectionFromRoute(
                 Settings.SB_API_URL.get(), SBRoutes.GET_SEGMENTS, videoId, FETCH_CATEGORIES);
         connection.setConnectTimeout(TIMEOUT_TCP_MS);
         connection.setReadTimeout(TIMEOUT_HTTP_MS);
         final int responseCode = connection.getResponseCode();
-        if (responseCode == Requester.HTTP_STATUS_CODE_SUCCESS) {
-            JSONArray responseArray = Requester.parseJSONArray(connection);
-            for (int i = 0, length = responseArray.length(); i < length; i++) {
-                JSONObject obj = responseArray.getJSONObject(i);
-                JSONArray segment = obj.getJSONArray("segment");
-                final long start = (long) (segment.getDouble(0) * 1000);
-                final long end = (long) (segment.getDouble(1) * 1000);
-                if (end <= start) {
-                    continue;
-                }
-                final double reported = obj.optDouble("videoDuration", 0);
-                segments.add(new Seg(start, end, obj.getString("category"),
-                        reported > 0 ? (long) (reported * 1000) : 0));
-            }
-        } else if (responseCode == 404) {
+        if (responseCode == 404) {
             // No segments for this video - a normal answer.
             return List.of();
-        } else {
+        }
+        if (responseCode != Requester.HTTP_STATUS_CODE_SUCCESS) {
             connection.disconnect();
             return null;
         }
 
+        List<Seg> segments = new ArrayList<>();
+        JSONArray responseArray = Requester.parseJSONArray(connection);
+        for (int i = 0, length = responseArray.length(); i < length; i++) {
+            Seg seg = parseSegment(responseArray.getJSONObject(i));
+            if (seg != null) {
+                segments.add(seg);
+            }
+        }
         segments.sort(Comparator.comparingLong(Seg::startMs));
         return merge(segments);
+    }
+
+    /** One entry of the API answer, or null when it spans no time. */
+    @Nullable
+    private static Seg parseSegment(@NonNull JSONObject obj) throws JSONException {
+        JSONArray segment = obj.getJSONArray("segment");
+        final long start = (long) (segment.getDouble(0) * 1000);
+        final long end = (long) (segment.getDouble(1) * 1000);
+        if (end <= start) {
+            return null;
+        }
+        final double reported = obj.optDouble("videoDuration", 0);
+        return new Seg(start, end, obj.getString("category"),
+                reported > 0 ? (long) (reported * 1000) : 0);
     }
 
     /**

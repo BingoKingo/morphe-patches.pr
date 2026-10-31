@@ -234,21 +234,8 @@ public final class BinimumProvider implements LyricsProvider {
         }
 
         JSONObject metadata = root.optJSONObject("metadata");
-        List<String> songwriters = null;
-        JSONArray songPartsJson = null;
-        if (metadata != null) {
-            JSONArray sw = metadata.optJSONArray("songWriters");
-            if (sw != null && sw.length() > 0) {
-                songwriters = new ArrayList<>();
-                for (int i = 0; i < sw.length(); i++) {
-                    String writer = sw.optString(i);
-                    if (!writer.isEmpty()) {
-                        songwriters.add(writer);
-                    }
-                }
-            }
-            songPartsJson = metadata.optJSONArray("songParts");
-        }
+        List<String> songwriters = metadata == null ? null : songwritersOf(metadata);
+        JSONArray songPartsJson = metadata == null ? null : metadata.optJSONArray("songParts");
 
         List<LyricsLine> lines = new ArrayList<>();
         List<LyricsLine> romanization = new ArrayList<>();
@@ -259,92 +246,17 @@ public final class BinimumProvider implements LyricsProvider {
             JSONObject item = lyricsArray.optJSONObject(i);
             if (item == null) continue;
 
-            long lineTime = item.optLong("time", LyricsLine.NO_TIME);
-            long lineDuration = item.optLong("duration", 0);
-            long lineEndTime = (lineTime != LyricsLine.NO_TIME && lineDuration > 0)
-                    ? lineTime + lineDuration : LyricsLine.NO_TIME;
-            String rawLineText = item.optString("text", "");
-
-            JSONObject element = item.optJSONObject("element");
-            String agentId = null;
-            String songPart = null;
-            if (element != null) {
-                String singer = element.optString("singer");
-                if (!singer.isEmpty()) agentId = singer;
-                int songPartIndex = element.optInt("songPartIndex", -1);
-                if (songPartsJson != null && songPartIndex >= 0 && songPartIndex < songPartsJson.length()) {
-                    JSONObject sp = songPartsJson.optJSONObject(songPartIndex);
-                    if (sp != null) {
-                        String name = sp.optString("name", null);
-                        if (name != null && !name.isEmpty()) songPart = name;
-                    }
-                }
-            }
-            boolean isDuet = isAgentDuet(agentId);
-
-            JSONArray syllabus = item.optJSONArray("syllabus");
-            JSONObject transliteration = item.optJSONObject("transliteration");
-            String transText = item.optString("translation", null);
-
-            JSONArray transSyls = transliteration != null ? transliteration.optJSONArray("syllabus") : null;
-            String transliterationText = transliteration != null ? transliteration.optString("text", null) : null;
-
-            if (syllabus != null && syllabus.length() > 0) {
-                List<WordCandidate> mainSyls = new ArrayList<>();
-                List<WordCandidate> bgSyls = new ArrayList<>();
-                for (int s = 0; s < syllabus.length(); s++) {
-                    JSONObject syl = syllabus.optJSONObject(s);
-                    if (syl == null) continue;
-                    String roma = null;
-                    if (transSyls != null && s < transSyls.length()) {
-                        JSONObject tSyl = transSyls.optJSONObject(s);
-                        if (tSyl != null) {
-                            roma = tSyl.optString("text", null);
-                            if (roma != null && roma.trim().isEmpty()) roma = null;
-                        }
-                    }
-                    boolean isBg = syl.optBoolean("isBackground", false);
-                    WordCandidate cand = new WordCandidate(syl, roma);
-                    if (isBg) {
-                        bgSyls.add(cand);
-                    } else {
-                        mainSyls.add(cand);
-                    }
-                }
-
-                LyricsLine mainLine = buildLineFromCandidates(
-                        mainSyls, lineTime, lineEndTime, lineDuration, rawLineText, agentId, isDuet, false, songPart);
-                if (mainLine != null) {
-                    lines.add(mainLine);
-                    if (!mainLine.words().isEmpty()) hasAnyWordSync = true;
-                }
-
-                LyricsLine bgLine = buildLineFromCandidates(
-                        bgSyls, lineTime, lineEndTime, lineDuration, null, agentId, isDuet, true, songPart);
-                if (bgLine != null) {
-                    lines.add(bgLine);
-                    if (!bgLine.words().isEmpty()) hasAnyWordSync = true;
-                }
-            } else {
-                // Line synced only, with no word timing.
-                String text = rawLineText.trim();
-                boolean isBg = false;
-                if ((text.startsWith("(") && text.endsWith(")")) || (text.startsWith("（") && text.endsWith("）"))) {
-                    isBg = true;
-                    text = text.substring(1, text.length() - 1).trim();
-                }
-                if (!text.isEmpty()) {
-                    lines.add(new LyricsLine(lineTime, lineEndTime, text, List.of(), agentId, isDuet, isBg, songPart));
-                }
-            }
+            final LineParse parsed = parseItem(item, songPartsJson, lines);
+            if (!parsed.words().isEmpty()) hasAnyWordSync = true;
 
             // The transliteration and translation of the line, if any.
-            if (transliterationText != null && !transliterationText.trim().isEmpty()) {
+            String transliterationText = parsed.transliterationText();
+            if (hasText(transliterationText)) {
                 romanization.add(new LyricsLine(LyricsLine.NO_TIME, transliterationText.trim()));
             }
-            if (transText != null && !transText.trim().isEmpty()) {
+            if (hasText(parsed.translationText())) {
                 translations.computeIfAbsent("default", k -> new ArrayList<>())
-                        .add(new LyricsLine(LyricsLine.NO_TIME, transText.trim()));
+                        .add(new LyricsLine(LyricsLine.NO_TIME, parsed.translationText().trim()));
             }
         }
 
@@ -361,6 +273,150 @@ public final class BinimumProvider implements LyricsProvider {
                 null,
                 hasAnyWordSync ? "syllable" : "line",
                 sourceUrl);
+    }
+
+    /** What one entry of the lyrics array contributed to the lyric. */
+    private record LineParse(List<LyricsLine> words, @Nullable String transliterationText,
+                             @Nullable String translationText) {
+    }
+
+    /** Adds the line's main and background lines to {@code lines}. */
+    private static LineParse parseItem(JSONObject item, @Nullable JSONArray songPartsJson,
+                                       List<LyricsLine> lines) {
+        long lineTime = item.optLong("time", LyricsLine.NO_TIME);
+        long lineDuration = item.optLong("duration", 0);
+        long lineEndTime = (lineTime != LyricsLine.NO_TIME && lineDuration > 0)
+                ? lineTime + lineDuration : LyricsLine.NO_TIME;
+        String rawLineText = item.optString("text", "");
+
+        JSONObject element = item.optJSONObject("element");
+        String agentId = element == null ? null : element.optString("singer", "");
+        if (agentId != null && agentId.isEmpty()) agentId = null;
+        String songPart = element == null ? null : songPartOf(element, songPartsJson);
+        boolean isDuet = isAgentDuet(agentId);
+
+        JSONArray syllabus = item.optJSONArray("syllabus");
+        JSONObject transliteration = item.optJSONObject("transliteration");
+        String transliterationText = transliteration == null
+                ? null : transliteration.optString("text", null);
+
+        List<LyricsLine> added = new ArrayList<>(2);
+        if (syllabus != null && syllabus.length() > 0) {
+            addSyllableLines(lines, added, syllabus, transliteration, lineTime, lineEndTime,
+                    lineDuration, rawLineText, agentId, isDuet, songPart);
+        } else {
+            addPlainLine(lines, lineTime, lineEndTime, rawLineText, agentId, isDuet, songPart);
+        }
+
+        return new LineParse(added, transliterationText,
+                item.optString("translation", null));
+    }
+
+    /** Adds the syllable lines of a word-synced entry, lead singers first. */
+    private static void addSyllableLines(List<LyricsLine> lines, List<LyricsLine> added,
+                                         JSONArray syllabus, @Nullable JSONObject transliteration,
+                                         long lineTime, long lineEndTime, long lineDuration,
+                                         String rawLineText, @Nullable String agentId,
+                                         boolean isDuet, @Nullable String songPart) {
+        JSONArray transSyls = transliteration != null
+                ? transliteration.optJSONArray("syllabus") : null;
+        List<WordCandidate> mainSyls = new ArrayList<>();
+        List<WordCandidate> bgSyls = new ArrayList<>();
+        for (int s = 0; s < syllabus.length(); s++) {
+            JSONObject syl = syllabus.optJSONObject(s);
+            if (syl == null) continue;
+            WordCandidate cand = new WordCandidate(syl, romajiAt(transSyls, s));
+            if (syl.optBoolean("isBackground", false)) {
+                bgSyls.add(cand);
+            } else {
+                mainSyls.add(cand);
+            }
+        }
+
+        addCandidateLine(lines, added, mainSyls, lineTime, lineEndTime, lineDuration,
+                rawLineText, agentId, isDuet, false, songPart);
+        addCandidateLine(lines, added, bgSyls, lineTime, lineEndTime, lineDuration,
+                null, agentId, isDuet, true, songPart);
+    }
+
+    private static void addCandidateLine(List<LyricsLine> lines, List<LyricsLine> added,
+                                         List<WordCandidate> candidates, long lineTime,
+                                         long lineEndTime, long lineDuration,
+                                         @Nullable String text, @Nullable String agentId,
+                                         boolean isDuet, boolean isBg, @Nullable String songPart) {
+        LyricsLine line = buildLineFromCandidates(
+                candidates, lineTime, lineEndTime, lineDuration, text, agentId, isDuet, isBg, songPart);
+        if (line != null) {
+            lines.add(line);
+            added.add(line);
+        }
+    }
+
+    /** Adds an entry that is only line synced, with no word timing. */
+    private static void addPlainLine(List<LyricsLine> lines, long lineTime, long lineEndTime,
+                                     String rawLineText, @Nullable String agentId,
+                                     boolean isDuet, @Nullable String songPart) {
+        String text = rawLineText.trim();
+        boolean isBg = isBracketed(text);
+        if (isBg) {
+            text = text.substring(1, text.length() - 1).trim();
+        }
+        if (text.isEmpty()) return;
+        lines.add(new LyricsLine(lineTime, lineEndTime, text, List.of(), agentId, isDuet, isBg, songPart));
+    }
+
+    /** A parenthesised line is a background vocal. */
+    private static boolean isBracketed(String text) {
+        return (text.startsWith("(") && text.endsWith(")"))
+                || (text.startsWith("（") && text.endsWith("）"));
+    }
+
+    @Nullable
+    private static String romajiAt(@Nullable JSONArray transSyls, int index) {
+        if (transSyls == null || index >= transSyls.length()) {
+            return null;
+        }
+        JSONObject tSyl = transSyls.optJSONObject(index);
+        if (tSyl == null) {
+            return null;
+        }
+        String roma = tSyl.optString("text", null);
+        return roma == null || roma.trim().isEmpty() ? null : roma;
+    }
+
+    @Nullable
+    private static String songPartOf(JSONObject element, @Nullable JSONArray songPartsJson) {
+        int songPartIndex = element.optInt("songPartIndex", -1);
+        if (songPartsJson == null || songPartIndex < 0 || songPartIndex >= songPartsJson.length()) {
+            return null;
+        }
+        JSONObject sp = songPartsJson.optJSONObject(songPartIndex);
+        if (sp == null) {
+            return null;
+        }
+        String name = sp.optString("name", null);
+        return name == null || name.isEmpty() ? null : name;
+    }
+
+    /** The songwriters the metadata lists, or null when it lists none. */
+    @Nullable
+    private static List<String> songwritersOf(JSONObject metadata) {
+        JSONArray sw = metadata.optJSONArray("songWriters");
+        if (sw == null || sw.length() == 0) {
+            return null;
+        }
+        List<String> songwriters = new ArrayList<>();
+        for (int i = 0; i < sw.length(); i++) {
+            String writer = sw.optString(i);
+            if (!writer.isEmpty()) {
+                songwriters.add(writer);
+            }
+        }
+        return songwriters;
+    }
+
+    private static boolean hasText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     @Nullable

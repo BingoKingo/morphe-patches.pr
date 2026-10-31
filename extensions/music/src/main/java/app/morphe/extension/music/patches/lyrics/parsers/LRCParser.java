@@ -63,24 +63,32 @@ public final class LRCParser {
             return creditLines;
         }
         for (String rawLine : lrc.split("\\r?\\n")) {
-            String line = rawLine.trim();
-            Matcher meta = LRC_META.matcher(line);
-            if (meta.matches()) {
-                String tag = meta.group(1);
-                String rawValue = meta.group(2);
-                if (tag == null || rawValue == null) {
-                    continue;
-                }
-                String key = tag.toLowerCase(Locale.ROOT);
-                if (!key.equals("offset") && CREDIT_META_KEYS.contains(key)) {
-                    String value = rawValue.trim();
-                    if (!value.isEmpty()) {
-                        creditLines.add(tag + ":" + value);
-                    }
-                }
+            String credit = creditOf(rawLine.trim());
+            if (credit != null) {
+                creditLines.add(credit);
             }
         }
         return creditLines;
+    }
+
+    /** One {@code [ti:Title]} tag as a credit line, or null when the line is anything else. */
+    @Nullable
+    private static String creditOf(String line) {
+        Matcher meta = LRC_META.matcher(line);
+        if (!meta.matches()) {
+            return null;
+        }
+        final String tag = meta.group(1);
+        final String rawValue = meta.group(2);
+        if (tag == null || rawValue == null) {
+            return null;
+        }
+        final String key = tag.toLowerCase(Locale.ROOT);
+        if (key.equals("offset") || !CREDIT_META_KEYS.contains(key)) {
+            return null;
+        }
+        final String value = rawValue.trim();
+        return value.isEmpty() ? null : tag + ":" + value;
     }
 
     public static boolean hasOuterParentheses(@Nullable String text) {
@@ -88,16 +96,16 @@ public final class LRCParser {
             return false;
         }
         String trimmed = text.trim();
-        if (trimmed.length() >= 2) {
-            char first = trimmed.charAt(0);
-            char last = trimmed.charAt(trimmed.length() - 1);
-            return (first == '(' && last == ')')
-                    || (first == '（' && last == '）')
-                    || (first == '[' && last == ']')
-                    || (first == '{' && last == '}')
-                    || (first == '<' && last == '>');
+        if (trimmed.length() < 2) {
+            return false;
         }
-        return false;
+        return isWrappedBy(trimmed, '(', ')') || isWrappedBy(trimmed, '（', '）')
+                || isWrappedBy(trimmed, '[', ']') || isWrappedBy(trimmed, '{', '}')
+                || isWrappedBy(trimmed, '<', '>');
+    }
+
+    private static boolean isWrappedBy(String text, char open, char close) {
+        return text.charAt(0) == open && text.charAt(text.length() - 1) == close;
     }
 
     public static String cleanTextForComparison(@Nullable String text) {
@@ -117,10 +125,6 @@ public final class LRCParser {
             return Collections.emptyList();
         }
 
-        record RawEntry(long timeMs, String text, List<Word> words, @Nullable String agentId,
-                        boolean isDuet, boolean isBg, @Nullable String songPart) {
-        }
-
         List<RawEntry> rawEntries = new ArrayList<>();
         // The LRC "offset" tag shifts every timestamp, and is applied while parsing
         // because it belongs to the file rather than to the user configured offset.
@@ -131,88 +135,7 @@ public final class LRCParser {
             if (line.isEmpty()) {
                 continue;
             }
-
-            List<Long> timestamps = new ArrayList<>(1);
-            String currentSpeaker = null;
-            boolean lineIsBg = false;
-            boolean lineIsDuet = false;
-            int index = 0;
-            // A leading bracket that is neither metadata nor a timestamp names the section the line
-            // opens, e.g. [00:10.00][Verse 1] walking down the street. The first one wins.
-            String songPart = null;
-            // Enhanced LRC may put the vocal agent in its own leading bracket, [v1:], rather than in
-            // front of the text. A marker in the text still wins, so the two forms agree.
-            String bracketedAgent = null;
-
-            while (index < line.length() && line.charAt(index) == '[') {
-                int end = line.indexOf(']', index);
-                if (end < 0) {
-                    break;
-                }
-
-                String tag = line.substring(index + 1, end).trim();
-                if (BG_TAG.equalsIgnoreCase(tag) || "bg".equalsIgnoreCase(tag)) {
-                    lineIsBg = true;
-                } else if (isMetadataTag(tag)) {
-                    Long offset = parseOffsetTag(tag);
-                    if (offset != null) {
-                        fileOffsetMs = offset;
-                    }
-                } else if ("duet".equalsIgnoreCase(tag)) {
-                    lineIsDuet = true;
-                } else if (SPEAKER_TAG_PATTERN.matcher(tag).matches()) {
-                    currentSpeaker = tag.toLowerCase(Locale.ROOT);
-                } else {
-                    long time = parseTimestamp(tag);
-                    if (time != LyricsLine.NO_TIME) {
-                        timestamps.add(time);
-                    } else if (agentMarker(tag) != null) {
-                        if (bracketedAgent == null) {
-                            bracketedAgent = tag;
-                        }
-                    } else if (songPart == null && !tag.trim().isEmpty()) {
-                        songPart = collapseSpaces(tag);
-                    }
-                }
-
-                index = end + 1;
-            }
-
-            if (timestamps.isEmpty()) {
-                continue;
-            }
-
-            final long lineStartMs = Math.max(0, timestamps.get(0) + fileOffsetMs);
-            BodyParse body = parseBody(line.substring(index), lineStartMs);
-            String text = body.text.trim();
-            List<Word> words = body.words;
-            String agentMarker = agentMarker(text);
-            String agentId = currentSpeaker;
-            boolean isDuet = lineIsDuet;
-            if (agentMarker != null) {
-                text = text.substring(agentMarker.length()).trim();
-                words = stripAgentMarker(words, agentMarker);
-                agentId = agentMarker.substring(0, agentMarker.length() - 1);
-                isDuet = isDuetAgent(agentId);
-            } else if (bracketedAgent != null) {
-                agentId = bracketedAgent.substring(0, bracketedAgent.length() - 1);
-                isDuet = isDuetAgent(agentId);
-            } else if (agentId != null && agentId.matches(".*\\d+$")) {
-                isDuet = isDuetAgent(agentId);
-            }
-            final boolean isBg = lineIsBg || "bg".equalsIgnoreCase(agentId)
-                    || "bg".equalsIgnoreCase(currentSpeaker) || hasOuterParentheses(text);
-            if (!words.isEmpty()) {
-                for (long time : timestamps) {
-                    rawEntries.add(new RawEntry(Math.max(0, time + fileOffsetMs),
-                            text, words, agentId, isDuet, isBg, songPart));
-                }
-            } else {
-                for (long time : timestamps) {
-                    rawEntries.add(new RawEntry(Math.max(0, time + fileOffsetMs),
-                            text, Collections.emptyList(), agentId, isDuet, isBg, songPart));
-                }
-            }
+            fileOffsetMs = readLeadingTags(line, rawEntries, fileOffsetMs);
         }
 
         if (rawEntries.isEmpty()) {
@@ -232,25 +155,10 @@ public final class LRCParser {
             }
 
             long startMs = current.timeMs();
-            long endMs = LyricsLine.NO_TIME;
-
-            if (!current.words().isEmpty()) {
-                endMs = current.words().get(current.words().size() - 1).endMs();
-            }
+            long endMs = wordEndMs(current);
 
             if (endMs == LyricsLine.NO_TIME) {
-                RawEntry next = null;
-                for (int j = i + 1; j < entryCount; j++) {
-                    RawEntry candidate = rawEntries.get(j);
-                    if (candidate.timeMs() > startMs) {
-                        if (!current.isBg() && candidate.isBg()) {
-                            continue;
-                        }
-                        next = candidate;
-                        break;
-                    }
-                }
-
+                RawEntry next = nextSungEntry(rawEntries, i, startMs, current.isBg());
                 if (next != null && isBreakMarker(next.text())) {
                     endMs = next.timeMs();
                 } else {
@@ -269,6 +177,127 @@ public final class LRCParser {
         markEchoesAsBackground(lines);
         resolveDuet(lines);
         return lines;
+    }
+
+    /**
+     * Reads the bracketed tags a line opens with and adds the line to {@code rawEntries} under
+     * each of its timestamps.
+     *
+     * @return the file offset the timestamps of the following lines are shifted by.
+     */
+    private static long readLeadingTags(String line, List<RawEntry> rawEntries, long fileOffsetMs) {
+        List<Long> timestamps = new ArrayList<>(1);
+        // A leading bracket that is neither metadata nor a timestamp names the section the line
+        // opens, e.g. [00:10.00][Verse 1] walking down the street. The first one wins.
+        String songPart = null;
+        // Enhanced LRC may put the vocal agent in its own leading bracket, [v1:], rather than in
+        // front of the text. A marker in the text still wins, so the two forms agree.
+        String bracketedAgent = null;
+        String currentSpeaker = null;
+        boolean lineIsBg = false;
+        boolean lineIsDuet = false;
+        int index = 0;
+
+        while (index < line.length() && line.charAt(index) == '[') {
+            int end = line.indexOf(']', index);
+            if (end < 0) {
+                break;
+            }
+
+            String tag = line.substring(index + 1, end).trim();
+            Long offset = null;
+            if (isBackgroundTag(tag)) {
+                lineIsBg = true;
+            } else if (isMetadataTag(tag)) {
+                offset = parseOffsetTag(tag);
+            } else if ("duet".equalsIgnoreCase(tag)) {
+                lineIsDuet = true;
+            } else if (SPEAKER_TAG_PATTERN.matcher(tag).matches()) {
+                currentSpeaker = tag.toLowerCase(Locale.ROOT);
+            } else {
+                long time = parseTimestamp(tag);
+                if (time != LyricsLine.NO_TIME) {
+                    timestamps.add(time);
+                } else if (agentMarker(tag) != null) {
+                    if (bracketedAgent == null) {
+                        bracketedAgent = tag;
+                    }
+                } else if (songPart == null && !tag.isEmpty()) {
+                    songPart = collapseSpaces(tag);
+                }
+            }
+            if (offset != null) {
+                fileOffsetMs = offset;
+            }
+
+            index = end + 1;
+        }
+
+        if (!timestamps.isEmpty()) {
+            addEntries(rawEntries, line.substring(index), timestamps, fileOffsetMs,
+                    songPart, bracketedAgent, currentSpeaker, lineIsBg, lineIsDuet);
+        }
+        return fileOffsetMs;
+    }
+
+    /** Adds the line once per timestamp, with its agent, duet side and section worked out. */
+    private static void addEntries(List<RawEntry> rawEntries, String body, List<Long> timestamps,
+                                   long fileOffsetMs, @Nullable String songPart,
+                                   @Nullable String bracketedAgent, @Nullable String currentSpeaker,
+                                   boolean lineIsBg, boolean lineIsDuet) {
+        final long lineStartMs = Math.max(0, timestamps.get(0) + fileOffsetMs);
+        BodyParse bodyParse = parseBody(body, lineStartMs);
+        String text = bodyParse.text.trim();
+        List<Word> words = bodyParse.words;
+        String agentMarker = agentMarker(text);
+        String agentId = currentSpeaker;
+        boolean isDuet = lineIsDuet;
+        if (agentMarker != null) {
+            text = text.substring(agentMarker.length()).trim();
+            words = stripAgentMarker(words, agentMarker);
+            agentId = agentMarker.substring(0, agentMarker.length() - 1);
+            isDuet = isDuetAgent(agentId);
+        } else if (bracketedAgent != null) {
+            agentId = bracketedAgent.substring(0, bracketedAgent.length() - 1);
+            isDuet = isDuetAgent(agentId);
+        } else if (agentId != null && agentId.matches(".*\\d+$")) {
+            isDuet = isDuetAgent(agentId);
+        }
+        final boolean isBg = lineIsBg || "bg".equalsIgnoreCase(agentId)
+                || "bg".equalsIgnoreCase(currentSpeaker) || hasOuterParentheses(text);
+        for (long time : timestamps) {
+            rawEntries.add(new RawEntry(Math.max(0, time + fileOffsetMs),
+                    text, words, agentId, isDuet, isBg, songPart));
+        }
+    }
+
+    private static boolean isBackgroundTag(String tag) {
+        return BG_TAG.equalsIgnoreCase(tag) || "bg".equalsIgnoreCase(tag);
+    }
+
+    /** Where a line's own word timings end it, or {@link LyricsLine#NO_TIME} without words. */
+    private static long wordEndMs(RawEntry entry) {
+        List<Word> words = entry.words();
+        return words.isEmpty() ? LyricsLine.NO_TIME : words.get(words.size() - 1).endMs();
+    }
+
+    /**
+     * The next line the lead vocal continues into, skipping background lines that follow a lead
+     * one, or null when no line starts later.
+     */
+    @Nullable
+    private static RawEntry nextSungEntry(List<RawEntry> rawEntries, int from, long startMs,
+                                          boolean currentIsBg) {
+        for (int j = from + 1; j < rawEntries.size(); j++) {
+            RawEntry candidate = rawEntries.get(j);
+            if (candidate.timeMs() > startMs) {
+                if (!currentIsBg && candidate.isBg()) {
+                    continue;
+                }
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /** An empty line or a lone note marks where singing stops. */
@@ -322,55 +351,19 @@ public final class LRCParser {
     }
 
     private static void resolveDuet(List<LyricsLine> lines) {
-        String lastPersonSpeaker = null;
-        boolean lastPersonIsDuet = false;
-        boolean hasMultipleSpeakers = false;
-        String firstSpeaker = null;
-
-        for (LyricsLine line : lines) {
-            String sp = line.agentId();
-            if (sp != null && !sp.isEmpty() && !"bg".equalsIgnoreCase(sp) && !"duet".equalsIgnoreCase(sp)) {
-                if (firstSpeaker == null) {
-                    firstSpeaker = sp;
-                } else if (!firstSpeaker.equalsIgnoreCase(sp)) {
-                    hasMultipleSpeakers = true;
-                    break;
-                }
-            }
-        }
-
-        if (!hasMultipleSpeakers) {
+        if (!hasMultipleSpeakers(lines)) {
             return;
         }
 
+        DuetState state = new DuetState();
         for (int i = 0; i < lines.size(); i++) {
             LyricsLine orig = lines.get(i);
             String sp = orig.agentId();
-            if (sp == null || sp.isEmpty() || "bg".equalsIgnoreCase(sp) || "duet".equalsIgnoreCase(sp)) {
+            if (!isPersonSpeaker(sp)) {
                 continue;
             }
 
-            boolean isDuet;
-            if ("v1".equalsIgnoreCase(sp) || "m".equalsIgnoreCase(sp) || "male".equalsIgnoreCase(sp)) {
-                isDuet = false;
-                lastPersonSpeaker = sp;
-                lastPersonIsDuet = false;
-            } else if ("v2".equalsIgnoreCase(sp) || "f".equalsIgnoreCase(sp) || "female".equalsIgnoreCase(sp)) {
-                isDuet = true;
-                lastPersonSpeaker = sp;
-                lastPersonIsDuet = true;
-            } else if (lastPersonSpeaker == null) {
-                isDuet = false;
-                lastPersonSpeaker = sp;
-                lastPersonIsDuet = false;
-            } else if (sp.equalsIgnoreCase(lastPersonSpeaker)) {
-                isDuet = lastPersonIsDuet;
-            } else {
-                isDuet = !lastPersonIsDuet;
-                lastPersonSpeaker = sp;
-                lastPersonIsDuet = isDuet;
-            }
-
+            boolean isDuet = state.nextIsDuet(sp);
             if (LyricsLine.isCenteredAgentId(sp)) {
                 // Keep the alternation state so surrounding lines keep their side.
                 isDuet = false;
@@ -379,6 +372,69 @@ public final class LRCParser {
             lines.set(i, new LyricsLine(
                     orig.startTimeMs(), orig.endTimeMs(), orig.text(),
                     orig.words(), sp, isDuet, orig.isBG(), orig.songPart()));
+        }
+    }
+
+    /** Whether the lines name more than one person, which is what makes a duet possible. */
+    private static boolean hasMultipleSpeakers(List<LyricsLine> lines) {
+        String firstSpeaker = null;
+        for (LyricsLine line : lines) {
+            String sp = line.agentId();
+            if (!isPersonSpeaker(sp)) {
+                continue;
+            }
+            if (firstSpeaker == null) {
+                firstSpeaker = sp;
+            } else if (!firstSpeaker.equalsIgnoreCase(sp)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A speaker that sings: the background and duet tags name a role, not a person. */
+    private static boolean isPersonSpeaker(@Nullable String sp) {
+        return sp != null && !sp.isEmpty()
+                && !"bg".equalsIgnoreCase(sp) && !"duet".equalsIgnoreCase(sp);
+    }
+
+    /**
+     * Which side of the duet each person sings. A named lead or backing speaker sets the side
+     * outright; anyone else keeps the previous person's side, and a new name takes the other one.
+     */
+    private static final class DuetState {
+        @Nullable
+        private String lastPersonSpeaker;
+        private boolean lastPersonIsDuet;
+
+        boolean nextIsDuet(String sp) {
+            if (isMale(sp)) {
+                return remember(sp, false);
+            }
+            if (isFemale(sp)) {
+                return remember(sp, true);
+            }
+            if (lastPersonSpeaker == null) {
+                return remember(sp, false);
+            }
+            if (sp.equalsIgnoreCase(lastPersonSpeaker)) {
+                return lastPersonIsDuet;
+            }
+            return remember(sp, !lastPersonIsDuet);
+        }
+
+        private boolean remember(String sp, boolean isDuet) {
+            lastPersonSpeaker = sp;
+            lastPersonIsDuet = isDuet;
+            return isDuet;
+        }
+
+        private static boolean isMale(String sp) {
+            return "v1".equalsIgnoreCase(sp) || "m".equalsIgnoreCase(sp) || "male".equalsIgnoreCase(sp);
+        }
+
+        private static boolean isFemale(String sp) {
+            return "v2".equalsIgnoreCase(sp) || "f".equalsIgnoreCase(sp) || "female".equalsIgnoreCase(sp);
         }
     }
 
@@ -435,19 +491,8 @@ public final class LRCParser {
             return new BodyParse(body, List.of());
         }
 
-        if (!pending.toString().trim().isEmpty()) {
-            addWord(words, pendingStart, pending.toString());
-        } else if (pendingStart != LyricsLine.NO_TIME && !words.isEmpty()) {
-            int lastIdx = words.size() - 1;
-            Word last = words.get(lastIdx);
-            if (pendingStart > last.startMs()) {
-                words.set(lastIdx, new Word(last.startMs(), pendingStart, last.text(), last.romaji(), last.endsWithSpace()));
-            }
-        }
-
-        if (!prefix.trim().isEmpty()) {
-            words.add(0, new Word(lineStartMs, LyricsLine.NO_TIME, prefix.trim()));
-        }
+        closePendingWord(words, pendingStart, pending);
+        addPrefixWord(words, lineStartMs, prefix);
 
         if (words.isEmpty()) {
             return new BodyParse(full.toString().trim(), List.of());
@@ -455,6 +500,32 @@ public final class LRCParser {
 
         inferMissingWordEnds(words, 800);
         return new BodyParse(full.toString().trim(), words);
+    }
+
+    /**
+     * Appends the text that follows the last timestamp as that word, or when it is whitespace
+     * only, extends the word before to the last timestamp.
+     */
+    private static void closePendingWord(List<Word> words, long pendingStart, StringBuilder pending) {
+        if (!pending.toString().trim().isEmpty()) {
+            addWord(words, pendingStart, pending.toString());
+            return;
+        }
+        if (pendingStart == LyricsLine.NO_TIME || words.isEmpty()) {
+            return;
+        }
+        int lastIdx = words.size() - 1;
+        Word last = words.get(lastIdx);
+        if (pendingStart > last.startMs()) {
+            words.set(lastIdx, new Word(last.startMs(), pendingStart, last.text(), last.romaji(), last.endsWithSpace()));
+        }
+    }
+
+    /** Text in front of the first timestamp becomes a word starting with the line. */
+    private static void addPrefixWord(List<Word> words, long lineStartMs, String prefix) {
+        if (!prefix.trim().isEmpty()) {
+            words.add(0, new Word(lineStartMs, LyricsLine.NO_TIME, prefix.trim()));
+        }
     }
 
     /**
@@ -546,29 +617,32 @@ public final class LRCParser {
             builder.append("[duet]");
         }
         if (line.hasWords()) {
-            final List<Word> words = line.words();
-            final String marks = spacesAfter(line.text(), words);
-            Word lastWord = null;
-            for (int i = 0; i < words.size(); i++) {
-                final Word word = words.get(i);
-                builder.append('<')
-                        .append(formatWordTimestamp(word.startMs()))
-                        .append('>')
-                        .append(word.text());
-                if (marks.charAt(i) == SEPARATED) {
-                    builder.append(' ');
-                }
-                lastWord = word;
-            }
-            if (lastWord != null && lastWord.endMs() > lastWord.startMs()) {
-                builder.append('<')
-                        .append(formatWordTimestamp(lastWord.endMs()))
-                        .append('>');
-            }
+            appendWords(builder, line.words(), line.text());
         } else {
             builder.append(line.text());
         }
         return builder.toString();
+    }
+
+    /** Writes the words with their timestamps, and one more tag for where the last of them ends. */
+    private static void appendWords(StringBuilder builder, List<Word> words, String text) {
+        final String marks = spacesAfter(text, words);
+        for (int i = 0; i < words.size(); i++) {
+            final Word word = words.get(i);
+            builder.append('<')
+                    .append(formatWordTimestamp(word.startMs()))
+                    .append('>')
+                    .append(word.text());
+            if (marks.charAt(i) == SEPARATED) {
+                builder.append(' ');
+            }
+        }
+        Word lastWord = words.get(words.size() - 1);
+        if (lastWord.endMs() > lastWord.startMs()) {
+            builder.append('<')
+                    .append(formatWordTimestamp(lastWord.endMs()))
+                    .append('>');
+        }
     }
 
     /**
@@ -660,12 +734,18 @@ public final class LRCParser {
             slots[i] = lines.size() - 1;
         }
 
-        // Trailing blank lines add nothing but scroll space. Their slots now point past the end
-        // of the list, which callers treat as out of range.
+        trimTrailingBlanks(lines);
+        return new PlainLyrics(lines, slots);
+    }
+
+    /**
+     * Trailing blank lines add nothing but scroll space. Their slots now point past the end of
+     * the list, which callers treat as out of range.
+     */
+    private static void trimTrailingBlanks(List<LyricsLine> lines) {
         while (!lines.isEmpty() && lines.get(lines.size() - 1).text().isEmpty()) {
             lines.remove(lines.size() - 1);
         }
-        return new PlainLyrics(lines, slots);
     }
 
     /**
@@ -690,9 +770,12 @@ public final class LRCParser {
         if (colon <= 0) {
             return false;
         }
-        String name = tag.substring(0, colon).toLowerCase(Locale.ROOT);
+        return isLowercaseAscii(tag.substring(0, colon));
+    }
+
+    private static boolean isLowercaseAscii(String name) {
         for (int i = 0; i < name.length(); i++) {
-            if (METADATA_TAG_CHARACTERS.indexOf(name.charAt(i)) < 0) {
+            if (METADATA_TAG_CHARACTERS.indexOf(Character.toLowerCase(name.charAt(i))) < 0) {
                 return false;
             }
         }
@@ -809,6 +892,11 @@ public final class LRCParser {
     }
 
     private record BodyParse(String text, List<Word> words) {
+    }
+
+    /** One timestamped line as read from the file, before its end time is known. */
+    private record RawEntry(long timeMs, String text, List<Word> words, @Nullable String agentId,
+                            boolean isDuet, boolean isBg, @Nullable String songPart) {
     }
 
     /**

@@ -36,43 +36,13 @@ public final class MiniLyricsTimeline {
             LyricsLine line = lines.get(i);
             if (line.startTimeMs() < 0 || isInstrumentalMarker(line.text())) continue;
 
-            long end = line.endTimeMs();
-            if (line.hasWordTimings()) {
-                long wordEnd = -1;
-                for (Word word : line.words()) {
-                    if (word.endMs() > word.startMs()) wordEnd = Math.max(wordEnd, word.endMs());
-                }
-                if (wordEnd > line.startTimeMs()) end = wordEnd;
-            }
-            if (end <= line.startTimeMs()) {
-                // No end time, so the line lasts until the next one starts.
-                end = durationMs > line.startTimeMs() ? durationMs : Long.MAX_VALUE;
-                for (int j = i + 1; j < lines.size(); j++) {
-                    if (!line.isBG() && lines.get(j).isBG()) continue;
-                    long next = lines.get(j).startTimeMs();
-                    if (next > line.startTimeMs()) {
-                        end = Math.min(end, next);
-                        break;
-                    }
-                }
-            }
-            if (durationMs > 0) end = Math.min(end, durationMs);
+            long end = vocalEndMs(line, lines, i, durationMs);
             if (end > line.startTimeMs()) vocals.add(new Vocal(line, i, line.startTimeMs(), end));
         }
         vocals.sort(Comparator.comparingLong(Vocal::startMs).thenComparingInt(Vocal::index));
 
-        // A provider line of only music notes marks an instrumental gap as well.
         List<SectionDotsMotion.Gap> classified = new ArrayList<>(SectionDotsMotion.computeGaps(lines));
-        for (int i = 0, size = lines.size(); i < size; i++) {
-            LyricsLine line = lines.get(i);
-            if (line.startTimeMs() < 0 || !isInstrumentalMarker(line.text())) continue;
-
-            long end = i + 1 < lines.size() ? lines.get(i + 1).startTimeMs() : durationMs;
-            if (end <= line.startTimeMs()) end = line.endTimeMs();
-            if (end > line.startTimeMs()) {
-                classified.add(new SectionDotsMotion.Gap(i, line.startTimeMs(), end));
-            }
-        }
+        classified.addAll(markerGaps(lines, durationMs));
 
         // Gaps only cover time no line is sung in.
         prefixEnds = new long[vocals.size()];
@@ -89,7 +59,65 @@ public final class MiniLyricsTimeline {
         }
         addGaps(classified, cursor, durationMs > 0 ? durationMs : Long.MAX_VALUE, previous);
 
-        // A note line can overlap a gap of the panel. Merge them so only one animation plays.
+        mergeOverlappingGaps();
+    }
+
+    /**
+     * When a line ends, from its own times or its word timings; a line with neither lasts until
+     * the next one starts.
+     */
+    private static long vocalEndMs(LyricsLine line, List<LyricsLine> lines, int index,
+                                   long durationMs) {
+        long end = line.endTimeMs();
+        if (line.hasWordTimings()) {
+            long wordEnd = -1;
+            for (Word word : line.words()) {
+                if (word.endMs() > word.startMs()) wordEnd = Math.max(wordEnd, word.endMs());
+            }
+            if (wordEnd > line.startTimeMs()) end = wordEnd;
+        }
+        if (end <= line.startTimeMs()) {
+            end = nextLineStartMs(line, lines, index, durationMs);
+        }
+        if (durationMs > 0) end = Math.min(end, durationMs);
+        return end;
+    }
+
+    /** The end of a line with no usable end time: the next line, or the track's end. */
+    private static long nextLineStartMs(LyricsLine line, List<LyricsLine> lines, int index,
+                                        long durationMs) {
+        long end = durationMs > line.startTimeMs() ? durationMs : Long.MAX_VALUE;
+        for (int j = index + 1; j < lines.size(); j++) {
+            if (!line.isBG() && lines.get(j).isBG()) continue;
+            long next = lines.get(j).startTimeMs();
+            if (next > line.startTimeMs()) {
+                end = Math.min(end, next);
+                break;
+            }
+        }
+        return end;
+    }
+
+    /**
+     * A provider line of only music notes marks an instrumental gap as well.
+     */
+    private static List<SectionDotsMotion.Gap> markerGaps(List<LyricsLine> lines, long durationMs) {
+        List<SectionDotsMotion.Gap> result = new ArrayList<>();
+        for (int i = 0, size = lines.size(); i < size; i++) {
+            LyricsLine line = lines.get(i);
+            if (line.startTimeMs() < 0 || !isInstrumentalMarker(line.text())) continue;
+
+            long end = i + 1 < lines.size() ? lines.get(i + 1).startTimeMs() : durationMs;
+            if (end <= line.startTimeMs()) end = line.endTimeMs();
+            if (end > line.startTimeMs()) {
+                result.add(new SectionDotsMotion.Gap(i, line.startTimeMs(), end));
+            }
+        }
+        return result;
+    }
+
+    /** A note line can overlap a gap of the panel. Merge them so only one animation plays. */
+    private void mergeOverlappingGaps() {
         gaps.sort(Comparator.comparingLong(Gap::startMs));
         for (int i = 1; i < gaps.size(); ) {
             Gap before = gaps.get(i - 1);
@@ -116,13 +144,14 @@ public final class MiniLyricsTimeline {
             at += Character.charCount(cp);
             // 0xFE0F is the emoji presentation selector.
             if (Character.isWhitespace(cp) || Character.isSpaceChar(cp) || cp == 0xFE0F) continue;
-            if ((cp >= '♩' && cp <= '♬') || cp == MUSICAL_NOTE || cp == MULTIPLE_MUSICAL_NOTES) {
-                note = true;
-            } else {
-                return false;
-            }
+            if (!isNoteCodePoint(cp)) return false;
+            note = true;
         }
         return note;
+    }
+
+    private static boolean isNoteCodePoint(int cp) {
+        return (cp >= '♩' && cp <= '♬') || cp == MUSICAL_NOTE || cp == MULTIPLE_MUSICAL_NOTES;
     }
 
     private void addGaps(List<SectionDotsMotion.Gap> classified, long start, long end,
@@ -138,28 +167,15 @@ public final class MiniLyricsTimeline {
         long position = Math.max(0, positionMs);
         if (durationMs > 0) position = Math.min(position, durationMs - 1);
 
-        int low = 0;
-        int high = gaps.size() - 1;
-        while (low <= high) {
-            final int mid = (low + high) >>> 1;
-            Gap gap = gaps.get(mid);
-            if (position < gap.startMs()) high = mid - 1;
-            else if (position >= gap.endMs()) low = mid + 1;
-            else return new Selection(null, gap, null);
-        }
+        Gap gap = gapAt(position);
+        if (gap != null) return new Selection(null, gap, null);
 
         // The last vocal that started at or before the position.
-        low = 0;
-        high = vocals.size() - 1;
-        while (low <= high) {
-            final int mid = (low + high) >>> 1;
-            if (vocals.get(mid).startMs() <= position) low = mid + 1;
-            else high = mid - 1;
-        }
+        int lastStarted = lastVocalStartedAt(position);
 
         // Prefer a lead vocal over a background vocal sung at the same time.
         Vocal background = null;
-        for (int i = high; i >= 0 && prefixEnds[i] > position; i--) {
+        for (int i = lastStarted; i >= 0 && prefixEnds[i] > position; i--) {
             Vocal vocal = vocals.get(i);
             if (vocal.endMs() <= position) continue;
             if (!vocal.line().isBG()) return new Selection(vocal, null, null);
@@ -167,7 +183,34 @@ public final class MiniLyricsTimeline {
         }
         if (background != null) return new Selection(background, null, null);
 
-        return new Selection(null, null, high >= 0 ? vocals.get(high) : null);
+        return new Selection(null, null, lastStarted >= 0 ? vocals.get(lastStarted) : null);
+    }
+
+    /** The gap covering this position, from the gaps sorted by start time, or null. */
+    @Nullable
+    private Gap gapAt(long position) {
+        int low = 0;
+        int high = gaps.size() - 1;
+        while (low <= high) {
+            final int mid = (low + high) >>> 1;
+            Gap gap = gaps.get(mid);
+            if (position < gap.startMs()) high = mid - 1;
+            else if (position >= gap.endMs()) low = mid + 1;
+            else return gap;
+        }
+        return null;
+    }
+
+    /** Index of the last vocal that started at or before the position, or -1 before the first. */
+    private int lastVocalStartedAt(long position) {
+        int low = 0;
+        int high = vocals.size() - 1;
+        while (low <= high) {
+            final int mid = (low + high) >>> 1;
+            if (vocals.get(mid).startMs() <= position) low = mid + 1;
+            else high = mid - 1;
+        }
+        return high;
     }
 
     public record Vocal(LyricsLine line, int index, long startMs, long endMs) {

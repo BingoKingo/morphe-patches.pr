@@ -74,6 +74,129 @@ public final class TTMLParser {
     private TTMLParser() {
     }
 
+    /** Takes one start tag of the head: its sections, and the values they hold. */
+    private static void onHeadStart(XmlPullParser p, HeadScan scan, List<String> songwriters,
+                                    List<String> amllCredits,
+                                    Map<String, AgentInfo> agentTypes,
+                                    Map<String, List<RomajiSyllable>> sidecarRoman,
+                                    Map<String, SidecarTranslation> sidecarTrans) throws XmlPullParserException, IOException {
+        final String local = localName(p.getName());
+        if ("head".equals(local)) {
+            scan.inHead = true;
+            return;
+        }
+        if (!scan.inHead) {
+            return;
+        }
+        if ("songwriters".equals(local)) {
+            scan.inSongwriters = true;
+            scan.songwritersDepth = 1;
+            return;
+        }
+        if (scan.inSongwriters) {
+            readSongwriter(p, scan, songwriters);
+            return;
+        }
+        if ("meta".equals(local) && isMetaNamespace(p)) {
+            collectMetaCredit(p, amllCredits);
+            return;
+        }
+        if ("agent".equals(local)) {
+            readAgent(p, scan);
+            return;
+        }
+        if (scan.inAgent && "name".equals(local)) {
+            readAgentName(p, scan);
+            return;
+        }
+        if ("transliterations".equals(local)) {
+            collectSidecarTransliterations(p, sidecarRoman);
+            return;
+        }
+        if ("translations".equals(local)) {
+            collectSidecarTranslations(p, sidecarTrans);
+        }
+    }
+
+    /** One songwriter, or the nesting that says the songwriters block is not over. */
+    private static void readSongwriter(XmlPullParser p, HeadScan scan, List<String> songwriters) throws XmlPullParserException, IOException {
+        if (!"songwriter".equals(localName(p.getName()))) {
+            scan.songwritersDepth++;
+            return;
+        }
+        // readTextContent swallows the closing tag too, so counting this one would leave
+        // songwritersDepth above zero at </songwriters> and latch inSongwriters, which swallows
+        // the transliterations below.
+        final String name = readTextContent(p);
+        if (!name.trim().isEmpty()) {
+            songwriters.add(name.trim());
+        }
+    }
+
+    private static void readAgent(XmlPullParser p, HeadScan scan) throws XmlPullParserException, IOException {
+        scan.agentId = getAttr(p, NS_TTM, "id", "xml:id");
+        scan.agentType = getAttr(p, NS_TTM, "type", "ttm:type");
+        if (scan.agentType == null) {
+            scan.agentType = getAttr(p, null, "type", "type");
+        }
+        scan.agentName = null;
+        scan.inAgent = true;
+    }
+
+    private static void readAgentName(XmlPullParser p, HeadScan scan) throws XmlPullParserException, IOException {
+        final String name = readTextContent(p);
+        if (!name.trim().isEmpty()) {
+            scan.agentName = name.trim();
+        }
+    }
+
+    /** Takes one end tag of the head, closing whatever the start tags opened. */
+    private static void onHeadEnd(XmlPullParser p, HeadScan scan,
+                                  Map<String, AgentInfo> agentTypes) throws XmlPullParserException, IOException {
+        final String local = localName(p.getName());
+        if ("head".equals(local)) {
+            scan.inHead = false;
+            return;
+        }
+        if (scan.inSongwriters && "songwriters".equals(local)) {
+            scan.songwritersDepth--;
+            if (scan.songwritersDepth <= 0) {
+                scan.inSongwriters = false;
+            }
+            return;
+        }
+        if (scan.inAgent && "agent".equals(local)) {
+            if (scan.agentId != null && scan.agentType != null) {
+                agentTypes.put(scan.agentId, new AgentInfo(scan.agentType, scan.agentName));
+            }
+            scan.resetAgent();
+        }
+    }
+
+    /**
+     * Where the head scan has got to: which part of the head it is inside, and the agent being
+     * read until its closing tag.
+     */
+    private static final class HeadScan {
+        boolean inHead;
+        boolean inSongwriters;
+        int songwritersDepth;
+        boolean inAgent;
+        @Nullable
+        String agentId;
+        @Nullable
+        String agentType;
+        @Nullable
+        String agentName;
+
+        void resetAgent() {
+            inAgent = false;
+            agentId = null;
+            agentType = null;
+            agentName = null;
+        }
+    }
+
     private static HeadMetadata parseHeadMetadata(String ttml) {
         List<String> songwriters = new ArrayList<>();
         List<String> amllCredits = new ArrayList<>();
@@ -87,76 +210,15 @@ public final class TTMLParser {
             final XmlPullParser p = factory.newPullParser();
             p.setInput(new StringReader(ttml));
 
-            boolean inHead = false;
-            boolean inSongwriters = false;
-            boolean inAgent = false;
-            int songwritersDepth = 0;
-            String agentId = null;
-            String agentType = null;
-            String agentName = null;
+            final HeadScan scan = new HeadScan();
 
             int event = p.getEventType();
             while (event != XmlPullParser.END_DOCUMENT) {
                 if (event == XmlPullParser.START_TAG) {
-                    final String local = localName(p.getName());
-                    if ("head".equals(local)) {
-                        inHead = true;
-                    } else if (inHead) {
-                        if ("songwriters".equals(local)) {
-                            inSongwriters = true;
-                            songwritersDepth = 1;
-                        } else if (inSongwriters) {
-                            if ("songwriter".equals(local)) {
-                                // readTextContent swallows the closing tag too, so counting this
-                                // one would leave songwritersDepth above zero at
-                                // </songwriters> and latch inSongwriters, which swallows
-                                // the transliterations below.
-                                final String name = readTextContent(p);
-                                if (!name.trim().isEmpty()) {
-                                    songwriters.add(name.trim());
-                                }
-                            } else {
-                                songwritersDepth++;
-                            }
-                        } else if ("meta".equals(local) && isMetaNamespace(p)) {
-                            collectMetaCredit(p, amllCredits);
-                        } else if ("agent".equals(local)) {
-                            agentId = getAttr(p, NS_TTM, "id", "xml:id");
-                            agentType = getAttr(p, NS_TTM, "type", "ttm:type");
-                            if (agentType == null) {
-                                agentType = getAttr(p, null, "type", "type");
-                            }
-                            agentName = null;
-                            inAgent = true;
-                        } else if (inAgent && "name".equals(local)) {
-                            final String name = readTextContent(p);
-                            if (!name.trim().isEmpty()) {
-                                agentName = name.trim();
-                            }
-                        } else if ("transliterations".equals(local)) {
-                            collectSidecarTransliterations(p, sidecarRoman);
-                        } else if ("translations".equals(local)) {
-                            collectSidecarTranslations(p, sidecarTrans);
-                        }
-                    }
+                    onHeadStart(p, scan, songwriters, amllCredits, agentTypes,
+                            sidecarRoman, sidecarTrans);
                 } else if (event == XmlPullParser.END_TAG) {
-                    final String local = localName(p.getName());
-                    if ("head".equals(local)) {
-                        inHead = false;
-                    } else if (inSongwriters && "songwriters".equals(local)) {
-                        songwritersDepth--;
-                        if (songwritersDepth <= 0) {
-                            inSongwriters = false;
-                        }
-                    } else if (inAgent && "agent".equals(local)) {
-                        if (agentId != null && agentType != null) {
-                            agentTypes.put(agentId, new AgentInfo(agentType, agentName));
-                        }
-                        inAgent = false;
-                        agentId = null;
-                        agentType = null;
-                        agentName = null;
-                    }
+                    onHeadEnd(p, scan, agentTypes);
                 }
                 event = p.next();
             }
@@ -175,17 +237,7 @@ public final class TTMLParser {
         try {
             final HeadMetadata hm = parseHeadMetadata(ttml);
 
-            final List<String> songwriters;
-            if (!hm.songwriters().isEmpty()) {
-                StringBuilder sb = new StringBuilder("Written by: ");
-                for (int i = 0; i < hm.songwriters().size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(hm.songwriters().get(i));
-                }
-                songwriters = List.of(sb.toString());
-            } else {
-                songwriters = null;
-            }
+            final List<String> songwriters = songwriterCredit(hm.songwriters());
             final List<String> amllCreditLines = hm.amllCredits();
             final Map<String, AgentInfo> agentTypes = hm.agentTypes();
             final Map<String, List<RomajiSyllable>> sidecarRoman = hm.sidecarRoman();
@@ -232,108 +284,10 @@ public final class TTMLParser {
 
                         final ParsedLine pl = processPElement(p, pBegin, pEnd);
 
-                        if (pl != null && (!pl.text().trim().isEmpty() || !pl.bgLines().isEmpty())) {
-                            final List<RomajiSyllable> lineSidecar =
-                                    findSidecarRoman(lineId, sidecarRoman);
-                            // Read off the sidecar before the words carry a reading, or the
-                            // line loses the parts no word matched.
-                            final String romaText = buildLineRomaji(pl.words(), lineSidecar);
-                            // The panel draws a reading over the words, not beside them.
-                            if (lineSidecar != null && !lineSidecar.isEmpty()) {
-                                alignRomajiToWords(pl.words(), lineSidecar);
-                            }
-
-                            if (!pl.text().trim().isEmpty()) {
-                                final LyricsLine line = new LyricsLine(
-                                        pl.begin(), pl.end(), pl.text(), pl.words(),
-                                        agentId, false, false, divSongPart);
-                                lines.add(line);
-                            }
-                            mainLineCount = lines.size();
-
-                            final String bgAgent = pl.bgAgentId() != null ? pl.bgAgentId() : agentId;
-                            for (LyricsLine bgSrc : pl.bgLines()) {
-                                final LyricsLine bgLine = new LyricsLine(
-                                        bgSrc.startTimeMs(), bgSrc.endTimeMs(),
-                                        bgSrc.text(), bgSrc.words(),
-                                        bgAgent, false, true, divSongPart);
-                                lines.add(bgLine);
-                            }
-
-                            if (!pl.text().trim().isEmpty()) {
-                                romanization.add(new LyricsLine(
-                                        LyricsLine.NO_TIME, romaText));
-                            }
-                            for (int i = 0; i < pl.bgLines().size(); i++) {
-                                romanization.add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                            }
-
-                            buildRomanizations(lineId, sidecarRoman, pl.words(), romanizations,
-                                    mainLineCount - 1, pl.bgLines().size());
-
-                            buildTranslations(lineId, sidecarTrans, translations,
-                                    mainLineCount - 1, pl.bgLines().size());
-
-                            if (pl.inlineTranslations() != null) {
-                                for (Map.Entry<String, String> e : pl.inlineTranslations().entrySet()) {
-                                    final String lang = e.getKey();
-                                    final String text = e.getValue();
-                                    if (text.isEmpty()) continue;
-                                    final List<LyricsLine> langLines = translations.computeIfAbsent(
-                                            lang, k -> new ArrayList<>());
-                                    while (langLines.size() < mainLineCount - 1) {
-                                        langLines.add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                                    }
-                                    langLines.add(new LyricsLine(LyricsLine.NO_TIME, text));
-                                }
-                                for (Map.Entry<String, List<LyricsLine>> e : translations.entrySet()) {
-                                    while (e.getValue().size() < lines.size()) {
-                                        e.getValue().add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                                    }
-                                }
-                            }
-
-                            if (pl.inlineRomanizations() != null) {
-                                for (Map.Entry<String, String> e : pl.inlineRomanizations().entrySet()) {
-                                    final String lang = e.getKey();
-                                    final String text = e.getValue();
-                                    if (text.isEmpty()) continue;
-                                    final List<LyricsLine> langLines = romanizations.computeIfAbsent(
-                                            lang, k -> new ArrayList<>());
-                                    while (langLines.size() < mainLineCount - 1) {
-                                        langLines.add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                                    }
-                                    langLines.add(new LyricsLine(LyricsLine.NO_TIME, text));
-                                }
-                            }
-
-                            if (pl.bgInlineTranslations() != null) {
-                                for (Map.Entry<String, String> e : pl.bgInlineTranslations().entrySet()) {
-                                    final String lang = "bg:" + e.getKey();
-                                    final String text = e.getValue();
-                                    if (text.isEmpty()) continue;
-                                    final List<LyricsLine> langLines = translations.computeIfAbsent(
-                                            lang, k -> new ArrayList<>());
-                                    while (langLines.size() < mainLineCount) {
-                                        langLines.add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                                    }
-                                    langLines.add(new LyricsLine(LyricsLine.NO_TIME, text));
-                                }
-                            }
-
-                            if (pl.bgInlineRomanizations() != null) {
-                                for (Map.Entry<String, String> e : pl.bgInlineRomanizations().entrySet()) {
-                                    final String lang = "bg:" + e.getKey();
-                                    final String text = e.getValue();
-                                    if (text.isEmpty()) continue;
-                                    final List<LyricsLine> langLines = romanizations.computeIfAbsent(
-                                            lang, k -> new ArrayList<>());
-                                    while (langLines.size() < mainLineCount) {
-                                        langLines.add(new LyricsLine(LyricsLine.NO_TIME, ""));
-                                    }
-                                    langLines.add(new LyricsLine(LyricsLine.NO_TIME, text));
-                                }
-                            }
+                        if (pl != null && hasSomething(pl)) {
+                            mainLineCount = addLineGroup(pl, lineId, agentId, divSongPart,
+                                    sidecarRoman, sidecarTrans, lines, romanization,
+                                    translations, romanizations);
                         }
                     }
                 } else if (event == XmlPullParser.END_TAG) {
@@ -360,18 +314,7 @@ public final class TTMLParser {
             final Map<String, List<LyricsLine>> romaOut =
                     romanizations.isEmpty() ? null : romanizations;
 
-            final Map<String, String> agentNames;
-            if (agentTypes.isEmpty()) {
-                agentNames = null;
-            } else {
-                final Map<String, String> names = new HashMap<>();
-                for (Map.Entry<String, AgentInfo> e : agentTypes.entrySet()) {
-                    if (e.getValue().name() != null) {
-                        names.put(e.getKey(), e.getValue().name());
-                    }
-                }
-                agentNames = names.isEmpty() ? null : names;
-            }
+            final Map<String, String> agentNames = agentNames(agentTypes);
 
             return new TtmlResult(lines,
                     LyricsMerge.hasText(romanization) ? romanization : null,
@@ -382,6 +325,133 @@ public final class TTMLParser {
         } catch (XmlPullParserException | IOException ex) {
             Logger.printDebug(() -> "Could not parse TTML to lyrics", ex);
             return null;
+        }
+    }
+
+    /** The songwriter credit line, or null when the head named none. */
+    @Nullable
+    private static List<String> songwriterCredit(List<String> songwriters) {
+        if (songwriters.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("Written by: ");
+        for (int i = 0; i < songwriters.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(songwriters.get(i));
+        }
+        return List.of(sb.toString());
+    }
+
+    /** Whether a parsed line has anything to show: text of its own, or background vocals. */
+    private static boolean hasSomething(ParsedLine pl) {
+        return !pl.text().trim().isEmpty() || !pl.bgLines().isEmpty();
+    }
+
+    /** The name each agent is credited with, or null when none of them was named. */
+    @Nullable
+    private static Map<String, String> agentNames(Map<String, AgentInfo> agentTypes) {
+        if (agentTypes.isEmpty()) {
+            return null;
+        }
+        final Map<String, String> names = new HashMap<>();
+        for (Map.Entry<String, AgentInfo> e : agentTypes.entrySet()) {
+            if (e.getValue().name() != null) {
+                names.put(e.getKey(), e.getValue().name());
+            }
+        }
+        return names.isEmpty() ? null : names;
+    }
+
+    /**
+     * Adds one parsed {@code <p>} to the lines: the lyric, then its background vocals, each with
+     * its reading where the sidecar has one, and the translations and readings that come with it.
+     *
+     * @return How many lines the main lyric had reached, counting only the lyric itself.
+     */
+    private static int addLineGroup(ParsedLine pl, @Nullable String lineId, String agentId,
+                                    @Nullable String divSongPart,
+                                    Map<String, List<RomajiSyllable>> sidecarRoman,
+                                    Map<String, SidecarTranslation> sidecarTrans,
+                                    List<LyricsLine> lines, List<LyricsLine> romanization,
+                                    Map<String, List<LyricsLine>> translations,
+                                    Map<String, List<LyricsLine>> romanizations) {
+        final List<RomajiSyllable> lineSidecar = findSidecarRoman(lineId, sidecarRoman);
+        // Read off the sidecar before the words carry a reading, or the line loses the parts no
+        // word matched.
+        final String romaText = buildLineRomaji(pl.words(), lineSidecar);
+        // The panel draws a reading over the words, not beside them.
+        if (lineSidecar != null && !lineSidecar.isEmpty()) {
+            alignRomajiToWords(pl.words(), lineSidecar);
+        }
+
+        final boolean hasText = !pl.text().trim().isEmpty();
+        if (hasText) {
+            lines.add(new LyricsLine(pl.begin(), pl.end(), pl.text(), pl.words(),
+                    agentId, false, false, divSongPart));
+        }
+        final int mainLineCount = lines.size();
+
+        final String bgAgent = pl.bgAgentId() != null ? pl.bgAgentId() : agentId;
+        for (LyricsLine bgSrc : pl.bgLines()) {
+            lines.add(new LyricsLine(bgSrc.startTimeMs(), bgSrc.endTimeMs(),
+                    bgSrc.text(), bgSrc.words(), bgAgent, false, true, divSongPart));
+        }
+
+        if (hasText) {
+            romanization.add(new LyricsLine(LyricsLine.NO_TIME, romaText));
+        }
+        for (int i = 0; i < pl.bgLines().size(); i++) {
+            romanization.add(new LyricsLine(LyricsLine.NO_TIME, ""));
+        }
+
+        buildRomanizations(lineId, sidecarRoman, pl.words(), romanizations,
+                mainLineCount - 1, pl.bgLines().size());
+
+        buildTranslations(lineId, sidecarTrans, translations,
+                mainLineCount - 1, pl.bgLines().size());
+
+        final int mainIndex = mainLineCount - 1;
+        addInlineRuns(translations, pl.inlineTranslations(), "", mainIndex,
+                pl.bgLines().size());
+        if (pl.inlineTranslations() != null) {
+            // A line's own translations leave every language one short of the vocals below it.
+            for (Map.Entry<String, List<LyricsLine>> e : translations.entrySet()) {
+                while (e.getValue().size() < lines.size()) {
+                    e.getValue().add(new LyricsLine(LyricsLine.NO_TIME, ""));
+                }
+            }
+        }
+        addInlineRuns(romanizations, pl.inlineRomanizations(), "", mainIndex,
+                pl.bgLines().size());
+        addInlineRuns(translations, pl.bgInlineTranslations(), "bg:", mainIndex,
+                pl.bgLines().size() + 1);
+        addInlineRuns(romanizations, pl.bgInlineRomanizations(), "bg:", mainIndex,
+                pl.bgLines().size() + 1);
+        return mainLineCount;
+    }
+
+    /**
+     * Adds one inline run per language, padded up to the line it belongs to.
+     *
+     * @param padTo The size each language must have reached before its own line is added.
+     * @param prefix What is put in front of the language key, empty for the lyric's own runs.
+     */
+    private static void addInlineRuns(Map<String, List<LyricsLine>> runs,
+                                      @Nullable Map<String, String> inline, String prefix,
+                                      int padTo, int padToSize) {
+        if (inline == null) {
+            return;
+        }
+        for (Map.Entry<String, String> e : inline.entrySet()) {
+            final String text = e.getValue();
+            if (text.isEmpty()) continue;
+            final List<LyricsLine> langLines = runs.computeIfAbsent(
+                    prefix + e.getKey(), k -> new ArrayList<>());
+            final int needed = prefix.isEmpty() ? padTo : padTo + padToSize;
+            while (langLines.size() < needed) {
+                langLines.add(new LyricsLine(LyricsLine.NO_TIME, ""));
+            }
+            langLines.add(new LyricsLine(LyricsLine.NO_TIME, text));
         }
     }
 
@@ -397,35 +467,38 @@ public final class TTMLParser {
             }
 
             final int agentNum = extractAgentNumber(agentId);
-            boolean isDuet;
-
             if (agentNum > 0) {
-                isDuet = !LyricsLine.isCenteredAgentId(agentId) && (agentNum % 2 == 0);
-            } else {
-                final AgentInfo info = agentTypes.get(agentId);
-                final String type = info != null ? info.type() : AGENT_TYPE_PERSON;
-
-                if (AGENT_TYPE_GROUP.equals(type)) {
-                    isDuet = false;
-                } else if (lastPersonAgentId == null) {
-                    isDuet = AGENT_TYPE_OTHER.equals(type);
-                } else if (agentId.equals(lastPersonAgentId)) {
-                    isDuet = lastPersonIsDuet;
-                } else {
-                    isDuet = !lastPersonIsDuet;
-                }
-
-                if (!AGENT_TYPE_GROUP.equals(type)) {
-                    lastPersonAgentId = agentId;
-                    lastPersonIsDuet = isDuet;
-                }
+                lines.set(i, withDuet(original, agentId,
+                        !LyricsLine.isCenteredAgentId(agentId) && (agentNum % 2 == 0)));
+                continue;
             }
 
-            lines.set(i, new LyricsLine(
-                    original.startTimeMs(), original.endTimeMs(), original.text(),
-                    original.words(), agentId, isDuet, original.isBG(),
-                    original.songPart()));
+            final AgentInfo info = agentTypes.get(agentId);
+            final String type = info != null ? info.type() : AGENT_TYPE_PERSON;
+            if (AGENT_TYPE_GROUP.equals(type)) {
+                lines.set(i, withDuet(original, agentId, false));
+                continue;
+            }
+            final boolean isDuet;
+            if (lastPersonAgentId == null) {
+                isDuet = AGENT_TYPE_OTHER.equals(type);
+            } else if (agentId.equals(lastPersonAgentId)) {
+                isDuet = lastPersonIsDuet;
+            } else {
+                isDuet = !lastPersonIsDuet;
+            }
+            lastPersonAgentId = agentId;
+            lastPersonIsDuet = isDuet;
+            lines.set(i, withDuet(original, agentId, isDuet));
         }
+    }
+
+    /** The same line, marked as a duet side or not. */
+    private static LyricsLine withDuet(LyricsLine original, String agentId, boolean isDuet) {
+        return new LyricsLine(
+                original.startTimeMs(), original.endTimeMs(), original.text(),
+                original.words(), agentId, isDuet, original.isBG(),
+                original.songPart());
     }
 
     /** Extracts trailing integer from agent ID (e.g. "v1" → 1, "singer2" → 2). Returns 0 if none. */
@@ -1040,24 +1113,7 @@ public final class TTMLParser {
                 } else if (inRubyText && inRubyContainer) {
                     rubyTextBuf.append(raw);
                 } else if (inBg && bgWrapperDepth == 0) {
-                    if (isWhitespace) {
-                        if (!bgWords.isEmpty()) {
-                            final Word prev = bgWords.get(bgWords.size() - 1);
-                            final boolean cjk = isContinuousCjk(prev.text());
-                            if (!hasNewline || !cjk) {
-                                if (bgFullText.length() > 0 && bgFullText.charAt(bgFullText.length() - 1) != ' ') {
-                                    bgFullText.append(' ');
-                                }
-                                if (!prev.endsWithSpace()) {
-                                    bgWords.set(bgWords.size() - 1, new Word(
-                                            prev.startMs(), prev.endMs(),
-                                            prev.text(), prev.romaji(), true));
-                                }
-                            }
-                        }
-                    } else {
-                        bgFullText.append(raw);
-                    }
+                    appendLineChar(bgFullText, bgWords, raw, isWhitespace, hasNewline);
                 } else if (inTranslation) {
                     transBuf.append(raw);
                 } else if (inRoman) {
@@ -1065,24 +1121,7 @@ public final class TTMLParser {
                 } else if (inWord && !inRubyContainer) {
                     wordBuf.append(raw);
                 } else if (!inBg && !inRubyContainer) {
-                    if (isWhitespace) {
-                        if (!words.isEmpty()) {
-                            final Word prev = words.get(words.size() - 1);
-                            final boolean cjk = isContinuousCjk(prev.text());
-                            if (!hasNewline || !cjk) {
-                                if (fullText.length() > 0 && fullText.charAt(fullText.length() - 1) != ' ') {
-                                    fullText.append(' ');
-                                }
-                                if (!prev.endsWithSpace()) {
-                                    words.set(words.size() - 1, new Word(
-                                            prev.startMs(), prev.endMs(),
-                                            prev.text(), prev.romaji(), true));
-                                }
-                            }
-                        }
-                    } else {
-                        fullText.append(raw);
-                    }
+                    appendLineChar(fullText, words, raw, isWhitespace, hasNewline);
                 }
             }
         }
@@ -1562,6 +1601,35 @@ public final class TTMLParser {
 
     private static String normalizeTextRaw(String s) {
         return MULTI_SPACE.matcher(s).replaceAll(" ");
+    }
+
+    /**
+     * Adds one run of text to a line being read.
+     *
+     * <p>Text goes in as it is. Whitespace separates the last word from the next, unless it is a
+     * line break inside a run of CJK, where the line break already does that.
+     */
+    private static void appendLineChar(StringBuilder lineText, List<Word> lineWords, String raw,
+                                       boolean isWhitespace, boolean hasNewline) {
+        if (!isWhitespace) {
+            lineText.append(raw);
+            return;
+        }
+        if (lineWords.isEmpty()) {
+            return;
+        }
+        final Word prev = lineWords.get(lineWords.size() - 1);
+        final boolean cjk = isContinuousCjk(prev.text());
+        if (hasNewline && cjk) {
+            return;
+        }
+        if (lineText.length() > 0 && lineText.charAt(lineText.length() - 1) != ' ') {
+            lineText.append(' ');
+        }
+        if (!prev.endsWithSpace()) {
+            lineWords.set(lineWords.size() - 1, new Word(
+                    prev.startMs(), prev.endMs(), prev.text(), prev.romaji(), true));
+        }
     }
 
     private static String normalizeText(String s) {

@@ -7,6 +7,8 @@
 
 package app.morphe.extension.music.patches.lyrics.parsers;
 
+import androidx.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -31,63 +33,70 @@ public final class KRCParser {
         }
 
         for (String rawLine : krc.split("\\r?\\n")) {
-            String line = rawLine.trim();
-            if (line.isEmpty() || line.charAt(0) != '[') {
-                continue;
+            LyricsLine line = parseLine(rawLine.trim());
+            if (line != null) {
+                lines.add(line);
             }
-
-            Matcher lineMatch = KRC_LINE.matcher(line);
-            if (!lineMatch.matches()) {
-                continue;
-            }
-
-            // Every group of both patterns is mandatory, so a match fills them all. The
-            // guard keeps that from turning silent if a pattern ever gains an optional group.
-            String startText = lineMatch.group(1);
-            String durationText = lineMatch.group(2);
-            String content = lineMatch.group(3);
-            if (startText == null || durationText == null || content == null) {
-                continue;
-            }
-
-            long lineStart = Long.parseLong(startText);
-            long lineDuration = Long.parseLong(durationText);
-            long lineEnd = lineStart + lineDuration;
-
-            List<Long> offsets = new ArrayList<>();
-            List<String> texts = new ArrayList<>();
-            Matcher wordMatch = KRC_WORD.matcher(content);
-            while (wordMatch.find()) {
-                String offsetText = wordMatch.group(1);
-                String wordText = wordMatch.group(4);
-                if (offsetText == null || wordText == null) {
-                    continue;
-                }
-                offsets.add(Long.parseLong(offsetText));
-                texts.add(wordText);
-            }
-
-            List<Word> words = new ArrayList<>();
-            StringBuilder full = new StringBuilder();
-            for (int i = 0; i < offsets.size(); i++) {
-                long wordStart = lineStart + offsets.get(i);
-                long wordEnd = (i < offsets.size() - 1) ? lineStart + offsets.get(i + 1) : lineEnd;
-                String text = texts.get(i);
-                words.add(new Word(wordStart, wordEnd, text));
-                full.append(text);
-            }
-            if (words.isEmpty() && !content.isEmpty()) {
-                full.append(content);
-            }
-
-            String text = full.toString().trim();
-            if (text.isEmpty()) {
-                continue;
-            }
-            lines.add(new LyricsLine(lineStart, lineEnd, text, words));
         }
 
         lines.sort(Comparator.comparingLong(LyricsLine::startTimeMs));
         return lines;
+    }
+
+    @Nullable
+    private static LyricsLine parseLine(String line) {
+        if (line.isEmpty() || line.charAt(0) != '[') {
+            return null;
+        }
+
+        Matcher lineMatch = KRC_LINE.matcher(line);
+        if (!lineMatch.matches()) {
+            return null;
+        }
+
+        // Every group of both patterns is mandatory, so a match fills them all. The
+        // guard keeps that from turning silent if a pattern ever gains an optional group.
+        String startText = lineMatch.group(1);
+        String durationText = lineMatch.group(2);
+        String content = lineMatch.group(3);
+        if (startText == null || durationText == null || content == null) {
+            return null;
+        }
+
+        long lineStart = Long.parseLong(startText);
+        long lineDuration = Long.parseLong(durationText);
+        long lineEnd = lineStart + lineDuration;
+
+        List<Long> offsets = new ArrayList<>();
+        List<String> texts = new ArrayList<>();
+        Matcher wordMatch = KRC_WORD.matcher(content);
+        while (wordMatch.find()) {
+            String offsetText = wordMatch.group(1);
+            String wordText = wordMatch.group(4);
+            if (offsetText == null || wordText == null) {
+                continue;
+            }
+            offsets.add(Long.parseLong(offsetText));
+            texts.add(wordText);
+        }
+
+        List<Word> words = new ArrayList<>();
+        StringBuilder full = new StringBuilder();
+        for (int i = 0; i < offsets.size(); i++) {
+            long wordStart = lineStart + offsets.get(i);
+            long wordEnd = (i < offsets.size() - 1) ? lineStart + offsets.get(i + 1) : lineEnd;
+            String text = texts.get(i);
+            words.add(new Word(wordStart, wordEnd, text));
+            full.append(text);
+        }
+        if (words.isEmpty() && !content.isEmpty()) {
+            full.append(content);
+        }
+
+        String text = full.toString().trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        return new LyricsLine(lineStart, lineEnd, text, words);
     }
 }

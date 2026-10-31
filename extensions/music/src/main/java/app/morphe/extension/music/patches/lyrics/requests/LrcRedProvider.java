@@ -72,91 +72,11 @@ public final class LrcRedProvider implements LyricsProvider {
         String itemAlbum = normalize(itemAlbumName);
 
         int score = 0;
-
-        // Title.
-        if (!targetFullTitle.isEmpty() && targetFullTitle.equals(itemFullTitle)) {
-            score += 50;
-        } else if (!targetBaseTitle.isEmpty() && !itemBaseTitle.isEmpty()) {
-            if (targetBaseTitle.equals(itemBaseTitle)) {
-                score += 35;
-            } else if (itemBaseTitle.contains(targetBaseTitle) || targetBaseTitle.contains(itemBaseTitle)) {
-                score += 15;
-            } else {
-                score -= 40;
-            }
-        }
-
-        // Artist.
-        if (!targetArtist.isEmpty() && !itemArtist.isEmpty()) {
-            if (targetArtist.equals(itemArtist)) {
-                score += 30;
-            } else if (itemArtist.contains(targetArtist) || targetArtist.contains(itemArtist)) {
-                score += 15;
-            } else {
-                List<String> targetArtists = extractArtists(track.artist());
-                List<String> itemArtists = extractArtists(itemArtistName);
-                boolean hasOverlap = false;
-                for (String ta : targetArtists) {
-                    for (String ia : itemArtists) {
-                        if (ia.equals(ta) || ia.contains(ta) || ta.contains(ia)) {
-                            hasOverlap = true;
-                            break;
-                        }
-                    }
-                    if (hasOverlap) {
-                        break;
-                    }
-                }
-                if (hasOverlap) {
-                    score += 10;
-                } else {
-                    score -= 50;
-                }
-            }
-        }
-
-        // Album.
-        if (!targetAlbum.isEmpty() && !itemAlbum.isEmpty()) {
-            if (targetAlbum.equals(itemAlbum)) {
-                score += 35;
-            } else if (itemAlbum.contains(targetAlbum) || targetAlbum.contains(itemAlbum)) {
-                score += 20;
-            }
-
-            boolean targetIsSingle = targetAlbum.contains("single");
-            boolean itemIsSingle = itemAlbum.contains("single");
-            if (!targetIsSingle && itemIsSingle) {
-                score -= 15;
-            } else if (targetIsSingle && itemIsSingle) {
-                score += 10;
-            }
-        }
-
-        // Duration.
-        if (targetDuration > 0 && itemDuration > 0) {
-            int diff = Math.abs(itemDuration - targetDuration);
-            if (diff == 0) {
-                score += 25;
-            } else if (diff <= 1) {
-                score += 20;
-            } else if (diff <= 2) {
-                score += 15;
-            } else if (diff <= 5) {
-                score += 5;
-            } else if (diff > 15) {
-                score -= 30;
-            }
-        }
-
-        // Word sync is preferred over line sync.
-        if ("word".equalsIgnoreCase(itemTimingType)) {
-            score += 15;
-        } else if ("line".equalsIgnoreCase(itemTimingType)) {
-            score += 8;
-        } else {
-            score -= 10;
-        }
-
+        score += titleScore(targetFullTitle, targetBaseTitle, itemFullTitle, itemBaseTitle);
+        score += artistScore(track.artist(), itemArtistName, targetArtist, itemArtist);
+        score += albumScore(targetAlbum, itemAlbum);
+        score += durationScore(targetDuration, itemDuration);
+        score += timingScore(itemTimingType);
         // A remix, cover or other variant the track is not.
         String trackLower = (track.title() + " " + track.album()).toLowerCase(Locale.ROOT);
         String itemLower = (itemTrackName + " " + itemAlbumName).toLowerCase(Locale.ROOT);
@@ -167,6 +87,101 @@ public final class LrcRedProvider implements LyricsProvider {
         }
 
         return score;
+    }
+
+    private static int titleScore(String targetFullTitle, String targetBaseTitle,
+                                  String itemFullTitle, String itemBaseTitle) {
+        if (!targetFullTitle.isEmpty() && targetFullTitle.equals(itemFullTitle)) {
+            return 50;
+        }
+        if (targetBaseTitle.isEmpty() || itemBaseTitle.isEmpty()) {
+            return 0;
+        }
+        if (targetBaseTitle.equals(itemBaseTitle)) {
+            return 35;
+        }
+        if (itemBaseTitle.contains(targetBaseTitle) || targetBaseTitle.contains(itemBaseTitle)) {
+            return 15;
+        }
+        return -40;
+    }
+
+    private static int artistScore(String targetArtistRaw, String itemArtistRaw,
+                                   String targetArtist, String itemArtist) {
+        if (targetArtist.isEmpty() || itemArtist.isEmpty()) {
+            return 0;
+        }
+        if (targetArtist.equals(itemArtist)) {
+            return 30;
+        }
+        if (itemArtist.contains(targetArtist) || targetArtist.contains(itemArtist)) {
+            return 15;
+        }
+        boolean hasOverlap = hasArtistOverlap(extractArtists(targetArtistRaw), extractArtists(itemArtistRaw));
+        return hasOverlap ? 10 : -50;
+    }
+
+    private static boolean hasArtistOverlap(List<String> targetArtists, List<String> itemArtists) {
+        for (String ta : targetArtists) {
+            for (String ia : itemArtists) {
+                if (ia.equals(ta) || ia.contains(ta) || ta.contains(ia)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int albumScore(String targetAlbum, String itemAlbum) {
+        if (targetAlbum.isEmpty() || itemAlbum.isEmpty()) {
+            return 0;
+        }
+        int score = 0;
+        if (targetAlbum.equals(itemAlbum)) {
+            score += 35;
+        } else if (itemAlbum.contains(targetAlbum) || targetAlbum.contains(itemAlbum)) {
+            score += 20;
+        }
+
+        boolean targetIsSingle = targetAlbum.contains("single");
+        boolean itemIsSingle = itemAlbum.contains("single");
+        if (!targetIsSingle && itemIsSingle) {
+            score -= 15;
+        } else if (targetIsSingle && itemIsSingle) {
+            score += 10;
+        }
+        return score;
+    }
+
+    private static int durationScore(int targetDuration, int itemDuration) {
+        if (targetDuration <= 0 || itemDuration <= 0) {
+            return 0;
+        }
+        int diff = Math.abs(itemDuration - targetDuration);
+        if (diff == 0) {
+            return 25;
+        }
+        if (diff <= 1) {
+            return 20;
+        }
+        if (diff <= 2) {
+            return 15;
+        }
+        if (diff <= 5) {
+            return 5;
+        }
+        return diff > 15 ? -30 : 0;
+    }
+
+    /** Word sync is preferred over line sync. */
+    private static int timingScore(String itemTimingType) {
+        if ("word".equalsIgnoreCase(itemTimingType)) {
+            return 15;
+        }
+        if ("line".equalsIgnoreCase(itemTimingType)) {
+            return 8;
+        }
+        return -10;
     }
 
     private static String normalize(String str) {
@@ -227,13 +242,8 @@ public final class LrcRedProvider implements LyricsProvider {
         }
 
         for (JSONObject candidate : candidates) {
-            String lyricsUrl = candidate.optString("lyricsUrl", "");
-            if (lyricsUrl.isEmpty()) {
-                continue;
-            }
-
-            Lyrics lyrics = downloadLyrics(lyricsUrl);
-            if (lyrics != null && !lyrics.isEmpty()) {
+            Lyrics lyrics = candidateLyrics(candidate);
+            if (lyrics != null) {
                 return FetchResult.of(
                         lyrics,
                         candidate.optString("track_name", ""),
@@ -255,19 +265,13 @@ public final class LrcRedProvider implements LyricsProvider {
         }
 
         List<Lyrics.ScoredLyrics> scored = new ArrayList<>();
-        int count = 0;
         for (JSONObject candidate : candidates) {
-            if (count >= LyricsRequests.MAX_CANDIDATES) {
+            if (scored.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
 
-            String lyricsUrl = candidate.optString("lyricsUrl", "");
-            if (lyricsUrl.isEmpty()) {
-                continue;
-            }
-
-            Lyrics lyrics = downloadLyrics(lyricsUrl);
-            if (lyrics != null && !lyrics.isEmpty()) {
+            Lyrics lyrics = candidateLyrics(candidate);
+            if (lyrics != null) {
                 int score = LyricsRequests.scoreLyricsCandidate(
                         candidate.optString("track_name", ""),
                         candidate.optString("artist_name", ""),
@@ -276,11 +280,21 @@ public final class LrcRedProvider implements LyricsProvider {
                         track
                 );
                 scored.add(new Lyrics.ScoredLyrics(score, lyrics));
-                count++;
             }
         }
 
         return Lyrics.sortScoredByScore(scored);
+    }
+
+    /** The non-empty lyrics one candidate points at, or null when it has none. */
+    @Nullable
+    private Lyrics candidateLyrics(JSONObject candidate) {
+        String lyricsUrl = candidate.optString("lyricsUrl", "");
+        if (lyricsUrl.isEmpty()) {
+            return null;
+        }
+        Lyrics lyrics = downloadLyrics(lyricsUrl);
+        return lyrics != null && !lyrics.isEmpty() ? lyrics : null;
     }
 
     private List<JSONObject> queryCandidates(TrackInfo track) {
@@ -381,19 +395,8 @@ public final class LrcRedProvider implements LyricsProvider {
             String trimmed = content.trim();
             if (trimmed.startsWith("<") || lyricsUrl.endsWith(".ttml")) {
                 return TTMLParser.ttmlToLyrics(content, name(), lyricsUrl);
-            } else {
-                LRCParser.LrcParseResult lrc = LRCParser.parseSyncedWithCreditLines(content);
-                if (!lrc.lines.isEmpty()) {
-                    return new Lyrics(lrc.lines, name(), true, null, null, null,
-                            lrc.creditLines.isEmpty() ? null : lrc.creditLines,
-                            content, "lrc", lyricsUrl);
-                }
-                List<LyricsLine> plain = LRCParser.parsePlain(content);
-                if (!plain.isEmpty()) {
-                    return new Lyrics(plain, name(), false, null, null, null, null,
-                            content, "lrc", lyricsUrl);
-                }
             }
+            return lrcOrPlain(content, lyricsUrl);
         } catch (Exception ex) {
             Logger.printDebug(() -> "LrcRed download failed: " + lyricsUrl, ex);
         } finally {
@@ -402,6 +405,23 @@ public final class LrcRedProvider implements LyricsProvider {
             }
         }
 
+        return null;
+    }
+
+    /** The synced lines of an LRC download, falling back to its plain lines. */
+    @Nullable
+    private Lyrics lrcOrPlain(String content, String lyricsUrl) {
+        LRCParser.LrcParseResult lrc = LRCParser.parseSyncedWithCreditLines(content);
+        if (!lrc.lines.isEmpty()) {
+            return new Lyrics(lrc.lines, name(), true, null, null, null,
+                    lrc.creditLines.isEmpty() ? null : lrc.creditLines,
+                    content, "lrc", lyricsUrl);
+        }
+        List<LyricsLine> plain = LRCParser.parsePlain(content);
+        if (!plain.isEmpty()) {
+            return new Lyrics(plain, name(), false, null, null, null, null,
+                    content, "lrc", lyricsUrl);
+        }
         return null;
     }
 

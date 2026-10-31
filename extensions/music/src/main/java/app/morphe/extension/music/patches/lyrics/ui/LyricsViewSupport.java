@@ -133,17 +133,22 @@ final class LyricsViewSupport {
             if (child == text || child.getVisibility() == View.GONE) {
                 continue;
             }
-            int height = child.getHeight();
-            ViewGroup.LayoutParams lp = child.getLayoutParams();
-            if (height <= 0 && lp != null && lp.height > 0) {
-                height = lp.height;
-            }
-            total += height;
-            if (lp instanceof ViewGroup.MarginLayoutParams margins) {
-                total += margins.topMargin + margins.bottomMargin;
-            }
+            total += childHeight(child);
         }
         return total;
+    }
+
+    /** The measured height of one child, falling back to its layout height, plus its margins. */
+    private static int childHeight(View child) {
+        int height = child.getHeight();
+        ViewGroup.LayoutParams lp = child.getLayoutParams();
+        if (height <= 0 && lp != null && lp.height > 0) {
+            height = lp.height;
+        }
+        if (lp instanceof ViewGroup.MarginLayoutParams margins) {
+            height += margins.topMargin + margins.bottomMargin;
+        }
+        return height;
     }
 
     static void applySectionDotSize(@Nullable LinearLayout row) {
@@ -153,20 +158,24 @@ final class LyricsViewSupport {
         final int size = scaledPixels(row.getContext(), LyricsPanelView.SECTION_DOT_SIZE_FACTOR);
         final int gap = scaledPixels(row.getContext(), LyricsPanelView.SECTION_DOT_GAP_FACTOR);
         for (int i = 0; i < row.getChildCount(); i++) {
-            View dot = row.getChildAt(i);
-            if (dot == null) {
-                continue;
-            }
-            LinearLayout.LayoutParams params =
-                    (LinearLayout.LayoutParams) dot.getLayoutParams();
-            if (params == null) {
-                continue;
-            }
-            params.width = size;
-            params.height = size;
-            params.setMarginStart(i == 0 ? 0 : gap);
-            dot.setLayoutParams(params);
+            sizeDot(row.getChildAt(i), i == 0 ? 0 : gap, size);
         }
+    }
+
+    /** Sizes one section dot, leaving any row member that is not a positioned child untouched. */
+    private static void sizeDot(@Nullable View dot, int marginStart, int size) {
+        if (dot == null) {
+            return;
+        }
+        LinearLayout.LayoutParams params =
+                (LinearLayout.LayoutParams) dot.getLayoutParams();
+        if (params == null) {
+            return;
+        }
+        params.width = size;
+        params.height = size;
+        params.setMarginStart(marginStart);
+        dot.setLayoutParams(params);
     }
 
     /**
@@ -182,10 +191,9 @@ final class LyricsViewSupport {
             List<LyricsSpanBuilder.WordTiming> lineTimings) {
         if (!only) {
             // Syllable readings are drawn by the view from the same timings that light the lyric.
-            if (result.showSyllableRomanization()) {
-                return result.readingSpans();
-            }
-            return withReading(lineTimings, result);
+            return result.showSyllableRomanization()
+                    ? result.readingSpans()
+                    : withReading(lineTimings, result);
         }
         List<LyricsSpanBuilder.WordTiming> spans = result.readingSpans();
         return spans == null || spans.isEmpty() ? Collections.emptyList() : spans;
@@ -221,12 +229,7 @@ final class LyricsViewSupport {
         }
         if (view.isSecondary()) {
             // A background vocal shows and hides with its own expansion instead.
-            if (view.fadeAnimator != null) {
-                view.fadeAnimator.cancel();
-                view.fadeAnimator = null;
-            }
-            view.lineAlpha = 1f;
-            view.fadeTargetAlpha = 1f;
+            resetSecondaryFade(view);
             return;
         }
         // Called on every highlight tick, so a fade already heading here is left to finish.
@@ -248,6 +251,21 @@ final class LyricsViewSupport {
             view.invalidate();
             return;
         }
+        startFadeAnimation(view, alpha, targetScale, startAlpha, startScale);
+    }
+
+    /** Drops a background vocal's own fade and puts it back at full strength. */
+    private static void resetSecondaryFade(LyricsLineView view) {
+        if (view.fadeAnimator != null) {
+            view.fadeAnimator.cancel();
+            view.fadeAnimator = null;
+        }
+        view.lineAlpha = 1f;
+        view.fadeTargetAlpha = 1f;
+    }
+
+    private static void startFadeAnimation(LyricsLineView view, float alpha, float targetScale,
+                                           float startAlpha, float startScale) {
         ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
         animator.setDuration(HIGHLIGHT_FADE_DURATION_MILLISECONDS);
         animator.setInterpolator(FAST_OUT_SLOW_IN);
@@ -423,29 +441,63 @@ final class LyricsViewSupport {
         SpannableStringBuilder text = new SpannableStringBuilder();
         appendSourceLine(text, String.format(str(LYRICS_SOURCE_KEY), providerName), onSourceClicked);
 
-        if (onlyMode != LyricsPanelView.OnlyMode.ROMA) {
-            if (translated && translatedFromGoogle) {
-                appendLink(text, str("morphe_music_lyrics_translated_by_google"),
-                        true, onTranslationLanguage);
-            } else if (translated && translatedFromAI && translatedAiModel != null) {
-                appendLink(text, String.format(str("morphe_music_lyrics_translated_by_ai"),
-                        translatedAiModel), true, onTranslationLanguage);
-            }
+        if (!onlyMode.dropsTranslation()) {
+            appendTranslationSource(text, translated, translatedFromGoogle, translatedFromAI,
+                    translatedAiModel, onTranslationLanguage);
         }
-        if (onlyMode != LyricsPanelView.OnlyMode.TRANS && romanized) {
-            if (romanizedFromGoogle) {
-                appendLink(text, str("morphe_music_lyrics_romanized_by_google"),
-                        false, onRomanizationLanguage);
-            } else if (romanizedFromAI && romanizedAiModel != null) {
-                appendLink(text, String.format(str("morphe_music_lyrics_romanized_by_ai"),
-                        romanizedAiModel), false, onRomanizationLanguage);
-            } else if (romanizedLocalDictionary != null) {
-                // Named and nothing more: the licences are in the About row.
-                appendLink(text, String.format(str("morphe_music_lyrics_romanized_by_local"),
-                        romanizedLocalDictionary), false, onRomanizationLanguage);
-            }
+        if (!onlyMode.dropsRomanization()) {
+            appendRomanizationSource(text, romanized, romanizedFromGoogle, romanizedFromAI,
+                    romanizedAiModel, romanizedLocalDictionary, onRomanizationLanguage);
         }
         return text;
+    }
+
+    /**
+     * Names whoever translated the lyrics, when the panel is showing a translation. The AI model
+     * is only named when one was recorded, so a translation without a model adds no line.
+     */
+    private static void appendTranslationSource(SpannableStringBuilder text, boolean translated,
+                                                boolean translatedFromGoogle,
+                                                boolean translatedFromAI,
+                                                @Nullable String translatedAiModel,
+                                                @Nullable Runnable onTranslationLanguage) {
+        if (!translated) {
+            return;
+        }
+        if (translatedFromGoogle) {
+            appendLink(text, str("morphe_music_lyrics_translated_by_google"),
+                    true, onTranslationLanguage);
+        } else if (translatedFromAI && translatedAiModel != null) {
+            appendLink(text, String.format(str("morphe_music_lyrics_translated_by_ai"),
+                    translatedAiModel), true, onTranslationLanguage);
+        }
+    }
+
+    /**
+     * Names whoever romanized the lyrics, when the panel is showing a romanization. Google and the
+     * AI come in that order, and a local dictionary is only named when one was used.
+     */
+    private static void appendRomanizationSource(SpannableStringBuilder text,
+                                                 boolean romanized,
+                                                 boolean romanizedFromGoogle,
+                                                 boolean romanizedFromAI,
+                                                 @Nullable String romanizedAiModel,
+                                                 @Nullable String romanizedLocalDictionary,
+                                                 @Nullable Runnable onRomanizationLanguage) {
+        if (!romanized) {
+            return;
+        }
+        if (romanizedFromGoogle) {
+            appendLink(text, str("morphe_music_lyrics_romanized_by_google"),
+                    false, onRomanizationLanguage);
+        } else if (romanizedFromAI && romanizedAiModel != null) {
+            appendLink(text, String.format(str("morphe_music_lyrics_romanized_by_ai"),
+                    romanizedAiModel), false, onRomanizationLanguage);
+        } else if (romanizedLocalDictionary != null) {
+            // Named and nothing more: the licences are in the About row.
+            appendLink(text, String.format(str("morphe_music_lyrics_romanized_by_local"),
+                    romanizedLocalDictionary), false, onRomanizationLanguage);
+        }
     }
 
     /** Appends a source line that opens its URL, not a language picker. */

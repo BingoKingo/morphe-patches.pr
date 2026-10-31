@@ -248,29 +248,16 @@ public final class MusixmatchProvider extends ScoredSongProvider {
         final List<ScoredSong> scored = new ArrayList<>();
         ScoredSong firstAccepted = null;
         for (JSONObject trackObj : trackObjs) {
-            final int trackId = trackObj.optInt("track_id", -1);
-            if (trackId <= 0) continue;
-            final Lyrics lyrics;
-            try {
-                lyrics = fetchLyricsByTrackId(trackId, token);
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Could not fetch Musixmatch lyrics by track ID", ex);
-                continue;
+            final ScoredSong candidate = scoredSongOf(trackObj, token, track);
+            if (candidate == null) continue;
+
+            if (firstAccepted == null) {
+                firstAccepted = candidate;
             }
-            if (lyrics != null) {
-                String title = trackObj.optString("track_name", "");
-                String artist = trackObj.optString("artist_name", "");
-                long durationSec = trackObj.optInt("track_length", 0);
-                int score = LyricsRequests.scoreLyricsCandidate(
-                        title, artist, durationSec, lyrics, track);
-                ScoredSong candidate = new ScoredSong(score, lyrics, title, artist, durationSec);
-                if (firstAccepted == null) {
-                    firstAccepted = candidate;
-                }
-                if (score >= LyricsRequests.SOFT_MIN + LyricsRequests.syncRank(lyrics)) {
-                    scored.add(candidate);
-                    break;
-                }
+            if (candidate.score() >= LyricsRequests.SOFT_MIN
+                    + LyricsRequests.syncRank(candidate.lyrics())) {
+                scored.add(candidate);
+                break;
             }
         }
         if (scored.isEmpty() && firstAccepted != null) {
@@ -279,6 +266,29 @@ public final class MusixmatchProvider extends ScoredSongProvider {
 
         scored.sort((a, b) -> Integer.compare(b.score(), a.score()));
         return scored;
+    }
+
+    /** The scored answer of one search result, or null when it has no usable lyrics. */
+    @Nullable
+    private ScoredSong scoredSongOf(JSONObject trackObj, String token, TrackInfo track) {
+        final int trackId = trackObj.optInt("track_id", -1);
+        if (trackId <= 0) return null;
+
+        final Lyrics lyrics;
+        try {
+            lyrics = fetchLyricsByTrackId(trackId, token);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not fetch Musixmatch lyrics by track ID", ex);
+            return null;
+        }
+        if (lyrics == null) return null;
+
+        final String title = trackObj.optString("track_name", "");
+        final String artist = trackObj.optString("artist_name", "");
+        final long durationSec = trackObj.optInt("track_length", 0);
+        final int score = LyricsRequests.scoreLyricsCandidate(
+                title, artist, durationSec, lyrics, track);
+        return new ScoredSong(score, lyrics, title, artist, durationSec);
     }
 
     @Nullable
@@ -364,26 +374,34 @@ public final class MusixmatchProvider extends ScoredSongProvider {
             }
 
             JSONObject body = obj(obj(root, "message"), "body");
-            final JSONArray trackList = body != null ? body.optJSONArray("track_list") : null;
+            final JSONArray trackList = body == null
+                    ? null : body.optJSONArray("track_list");
             if (trackList == null || trackList.length() == 0) {
                 return Collections.emptyList();
             }
 
             final List<JSONObject> result = new ArrayList<>();
             for (int i = 0; i < trackList.length(); i++) {
-                JSONObject item = trackList.optJSONObject(i);
-                JSONObject trackObj = item != null ? item.optJSONObject("track") : null;
+                JSONObject trackObj = trackObjectAt(trackList, i);
                 if (trackObj != null) {
-                    final int id = trackObj.optInt("track_id", -1);
-                    if (id > 0) {
-                        result.add(trackObj);
-                    }
+                    result.add(trackObj);
                 }
             }
             return result;
         } finally {
             connection.disconnect();
         }
+    }
+
+    /** The track of a search entry, or null when the entry has none with an id. */
+    @Nullable
+    private static JSONObject trackObjectAt(JSONArray trackList, int index) {
+        final JSONObject item = trackList.optJSONObject(index);
+        final JSONObject trackObj = item == null ? null : item.optJSONObject("track");
+        if (trackObj == null || trackObj.optInt("track_id", -1) <= 0) {
+            return null;
+        }
+        return trackObj;
     }
 
     @Nullable
@@ -431,56 +449,83 @@ public final class MusixmatchProvider extends ScoredSongProvider {
             final String copyright = extractCopyright(macroCalls);
             final String sourceUrl = extractBacklinkUrl(macroCalls);
 
-            JSONObject richMsg = obj(obj(macroCalls, "track.richsync.get"), "message");
-            JSONObject richHeader = obj(richMsg, "header");
-            final int richStatus = richHeader != null ? richHeader.optInt("status_code", 0) : 0;
-            if (richHeader != null && richStatus == 200) {
-                JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
-                if (richBody != null) {
-                    final String richBodyStr = LyricsRequests.optString(richBody, "richsync_body");
-                    if (richBodyStr != null && !richBodyStr.isEmpty()) {
-                        return appendCopyright(parseRichsync(richBodyStr, sourceUrl), copyright);
-                    }
-                }
-            }
+            Lyrics lyrics = richsyncLyrics(macroCalls, sourceUrl);
+            if (lyrics != null) return appendCopyright(lyrics, copyright);
 
-            JSONObject subMsg = obj(obj(macroCalls, "track.subtitles.get"), "message");
-            JSONObject subHeader = obj(subMsg, "header");
-            final int subStatus = subHeader != null ? subHeader.optInt("status_code", 0) : 0;
-            if (subHeader != null && subStatus == 200) {
-                JSONObject subBody = obj(subMsg, "body");
-                final JSONArray subList = subBody != null
-                        ? subBody.optJSONArray("subtitle_list") : null;
-                if (subList != null && subList.length() > 0) {
-                    JSONObject subItem = subList.optJSONObject(0);
-                    JSONObject subtitle = subItem != null
-                            ? subItem.optJSONObject("subtitle") : null;
-                    if (subtitle != null) {
-                        final String subtitleBody = LyricsRequests.optString(subtitle, "subtitle_body");
-                        if (subtitleBody != null && !subtitleBody.isEmpty()) {
-                            return appendCopyright(parseSubtitles(subtitleBody, sourceUrl), copyright);
-                        }
-                    }
-                }
-            }
+            lyrics = subtitleLyrics(macroCalls, sourceUrl);
+            if (lyrics != null) return appendCopyright(lyrics, copyright);
 
-            JSONObject lyricsMsg = obj(obj(macroCalls, "track.lyrics.get"), "message");
-            JSONObject lyricsHeader = obj(lyricsMsg, "header");
-            final int lyricsStatus = lyricsHeader != null ? lyricsHeader.optInt("status_code", 0) : 0;
-            if (lyricsHeader != null && lyricsStatus == 200) {
-                JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
-                if (lyricsBody != null) {
-                    final String lyricsText = LyricsRequests.optString(lyricsBody, "lyrics_body");
-                    if (lyricsText != null && !lyricsText.isEmpty()) {
-                        return appendCopyright(parseLyrics(lyricsText, sourceUrl), copyright);
-                    }
-                }
-            }
-
-            return null;
+            lyrics = plainLyrics(macroCalls, sourceUrl);
+            return appendCopyright(lyrics, copyright);
         } finally {
             connection.disconnect();
         }
+    }
+
+    /** The word-synced lyrics of the macro call, or null when it holds none. */
+    @Nullable
+    private Lyrics richsyncLyrics(JSONObject macroCalls, @Nullable String sourceUrl)
+            throws JSONException {
+        final JSONObject richMsg = callMessage(macroCalls, "track.richsync.get");
+        if (!callSucceeded(richMsg)) return null;
+
+        final JSONObject richBody = obj(obj(richMsg, "body"), "richsync");
+        final String body = richBody == null
+                ? null : LyricsRequests.optString(richBody, "richsync_body");
+        return isBlank(body) ? null : parseRichsync(body, sourceUrl);
+    }
+
+    /** The line-synced lyrics of the macro call, or null when it holds none. */
+    @Nullable
+    private Lyrics subtitleLyrics(JSONObject macroCalls, @Nullable String sourceUrl)
+            throws JSONException {
+        final JSONObject subMsg = callMessage(macroCalls, "track.subtitles.get");
+        if (!callSucceeded(subMsg)) return null;
+
+        final JSONObject subBody = obj(subMsg, "body");
+        final JSONArray subList = subBody == null
+                ? null : subBody.optJSONArray("subtitle_list");
+        if (subList == null || subList.length() == 0) return null;
+
+        final JSONObject subtitle = subtitleAt(subList, 0);
+        final String body = subtitle == null
+                ? null : LyricsRequests.optString(subtitle, "subtitle_body");
+        return isBlank(body) ? null : parseSubtitles(body, sourceUrl);
+    }
+
+    /** The plain lyrics of the macro call, or null when it holds none. */
+    @Nullable
+    private Lyrics plainLyrics(JSONObject macroCalls, @Nullable String sourceUrl)
+            throws JSONException {
+        final JSONObject lyricsMsg = callMessage(macroCalls, "track.lyrics.get");
+        if (!callSucceeded(lyricsMsg)) return null;
+
+        final JSONObject lyricsBody = obj(obj(lyricsMsg, "body"), "lyrics");
+        final String text = lyricsBody == null
+                ? null : LyricsRequests.optString(lyricsBody, "lyrics_body");
+        return isBlank(text) ? null : parseLyrics(text, sourceUrl);
+    }
+
+    /** The message of one of the macro call's sub-requests. */
+    @Nullable
+    private static JSONObject callMessage(JSONObject macroCalls, String call) {
+        return obj(obj(macroCalls, call), "message");
+    }
+
+    /** Whether a sub-request answered 200. */
+    private static boolean callSucceeded(@Nullable JSONObject message) {
+        final JSONObject header = obj(message, "header");
+        return header != null && header.optInt("status_code", 0) == 200;
+    }
+
+    @Nullable
+    private static JSONObject subtitleAt(JSONArray subList, int index) {
+        final JSONObject item = subList.optJSONObject(index);
+        return item == null ? null : item.optJSONObject("subtitle");
+    }
+
+    private static boolean isBlank(@Nullable String text) {
+        return text == null || text.isEmpty();
     }
 
     @Nullable
@@ -505,81 +550,7 @@ public final class MusixmatchProvider extends ScoredSongProvider {
             List<Word> words = null;
             final JSONArray lArr = line.optJSONArray("l");
             if (lArr != null && lArr.length() > 0) {
-                words = new ArrayList<>();
-                int xCursor = 0;
-                for (int j = 0; j < lArr.length(); j++) {
-                    JSONObject w = lArr.optJSONObject(j);
-                    if (w == null) {
-                        continue;
-                    }
-                    final String rawChunk = LyricsRequests.optString(w, "c");
-                    if (rawChunk == null || rawChunk.isEmpty()) {
-                        continue;
-                    }
-                    final double offset = w.optDouble("o", 0);
-                    final long ws = (long) ((lineTs + offset) * 1000);
-
-                    long we;
-                    final int nextIdx = j + 1;
-                    if (nextIdx < lArr.length()) {
-                        JSONObject nextW = lArr.optJSONObject(nextIdx);
-                        if (nextW != null) {
-                            final double nextOffset = nextW.optDouble("o", offset);
-                            final long nextWs = (long) ((lineTs + nextOffset) * 1000);
-                            if (nextWs > ws) {
-                                if (nextWs - ws <= BRIDGING_THRESHOLD_MS) {
-                                    we = nextWs;
-                                } else {
-                                    we = ws + BRIDGING_THRESHOLD_MS;
-                                }
-                            } else {
-                                we = ws + MIN_WORD_MS;
-                            }
-                        } else {
-                            we = lineEndMs;
-                        }
-                    } else {
-                        we = lineEndMs;
-                    }
-                    if (we <= ws) {
-                        we = ws + 150L;
-                    } else if (we - ws > BRIDGING_THRESHOLD_MS) {
-                        we = ws + BRIDGING_THRESHOLD_MS;
-                    } else if (we - ws < MIN_WORD_MS) {
-                        we = ws + MIN_WORD_MS;
-                    }
-                    if (nextIdx < lArr.length()) {
-                        JSONObject nextW = lArr.optJSONObject(nextIdx);
-                        if (nextW != null) {
-                            final double nextOffset = nextW.optDouble("o", offset);
-                            final long nextWs = (long) ((lineTs + nextOffset) * 1000);
-                            if (nextWs > ws && we > nextWs) {
-                                we = nextWs;
-                            }
-                        }
-                    }
-
-                    boolean endsWithSpace = rawChunk.endsWith(" ") || rawChunk.endsWith("\t");
-                    String chunk = endsWithSpace ? rawChunk.stripTrailing() : rawChunk;
-
-                    if (x != null && !x.isEmpty()) {
-                        while (xCursor < x.length() && Character.isWhitespace(x.charAt(xCursor))) {
-                            xCursor++;
-                        }
-                        if (xCursor < x.length()) {
-                            int matchLen = chunk.length();
-                            if (xCursor + matchLen <= x.length()
-                                    && x.regionMatches(true, xCursor, chunk, 0, matchLen)) {
-                                chunk = x.substring(xCursor, xCursor + matchLen);
-                                int afterMatch = xCursor + matchLen;
-                                endsWithSpace = (afterMatch < x.length() && Character.isWhitespace(x.charAt(afterMatch)));
-                                xCursor = afterMatch;
-                            }
-                        }
-                    }
-
-                    words.add(new Word(ws, we, chunk, null, endsWithSpace));
-                }
+                words = richWords(lArr, lineTs, lineEndMs, x);
             }
 
             final String text;
@@ -598,6 +569,93 @@ public final class MusixmatchProvider extends ScoredSongProvider {
         }
         return new Lyrics(result, name(), true, null, null, null, null, body, "mxm.json",
                 sourceUrl);
+    }
+
+    /**
+     * The word timings of one richsync line. Each word lasts until the next one starts, clamped to
+     * the bridging window, and the published text corrects the spelling of each chunk.
+     */
+    private static List<Word> richWords(JSONArray lArr, double lineTs, long lineEndMs,
+                                        @Nullable String x) {
+        List<Word> words = new ArrayList<>();
+        int xCursor = 0;
+        for (int j = 0; j < lArr.length(); j++) {
+            JSONObject w = lArr.optJSONObject(j);
+            if (w == null) continue;
+            final String rawChunk = LyricsRequests.optString(w, "c");
+            if (rawChunk == null || rawChunk.isEmpty()) continue;
+
+            final double offset = w.optDouble("o", 0);
+            final long ws = (long) ((lineTs + offset) * 1000);
+            final JSONObject nextW = nextWord(lArr, j);
+            long we = nextW == null
+                    ? lineEndMs
+                    : wordEndMs(ws, (long) ((lineTs + nextW.optDouble("o", offset)) * 1000));
+            if (nextW != null) {
+                final long nextWs = (long) ((lineTs + nextW.optDouble("o", offset)) * 1000);
+                if (nextWs > ws && we > nextWs) {
+                    we = nextWs;
+                }
+            }
+
+            boolean endsWithSpace = rawChunk.endsWith(" ") || rawChunk.endsWith("\t");
+            String chunk = endsWithSpace ? rawChunk.stripTrailing() : rawChunk;
+
+            if (x != null && !x.isEmpty()) {
+                xCursor = skipWhitespace(x, xCursor);
+                ChunkMatch match = matchInPublishedText(x, xCursor, chunk);
+                if (match != null) {
+                    chunk = match.chunk();
+                    endsWithSpace = match.endsWithSpace();
+                    xCursor = match.end();
+                }
+            }
+
+            words.add(new Word(ws, we, chunk, null, endsWithSpace));
+        }
+        return words;
+    }
+
+    /** The word after this one in the line, or null at the end or when the entry is not an object. */
+    @Nullable
+    private static JSONObject nextWord(JSONArray lArr, int index) {
+        final int nextIdx = index + 1;
+        return nextIdx < lArr.length() ? lArr.optJSONObject(nextIdx) : null;
+    }
+
+    /** Where a word ends when the next one starts: at most one bridging window after it starts. */
+    private static long wordEndMs(long startMs, long nextStartMs) {
+        if (nextStartMs <= startMs) {
+            return startMs + MIN_WORD_MS;
+        }
+        return nextStartMs - startMs <= BRIDGING_THRESHOLD_MS
+                ? nextStartMs : startMs + BRIDGING_THRESHOLD_MS;
+    }
+
+    private static int skipWhitespace(String text, int from) {
+        int at = from;
+        while (at < text.length() && Character.isWhitespace(text.charAt(at))) {
+            at++;
+        }
+        return at;
+    }
+
+    /**
+     * The chunk as the published text spells it at {@code from}, or null when it does not appear
+     * there. The published reply uses the reader facing spelling of names and punctuation.
+     */
+    @Nullable
+    private static ChunkMatch matchInPublishedText(String text, int from, String chunk) {
+        final int matchLen = chunk.length();
+        if (from + matchLen > text.length() || !text.regionMatches(true, from, chunk, 0, matchLen)) {
+            return null;
+        }
+        final int end = from + matchLen;
+        final boolean endsWithSpace = end < text.length() && Character.isWhitespace(text.charAt(end));
+        return new ChunkMatch(text.substring(from, end), endsWithSpace, end);
+    }
+
+    private record ChunkMatch(String chunk, boolean endsWithSpace, int end) {
     }
 
     @Nullable

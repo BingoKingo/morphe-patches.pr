@@ -61,20 +61,51 @@ public final class LyricsFileParser {
         boolean instrumental = false;
         Object metaObject = top.get("metadata");
         if (metaObject instanceof Map<?, ?> metadata) {
-            Object instrumentalValue = metadata.get("instrumental");
-            if (instrumentalValue instanceof Boolean) {
-                instrumental = (Boolean) instrumentalValue;
-            } else if (instrumentalValue instanceof String) {
-                instrumental = Boolean.parseBoolean((String) instrumentalValue);
-            }
-            for (String key : CREDIT_META_KEYS) {
-                Object value = metadata.get(key);
-                if (value instanceof String && !((String) value).isEmpty()) {
-                    creditLines.add(key + ": " + value);
-                }
-            }
+            instrumental = isInstrumental(metadata.get("instrumental"));
+            creditLines.addAll(creditLines(metadata));
         }
 
+        List<LyricsLine> parsedLines = parsedLines(top);
+        List<String> creditLinesOut = creditLines.isEmpty() ? null : creditLines;
+
+        if (instrumental) {
+            return parsedLines.isEmpty()
+                    ? Lyrics.NOT_FOUND
+                    : fileLyrics(parsedLines, providerName, true, creditLinesOut, yaml, sourceUrl);
+        }
+
+        if (isSynced(parsedLines)) {
+            return fileLyrics(parsedLines, providerName, true, creditLinesOut, yaml, sourceUrl);
+        }
+
+        return plainLyrics(top, providerName, creditLinesOut, yaml, sourceUrl);
+    }
+
+    /** Whether the metadata marks the track as having no lyrics to sing. */
+    private static boolean isInstrumental(@Nullable Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof String) {
+            return Boolean.parseBoolean((String) value);
+        }
+        return false;
+    }
+
+    /** The "title: …", "artist: …" and "album: …" lines the file credits. */
+    private static List<String> creditLines(Map<?, ?> metadata) {
+        List<String> creditLines = new ArrayList<>();
+        for (String key : CREDIT_META_KEYS) {
+            Object value = metadata.get(key);
+            if (value instanceof String && !((String) value).isEmpty()) {
+                creditLines.add(key + ": " + value);
+            }
+        }
+        return creditLines;
+    }
+
+    /** The timed lines of a file, in file order, skipping entries that are not usable lines. */
+    private static List<LyricsLine> parsedLines(Map<?, ?> top) {
         List<LyricsLine> parsedLines = new ArrayList<>();
         Object linesObject = top.get("lines");
         if (linesObject instanceof List) {
@@ -85,26 +116,23 @@ public final class LyricsFileParser {
                 }
             }
         }
+        return parsedLines;
+    }
 
-        List<String> creditLinesOut = creditLines.isEmpty() ? null : creditLines;
+    private static boolean isSynced(List<LyricsLine> parsedLines) {
+        return parsedLines.stream().anyMatch(line -> line.startTimeMs() != LyricsLine.NO_TIME);
+    }
 
-        if (instrumental) {
-            return parsedLines.isEmpty()
-                    ? Lyrics.NOT_FOUND
-                    : fileLyrics(parsedLines, providerName, true, creditLinesOut, yaml, sourceUrl);
-        }
-
-        boolean synced = parsedLines.stream()
-                .anyMatch(line -> line.startTimeMs() != LyricsLine.NO_TIME);
-        if (synced) {
-            return fileLyrics(parsedLines, providerName, true, creditLinesOut, yaml, sourceUrl);
-        }
-
+    /** A file without line timings may still carry a plain-text block. */
+    @Nullable
+    private static Lyrics plainLyrics(Map<?, ?> top, String providerName,
+                                      @Nullable List<String> creditLines, String yaml,
+                                      @Nullable String sourceUrl) {
         Object plainObject = top.get("plain");
         if (plainObject instanceof String) {
             List<LyricsLine> plain = LRCParser.parsePlain((String) plainObject);
             if (!plain.isEmpty()) {
-                return fileLyrics(plain, providerName, false, creditLinesOut, yaml, sourceUrl);
+                return fileLyrics(plain, providerName, false, creditLines, yaml, sourceUrl);
             }
         }
         return Lyrics.NOT_FOUND;
@@ -123,56 +151,63 @@ public final class LyricsFileParser {
             return null;
         }
 
-        Object textObject = map.get("text");
-        String text = textObject instanceof String ? (String) textObject : "";
-
-        List<Word> words = new ArrayList<>();
-        boolean wordTimingsUsable = true;
-        Object wordsObject = map.get("words");
-        if (wordsObject instanceof List) {
-            for (Object wordObject : (List<?>) wordsObject) {
-                if (!(wordObject instanceof Map<?, ?> wordMap)) {
-                    continue;
-                }
-                Object wordText = wordMap.get("text");
-                String wordString = wordText instanceof String ? (String) wordText : "";
-                long start = asLong(wordMap.get("start_ms"));
-                // A word with no start of its own has nothing to be lit by, and the ends its
-                // neighbours lend it would be counted off a number that is not a time. The
-                // line keeps its own timing and is sung in one go instead. The text is rebuilt
-                // from the words below, so the words are only given up after that has happened.
-                if (start < 0) {
-                    wordTimingsUsable = false;
-                    break;
-                }
-                long end = asLong(wordMap.get("end_ms"));
-                words.add(new Word(start, end, wordString));
-            }
-        }
-
-        if (text.isEmpty()) {
-            StringBuilder builder = new StringBuilder();
-            for (Word word : words) {
-                String wordText = word.text();
-                if (wordText.isEmpty()) {
-                    continue;
-                }
-                //noinspection SizeReplaceableByIsEmpty
-                if (builder.length() > 0) {
-                    builder.append(' ');
-                }
-                builder.append(wordText);
-            }
-            text = builder.toString();
-        }
-
-        if (!wordTimingsUsable) {
-            words.clear();
+        List<Word> words = words(map.get("words"));
+        String text = textOf(map.get("text"), words);
+        if (words == null) {
+            // Only the timings are given up: the text is already built from the words.
+            words = List.of();
         }
 
         LRCParser.inferMissingWordEnds(words, 800);
 
         return new LyricsLine(asLong(map.get("start_ms")), text, words);
+    }
+
+    /**
+     * The line's words, or null when any of them has no start of its own: such a word has nothing
+     * to be lit by, and the ends its neighbours lend it would be counted off a number that is not
+     * a time. The line then keeps its own timing and is sung in one go.
+     */
+    @Nullable
+    private static List<Word> words(@Nullable Object wordsObject) {
+        List<Word> words = new ArrayList<>();
+        if (!(wordsObject instanceof List)) {
+            return words;
+        }
+        for (Object wordObject : (List<?>) wordsObject) {
+            if (!(wordObject instanceof Map<?, ?> wordMap)) {
+                continue;
+            }
+            long start = asLong(wordMap.get("start_ms"));
+            if (start < 0) {
+                return null;
+            }
+            Object wordText = wordMap.get("text");
+            String wordString = wordText instanceof String ? (String) wordText : "";
+            words.add(new Word(start, asLong(wordMap.get("end_ms")), wordString));
+        }
+        return words;
+    }
+
+    /** The line's own text, or the words joined by spaces when it has none. */
+    private static String textOf(@Nullable Object textObject, List<Word> words) {
+        String text = textObject instanceof String ? (String) textObject : "";
+        if (!text.isEmpty()) {
+            return text;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Word word : words) {
+            String wordText = word.text();
+            if (wordText.isEmpty()) {
+                continue;
+            }
+            //noinspection SizeReplaceableByIsEmpty
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(wordText);
+        }
+        return builder.toString();
     }
 
     private static long asLong(Object value) {
@@ -204,14 +239,18 @@ public final class LyricsFileParser {
     }
 
     private static boolean isSequenceItem(String line, int indent) {
-        return indentOf(line) == indent && line.trim().startsWith("- ");
+        return indentOf(line) == indent && isSequenceLine(line);
+    }
+
+    private static boolean isSequenceLine(String line) {
+        return line.trim().startsWith("- ");
     }
 
     private static Object readSequence(List<String> lines, Cursor cursor, int indent) {
         List<Object> sequence = new ArrayList<>();
         while (cursor.index < lines.size()) {
             String line = lines.get(cursor.index);
-            if (indentOf(line) != indent || !line.trim().startsWith("- ")) {
+            if (indentOf(line) != indent || !isSequenceLine(line)) {
                 break;
             }
             String rest = line.trim().substring(2).trim();
@@ -245,19 +284,24 @@ public final class LyricsFileParser {
             String value = line.substring(colon + 1).trim();
             cursor.index++;
 
-            if (value.isEmpty()) {
-                if (cursor.index < lines.size() && indentOf(lines.get(cursor.index)) > indent) {
-                    map.put(key, readValue(lines, cursor, indentOf(lines.get(cursor.index))));
-                } else {
-                    map.put(key, "");
-                }
-            } else if (isBlockScalar(value)) {
-                map.put(key, readBlockScalar(lines, cursor, indent));
-            } else {
-                map.put(key, unquote(value));
-            }
+            map.put(key, readMappingValue(lines, cursor, indent, value));
         }
         return map;
+    }
+
+    /** What a mapping key holds: a nested block, a block scalar, or a plain value. */
+    private static Object readMappingValue(List<String> lines, Cursor cursor, int indent,
+                                           String value) {
+        if (value.isEmpty()) {
+            if (cursor.index < lines.size() && indentOf(lines.get(cursor.index)) > indent) {
+                return readValue(lines, cursor, indentOf(lines.get(cursor.index)));
+            }
+            return "";
+        }
+        if (isBlockScalar(value)) {
+            return readBlockScalar(lines, cursor, indent);
+        }
+        return unquote(value);
     }
 
     private static boolean isBlockScalar(String value) {
@@ -294,10 +338,10 @@ public final class LyricsFileParser {
 
     private static String unquote(String value) {
         String string = value.trim();
-        if (string.length() >= 2 && string.startsWith("'") && string.endsWith("'")) {
+        if (isSingleQuoted(string)) {
             return string.substring(1, string.length() - 1).replace("''", "'");
         }
-        if (string.length() >= 2 && string.startsWith("\"") && string.endsWith("\"")) {
+        if (isDoubleQuoted(string)) {
             return string.substring(1, string.length() - 1)
                     .replace("\\n", "\n")
                     .replace("\\t", "\t")
@@ -305,6 +349,14 @@ public final class LyricsFileParser {
                     .replace("\\\\", "\\");
         }
         return string;
+    }
+
+    private static boolean isSingleQuoted(String string) {
+        return string.length() >= 2 && string.startsWith("'") && string.endsWith("'");
+    }
+
+    private static boolean isDoubleQuoted(String string) {
+        return string.length() >= 2 && string.startsWith("\"") && string.endsWith("\"");
     }
 
     private static int indentOf(String line) {
