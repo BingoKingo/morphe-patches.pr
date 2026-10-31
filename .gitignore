@@ -1,6 +1,8 @@
 # Private key that signs the patches file
 morphe-signing.key
 
+*._*
+
 # Gradle files
 .gradle/
 build/

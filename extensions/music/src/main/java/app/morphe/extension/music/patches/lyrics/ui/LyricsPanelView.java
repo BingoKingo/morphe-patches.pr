@@ -1274,6 +1274,10 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             LyricsLineView lineView = new LyricsLineView(context);
             lineView.setSecondary(isSec);
             lineView.setIsRightAligned(isRightAligned);
+            // The vocal shares its lead line's row, so it centres with that line.
+            lineView.setIsCentered(isSec && curParentForAlign >= 0
+                    ? newLyrics.lines().get(curParentForAlign).isCentered()
+                    : line.isCentered());
             // Plain text first so the panel paints immediately; the karaoke spans are added on a
             // background thread (see the LINE_BUILDER_EXECUTOR pass below). A hide rebuild keeps
             // the surviving regions so its first frame matches the shrunken layout exactly, and a
@@ -1321,7 +1325,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
                 String rawText = formatted.isEmpty() ? "♪" : formatted;
                 boolean isRtl = ScriptDetector.isLineRtl(rawText);
                 SpannableString initialText = new SpannableString(rawText);
-                initialText.setSpan(new AlignmentSpan.Standard(LyricsSpanBuilder.resolveAlignment(isRtl, isRightAligned)),
+                initialText.setSpan(new AlignmentSpan.Standard(LyricsSpanBuilder.resolveAlignment(
+                                isRtl, isRightAligned, lineView.isCentered())),
                         0, initialText.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 lineView.setText(initialText);
             }
@@ -1444,7 +1449,8 @@ public final class LyricsPanelView extends FrameLayout implements LyricsManager.
             lineRow.setClipToPadding(false);
             currentParentRow = lineRow;
 
-            if (isDuetSong) {
+            // A centred line takes neither duet side, so its row stays on the axis.
+            if (isDuetSong && !line.isCentered()) {
                 if (isRightAligned) {
                     lineRow.setPadding(duetSideInset, Dim.dp(2), 0, Dim.dp(2));
                 } else {
