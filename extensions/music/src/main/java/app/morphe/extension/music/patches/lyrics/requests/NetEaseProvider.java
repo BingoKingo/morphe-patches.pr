@@ -82,35 +82,57 @@ public final class NetEaseProvider implements LyricsProvider {
             return creditLines;
         }
         for (String rawLine : yrc.split("\\r?\\n")) {
-            String trimmed = rawLine.trim();
-            if (!trimmed.startsWith("{")) {
-                continue;
-            }
-            try {
-                JSONObject obj = new JSONObject(trimmed);
-                JSONArray parts = obj.optJSONArray("c");
-                if (parts == null) {
-                    continue;
-                }
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < parts.length(); i++) {
-                    JSONObject part = parts.optJSONObject(i);
-                    if (part != null) {
-                        String tx = part.optString("tx", "");
-                        if (!tx.isEmpty()) {
-                            sb.append(tx);
-                        }
-                    }
-                }
-                String value = sb.toString().trim();
-                if (!value.isEmpty()) {
-                    creditLines.add(value);
-                }
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Could not parse NetEase user description", ex);
+            String credit = yrcCreditLine(rawLine.trim());
+            if (credit != null) {
+                creditLines.add(credit);
             }
         }
         return creditLines;
+    }
+
+    /**
+     * The credit one YRC line carries, credits being the JSON lines mixed in with the timed ones.
+     *
+     * @return The credit text, or null when the line is timed or has no text.
+     */
+    @Nullable
+    private static String yrcCreditLine(String trimmed) {
+        if (!trimmed.startsWith("{")) {
+            return null;
+        }
+        try {
+            String value = jsonPartsText(new JSONObject(trimmed));
+            return value == null || value.isEmpty() ? null : value;
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not parse NetEase user description", ex);
+            return null;
+        }
+    }
+
+    /** The text of a NetEase {@code "c"} parts array, or null when the object has none. */
+    @Nullable
+    private static String jsonPartsText(JSONObject obj) {
+        JSONArray parts = obj.optJSONArray("c");
+        if (parts == null) {
+            return null;
+        }
+        return joinPartTexts(parts);
+    }
+
+    /** The concatenated non-empty {@code tx} of every part in a NetEase parts array. */
+    private static String joinPartTexts(JSONArray parts) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length(); i++) {
+            JSONObject part = parts.optJSONObject(i);
+            if (part == null) {
+                continue;
+            }
+            String tx = part.optString("tx", "");
+            if (!tx.isEmpty()) {
+                sb.append(tx);
+            }
+        }
+        return sb.toString().trim();
     }
 
     private static String optLyric(JSONObject root, String key) {
@@ -165,20 +187,14 @@ public final class NetEaseProvider implements LyricsProvider {
                 passed.add(item);
             }
         }
-        return passed.isEmpty() && !scored.isEmpty()
-                ? List.of(scored.get(0)) : passed;
+        return passed.isEmpty() ? List.of(scored.get(0)) : passed;
     }
 
     @Nullable
     private static JSONObject searchBest(String keyword, TrackInfo track) {
-        List<JSONObject> candidates = searchCandidates(keyword);
-        if (candidates.isEmpty()) {
-            return null;
-        }
-
         JSONObject best = null;
         int bestScore = -1;
-        for (JSONObject candidate : candidates) {
+        for (JSONObject candidate : searchCandidates(keyword)) {
             int score = scoreCandidate(candidate, track);
             if (score > bestScore) {
                 bestScore = score;
@@ -207,26 +223,27 @@ public final class NetEaseProvider implements LyricsProvider {
                 .put("scene", "NORMAL")
                 .put("needCorrect", "true"));
 
-        JSONObject data = root.optJSONObject("data");
-        JSONArray resources = data == null ? null : data.optJSONArray("resources");
-        List<JSONObject> songs = new ArrayList<>();
-        if (resources == null) {
-            return songs;
+        return mapSongs(root, "data", "resources");
+    }
+
+    /**
+     * The songs a search response carries, in mapped form.
+     *
+     * @param section The object holding the array, absent on some responses.
+     * @param key The array's name.
+     */
+    private static List<JSONObject> mapSongs(JSONObject root, String section, String key)
+            throws JSONException {
+        JSONObject holder = root.optJSONObject(section);
+        JSONArray songs = holder == null ? null : holder.optJSONArray(key);
+        List<JSONObject> mapped = new ArrayList<>();
+        if (songs == null) {
+            return mapped;
         }
-        for (int i = 0; i < resources.length(); i++) {
-            JSONObject resource = resources.optJSONObject(i);
-            if (resource == null) {
-                continue;
-            }
-            JSONObject simple = LyricsRequests.optPath(resource, "baseInfo", "simpleSongData");
-            if (simple != null) {
-                JSONObject mapped = mapSong(simple);
-                if (mapped != null) {
-                    songs.add(mapped);
-                }
-            }
+        for (int i = 0; i < songs.length(); i++) {
+            addMappedSong(songs.optJSONObject(i), mapped);
         }
-        return songs;
+        return mapped;
     }
 
     private static List<JSONObject> searchByCloudSearch(String keyword) throws IOException, JSONException {
@@ -239,22 +256,18 @@ public final class NetEaseProvider implements LyricsProvider {
         }
 
         JSONObject root = Requester.parseJSONObject(connection);
-        JSONObject result = root.optJSONObject("result");
-        JSONArray songs = result == null ? null : result.optJSONArray("songs");
-        List<JSONObject> mapped = new ArrayList<>();
-        if (songs == null) {
-            return mapped;
+        return mapSongs(root, "result", "songs");
+    }
+
+    /** Adds {@code song} to {@code out} in mapped form, skipping null and unidentifiable entries. */
+    private static void addMappedSong(@Nullable JSONObject song, List<JSONObject> out) throws JSONException {
+        if (song == null) {
+            return;
         }
-        for (int i = 0; i < songs.length(); i++) {
-            JSONObject song = songs.optJSONObject(i);
-            if (song != null) {
-                JSONObject mappedSong = mapSong(song);
-                if (mappedSong != null) {
-                    mapped.add(mappedSong);
-                }
-            }
+        JSONObject mapped = mapSong(song);
+        if (mapped != null) {
+            out.add(mapped);
         }
-        return mapped;
     }
 
     @Nullable
@@ -345,26 +358,7 @@ public final class NetEaseProvider implements LyricsProvider {
             }
         }
 
-        String body = "params=" + buildEapiParams(path, params);
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Referer", "https://music.163.com/");
-        headers.put("User-Agent", NETEASE_USER_AGENT);
-        headers.put("Accept", "*/*");
-        headers.put("Host", "interface.music.163.com");
-        String cookie = cookieHeader();
-        if (!cookie.isEmpty()) {
-            headers.put("Cookie", cookie);
-        }
-        HttpURLConnection connection = LyricsRequests.postForm(EAPI_HOST + path, body, headers);
-        int httpCode = connection.getResponseCode();
-        if (httpCode != 200) {
-            LyricsRequests.logFailure("NetEase", connection);
-            return new JSONObject();
-        }
-
-        captureCookies(connection);
-
-        String decrypted = decryptEapiResponse(connection);
+        String decrypted = postEapi(path, params);
         if (decrypted.isEmpty()) {
             return new JSONObject();
         }
@@ -380,7 +374,30 @@ public final class NetEaseProvider implements LyricsProvider {
     }
 
     private static JSONObject registerAnonimous(JSONObject params) throws IOException, JSONException {
-        String body = "params=" + buildEapiParams(REGISTER_PATH, params);
+        String decrypted = postEapi(REGISTER_PATH, params);
+        return decrypted.isEmpty() ? new JSONObject() : new JSONObject(decrypted);
+    }
+
+    /**
+     * Posts one EAPI call and decrypts its answer.
+     *
+     * @return The decrypted body, empty when the call did not answer with a body.
+     */
+    private static String postEapi(String path, JSONObject params) throws IOException, JSONException {
+        String body = "params=" + buildEapiParams(path, params);
+        Map<String, String> headers = eapiHeaders();
+        HttpURLConnection connection = LyricsRequests.postForm(EAPI_HOST + path, body, headers);
+        int httpCode = connection.getResponseCode();
+        if (httpCode != 200) {
+            LyricsRequests.logFailure("NetEase", connection);
+            return "";
+        }
+        captureCookies(connection);
+        return decryptEapiResponse(connection);
+    }
+
+    /** The request headers every EAPI call carries, including the current cookie jar. */
+    private static Map<String, String> eapiHeaders() {
         Map<String, String> headers = new HashMap<>();
         headers.put("Referer", "https://music.163.com/");
         headers.put("User-Agent", NETEASE_USER_AGENT);
@@ -390,15 +407,7 @@ public final class NetEaseProvider implements LyricsProvider {
         if (!cookie.isEmpty()) {
             headers.put("Cookie", cookie);
         }
-        HttpURLConnection connection = LyricsRequests.postForm(EAPI_HOST + REGISTER_PATH, body, headers);
-        int httpCode = connection.getResponseCode();
-        if (httpCode != 200) {
-            LyricsRequests.logFailure("NetEase", connection);
-            return new JSONObject();
-        }
-        captureCookies(connection);
-        String decrypted = decryptEapiResponse(connection);
-        return decrypted.isEmpty() ? new JSONObject() : new JSONObject(decrypted);
+        return headers;
     }
 
     private static String buildEapiParams(String path, JSONObject params) throws JSONException {
@@ -451,29 +460,46 @@ public final class NetEaseProvider implements LyricsProvider {
     }
 
     private static void captureCookies(HttpURLConnection connection) {
+        List<String> setCookies = setCookies(connection);
+        if (setCookies == null) {
+            return;
+        }
+        for (String line : setCookies) {
+            Map.Entry<String, String> pair = cookiePair(line);
+            if (pair != null) {
+                cookieJar.put(pair.getKey(), pair.getValue());
+            }
+        }
+    }
+
+    /** The {@code Set-Cookie} values of a response, or null when the header is absent. */
+    @Nullable
+    private static List<String> setCookies(HttpURLConnection connection) {
         Map<String, List<String>> headerFields = connection.getHeaderFields();
         List<String> setCookies = headerFields.get("Set-Cookie");
         if (setCookies == null) {
             setCookies = headerFields.get("set-cookie");
         }
-        if (setCookies == null) {
-            return;
+        return setCookies;
+    }
+
+    /** The non-empty {@code name=value} of one {@code Set-Cookie} line, or null. */
+    @Nullable
+    private static Map.Entry<String, String> cookiePair(@Nullable String line) {
+        if (line == null) {
+            return null;
         }
-        for (String line : setCookies) {
-            if (line == null) {
-                continue;
-            }
-            String pair = line.split(";", 2)[0];
-            int index = pair.indexOf('=');
-            if (index <= 0) {
-                continue;
-            }
-            String key = pair.substring(0, index).trim();
-            String value = pair.substring(index + 1).trim();
-            if (!key.isEmpty() && !value.isEmpty()) {
-                cookieJar.put(key, value);
-            }
+        String pair = line.split(";", 2)[0];
+        int index = pair.indexOf('=');
+        if (index <= 0) {
+            return null;
         }
+        String key = pair.substring(0, index).trim();
+        String value = pair.substring(index + 1).trim();
+        if (key.isEmpty() || value.isEmpty()) {
+            return null;
+        }
+        return Map.entry(key, value);
     }
 
     private static String cookieHeader() {
@@ -488,8 +514,9 @@ public final class NetEaseProvider implements LyricsProvider {
         return builder.toString();
     }
 
-    private static List<LyricsLine> parseNeteaseOriginalLyrics(String yrc, String lrc) {
-        if (yrc != null && !yrc.isEmpty()) {
+    private static List<LyricsLine> parseNeteaseOriginalLyrics(@Nullable String yrc, @Nullable String lrc) {
+        boolean hasYrc = yrc != null && !yrc.isEmpty();
+        if (hasYrc) {
             List<LyricsLine> lines = parseYrc(yrc);
             if (!lines.isEmpty()) {
                 return lines;
@@ -521,116 +548,137 @@ public final class NetEaseProvider implements LyricsProvider {
                 continue;
             }
 
-            long lineStart = Long.parseLong(Objects.requireNonNull(lineMatch.group(1)));
-            long lineDuration = Long.parseLong(Objects.requireNonNull(lineMatch.group(2)));
-            long lineEnd = lineStart + lineDuration;
-            String content = Objects.requireNonNull(lineMatch.group(3));
-
-            List<Long> starts = new ArrayList<>();
-            List<Long> durations = new ArrayList<>();
-            List<int[]> marks = new ArrayList<>();
-            Matcher wordMatch = YRC_WORD.matcher(content);
-            while (wordMatch.find()) {
-                starts.add(Long.parseLong(Objects.requireNonNull(wordMatch.group(1))));
-                durations.add(Long.parseLong(Objects.requireNonNull(wordMatch.group(2))));
-                marks.add(new int[]{wordMatch.start(), wordMatch.start(3)});
+            LyricsLine yrcLine = yrcLine(lineMatch);
+            if (yrcLine != null) {
+                lines.add(yrcLine);
             }
-
-            List<Word> words = new ArrayList<>();
-            StringBuilder full = new StringBuilder();
-            if (!marks.isEmpty() && marks.get(0)[0] > 0) {
-                full.append(content, 0, marks.get(0)[0]);
-            }
-            for (int i = 0; i < starts.size(); i++) {
-                long wordStart = starts.get(i);
-                long wordEnd = wordStart + durations.get(i);
-                int segmentStart = marks.get(i)[1];
-                int segmentEnd = i + 1 < marks.size() ? marks.get(i + 1)[0] : content.length();
-                String wordText = content.substring(segmentStart, segmentEnd);
-                full.append(wordText);
-                String trimmed = wordText.trim();
-                if (trimmed.isEmpty()) {
-                    // A timed space between words is kept in the line text only.
-                    continue;
-                }
-                boolean endsWithSpace =
-                        Character.isWhitespace(wordText.charAt(wordText.length() - 1));
-                words.add(new Word(wordStart, wordEnd, trimmed, null, endsWithSpace));
-            }
-            if (words.isEmpty() && full.length() == 0 && !content.isEmpty()) {
-                full.append(content);
-            }
-
-            String fullText = full.toString().trim();
-            if (fullText.isEmpty()) {
-                continue;
-            }
-            lines.add(new LyricsLine(lineStart, lineEnd, fullText, words));
         }
 
         lines.sort(Comparator.comparingLong(LyricsLine::startTimeMs));
         return lines;
     }
 
-    private static List<LyricsLine> parseLrc(String text) {
-        if (text == null || text.isEmpty()) {
-            return new ArrayList<>();
+    /** One matched YRC line with its timed words, or null when it holds no text. */
+    @Nullable
+    private static LyricsLine yrcLine(Matcher lineMatch) {
+        long lineStart = Long.parseLong(Objects.requireNonNull(lineMatch.group(1)));
+        long lineDuration = Long.parseLong(Objects.requireNonNull(lineMatch.group(2)));
+        long lineEnd = lineStart + lineDuration;
+        String content = Objects.requireNonNull(lineMatch.group(3));
+
+        List<Long> starts = new ArrayList<>();
+        List<Long> durations = new ArrayList<>();
+        List<int[]> marks = new ArrayList<>();
+        Matcher wordMatch = YRC_WORD.matcher(content);
+        while (wordMatch.find()) {
+            starts.add(Long.parseLong(Objects.requireNonNull(wordMatch.group(1))));
+            durations.add(Long.parseLong(Objects.requireNonNull(wordMatch.group(2))));
+            marks.add(new int[]{wordMatch.start(), wordMatch.start(3)});
         }
 
-        List<Item> items = new ArrayList<>();
-        for (String rawLine : text.split("\\r?\\n")) {
-            String line = rawLine.trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            addTimeTaggedLine(line, items);
+        StringBuilder full = new StringBuilder();
+        if (!marks.isEmpty() && marks.get(0)[0] > 0) {
+            full.append(content, 0, marks.get(0)[0]);
         }
-        return toSortedLines(items);
+        List<Word> words = yrcWords(starts, durations, marks, content, full);
+        if (words.isEmpty() && full.length() == 0 && !content.isEmpty()) {
+            full.append(content);
+        }
+
+        String fullText = full.toString().trim();
+        if (fullText.isEmpty()) {
+            return null;
+        }
+        return new LyricsLine(lineStart, lineEnd, fullText, words);
     }
 
+    /**
+     * Appends every YRC word to {@code full} and returns the timed words, skipping the
+     * timed spaces that only belong to the line text.
+     */
+    private static List<Word> yrcWords(List<Long> starts, List<Long> durations,
+                                       List<int[]> marks, String content, StringBuilder full) {
+        List<Word> words = new ArrayList<>();
+        for (int i = 0; i < starts.size(); i++) {
+            long wordStart = starts.get(i);
+            long wordEnd = wordStart + durations.get(i);
+            int segmentStart = marks.get(i)[1];
+            int segmentEnd = i + 1 < marks.size() ? marks.get(i + 1)[0] : content.length();
+            String wordText = content.substring(segmentStart, segmentEnd);
+            full.append(wordText);
+            String trimmed = wordText.trim();
+            if (trimmed.isEmpty()) {
+                // A timed space between words is kept in the line text only.
+                continue;
+            }
+            boolean endsWithSpace =
+                    Character.isWhitespace(wordText.charAt(wordText.length() - 1));
+            words.add(new Word(wordStart, wordEnd, trimmed, null, endsWithSpace));
+        }
+        return words;
+    }
+
+    /** The timed lines of a plain LRC body. */
+    private static List<LyricsLine> parseLrc(String text) {
+        return toSortedLines(text, true, false);
+    }
+
+    /** The lines of a body that may also carry its timed items as JSON, as NetEase writes them. */
     private static List<LyricsLine> parseMixedNeteaseLyrics(String text) {
-        List<Item> items = new ArrayList<>();
+        return toSortedLines(text, true, true);
+    }
+
+    /**
+     * The sorted lines of a NetEase lyric body.
+     *
+     * @param timed The timing of the lines a plain LRC gives.
+     * @param mixed Whether lines may also be the JSON items of a mixed body.
+     */
+    private static List<LyricsLine> toSortedLines(String text, boolean timed, boolean mixed) {
         if (text == null || text.isEmpty()) {
             return new ArrayList<>();
         }
+        return toSortedLines(parseItems(text, timed, mixed));
+    }
 
+    /** The items one line of a NetEase lyric body adds, and none when it carries neither. */
+    private static List<Item> parseItems(String text, boolean timed, boolean mixed) {
+        List<Item> items = new ArrayList<>();
         for (String rawLine : text.split("\\r?\\n")) {
             String line = rawLine.trim();
             if (line.isEmpty()) {
                 continue;
             }
-
-            if (line.charAt(0) == '{') {
-                try {
-                    JSONObject obj = new JSONObject(line);
-                    long start = obj.optLong("t", 0);
-                    JSONArray parts = obj.optJSONArray("c");
-                    if (parts == null) {
-                        continue;
-                    }
-                    StringBuilder builder = new StringBuilder();
-                    for (int i = 0; i < parts.length(); i++) {
-                        JSONObject part = parts.optJSONObject(i);
-                        if (part != null) {
-                            String tx = part.optString("tx", "");
-                            if (!tx.isEmpty()) {
-                                builder.append(tx);
-                            }
-                        }
-                    }
-                    String value = builder.toString().trim();
-                    if (!value.isEmpty()) {
-                        items.add(new Item(start, value));
-                    }
-                } catch (Exception ex) {
-                    Logger.printDebug(() -> "Could not parse NetEase LRC item", ex);
+            if (mixed && line.charAt(0) == '{') {
+                Item item = mixedJsonItem(line);
+                if (item != null) {
+                    items.add(item);
                 }
                 continue;
             }
-
-            addTimeTaggedLine(line, items);
+            if (timed) {
+                addTimeTaggedLine(line, items);
+            }
         }
-        return toSortedLines(items);
+        return items;
+    }
+
+    /** The timed item of a NetEase JSON mixed-lyric line, or null when it carries no text. */
+    @Nullable
+    private static Item mixedJsonItem(String line) {
+        try {
+            JSONObject obj = new JSONObject(line);
+            long start = obj.optLong("t", 0);
+            JSONArray parts = obj.optJSONArray("c");
+            if (parts == null) {
+                return null;
+            }
+            String value = joinPartTexts(parts);
+            return value.isEmpty() ? null : new Item(start, value);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not parse NetEase LRC item", ex);
+            return null;
+        }
     }
 
     /**
@@ -721,12 +769,22 @@ public final class NetEaseProvider implements LyricsProvider {
         if (lyrics == null) {
             return null;
         }
-        final long durationMs = song.optLong("duration", 0);
-        return FetchResult.of(lyrics,
-                song.optString("name", ""),
-                song.optString("artist", ""),
-                durationMs > 0 ? durationMs / 1000 : 0,
+        return FetchResult.of(lyrics, songTitle(song), songArtist(song), songDurationSeconds(song),
                 track);
+    }
+
+    private static String songTitle(JSONObject song) {
+        return song.optString("name", "");
+    }
+
+    private static String songArtist(JSONObject song) {
+        return song.optString("artist", "");
+    }
+
+    /** The song's length in whole seconds, or 0 when the search did not say. */
+    private static int songDurationSeconds(JSONObject song) {
+        final long durationMs = song.optLong("duration", 0);
+        return durationMs > 0 ? (int) (durationMs / 1000) : 0;
     }
 
     @Override
@@ -739,24 +797,33 @@ public final class NetEaseProvider implements LyricsProvider {
             if (scored.size() >= LyricsRequests.MAX_CANDIDATES) {
                 break;
             }
-            if (song == null || !song.has("id")) {
-                continue;
-            }
-            try {
-                Lyrics lyrics = fetchFromSong(song);
-                if (lyrics != null) {
-                    final long durationMs = song.optLong("duration", 0);
-                    int score = LyricsRequests.scoreLyricsCandidate(
-                            song.optString("name", ""), song.optString("artist", ""),
-                            durationMs > 0 ? durationMs / 1000 : 0, lyrics, track);
-                    scored.add(new Lyrics.ScoredLyrics(score, lyrics));
-                }
-            } catch (Exception ex) {
-                Logger.printDebug(() -> "Could not fetch NetEase lyrics for a song", ex);
+            Lyrics.ScoredLyrics candidate = scoredCandidate(song, track);
+            if (candidate != null) {
+                scored.add(candidate);
             }
         }
 
         return Lyrics.sortScoredByScore(scored);
+    }
+
+    /** The scored lyrics of one search result, or null when it has none. */
+    @Nullable
+    private Lyrics.ScoredLyrics scoredCandidate(@Nullable JSONObject song, TrackInfo track) {
+        if (song == null || !song.has("id")) {
+            return null;
+        }
+        try {
+            Lyrics lyrics = fetchFromSong(song);
+            if (lyrics == null) {
+                return null;
+            }
+            int score = LyricsRequests.scoreLyricsCandidate(
+                    songTitle(song), songArtist(song), songDurationSeconds(song), lyrics, track);
+            return new Lyrics.ScoredLyrics(score, lyrics);
+        } catch (Exception ex) {
+            Logger.printDebug(() -> "Could not fetch NetEase lyrics for a song", ex);
+            return null;
+        }
     }
 
     @Nullable
@@ -769,6 +836,7 @@ public final class NetEaseProvider implements LyricsProvider {
                 .put("yv", "-1"));
 
         String yrc = optLyric(root, "yrc");
+        final boolean isYrc = !yrc.isEmpty();
         String lrc = optLyric(root, "lrc");
         String tlyric = optLyric(root, "tlyric");
         String romalrc = optLyric(root, "romalrc");
@@ -783,21 +851,28 @@ public final class NetEaseProvider implements LyricsProvider {
         List<LyricsLine> romaLines = romalrc.isEmpty() ? null : LRCParser.parseSynced(romalrc);
         List<LyricsLine> romanization = LyricsMerge.mergeRomanization(lines, romaLines);
 
-        // NetEase writes this translation itself, in the Chinese the mainland uses.
-        Map<String, List<LyricsLine>> translations = null;
-        if (LyricsRequests.isSimplifiedChinese()) {
-            List<LyricsLine> transLines = tlyric.isEmpty() ? null : LRCParser.parseSynced(tlyric);
-            List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, transLines);
-            translations = LyricsMerge.singleLanguageTranslations(
-                    translation, LyricsRequests.SIMPLIFIED_CHINESE);
-        }
+        Map<String, List<LyricsLine>> translations = translationsOf(lines, tlyric);
 
-        String rawFormat = filterJsonLines(!yrc.isEmpty() ? yrc : lrc);
-        String formatType = !yrc.isEmpty() ? "yrc" : "lrc";
+        String rawFormat = filterJsonLines(yrc.isEmpty() ? lrc : yrc);
+        String formatType = isYrc ? "yrc" : "lrc";
         long songId = song.getLong("id");
         String sourceUrl = "https://music.163.com/song?id=" + songId;
         return new Lyrics(lines, name(), true, romanization, translations, null,
                 creditLines.isEmpty() ? null : creditLines, rawFormat, formatType, sourceUrl);
+    }
+
+    /**
+     * NetEase writes this translation itself, in the Chinese the mainland uses, so it is only
+     * kept when that is the user's language.
+     */
+    @Nullable
+    private static Map<String, List<LyricsLine>> translationsOf(List<LyricsLine> lines, String tlyric) {
+        if (!LyricsRequests.isSimplifiedChinese()) {
+            return null;
+        }
+        List<LyricsLine> transLines = tlyric.isEmpty() ? null : LRCParser.parseSynced(tlyric);
+        List<LyricsLine> translation = LyricsMerge.mergeRomanization(lines, transLines);
+        return LyricsMerge.singleLanguageTranslations(translation, LyricsRequests.SIMPLIFIED_CHINESE);
     }
 
     private record Item(long start, String text) {

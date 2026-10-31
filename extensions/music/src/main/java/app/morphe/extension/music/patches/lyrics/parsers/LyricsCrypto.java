@@ -10,6 +10,8 @@ package app.morphe.extension.music.patches.lyrics.parsers;
 import android.annotation.SuppressLint;
 import android.util.Base64;
 
+import androidx.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -102,7 +104,7 @@ public final class LyricsCrypto {
      * layout, so the cipher is reimplemented here verbatim from the reference client.
      */
     public static byte[] tripleDesEcbDecrypt(byte[] data, String key) {
-        if (data == null || data.length == 0 || data.length % 8 != 0) {
+        if (!isWholeBlockCiphertext(data)) {
             return new byte[0];
         }
         byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
@@ -113,12 +115,17 @@ public final class LyricsCrypto {
         byte[] out = new byte[data.length];
         for (int i = 0; i + 8 <= data.length; i += 8) {
             byte[] block = Arrays.copyOfRange(data, i, i + 8);
-            for (int k = 0; k < 3; k++) {
-                block = qrcCryptBlock(block, schedules[k]);
+            for (int[][] schedule : schedules) {
+                block = qrcCryptBlock(block, schedule);
             }
             System.arraycopy(block, 0, out, i, 8);
         }
         return out;
+    }
+
+    /** Ciphertext that is present and made of whole 8-byte blocks, or nothing to decrypt. */
+    private static boolean isWholeBlockCiphertext(@Nullable byte[] data) {
+        return data != null && data.length > 0 && data.length % 8 == 0;
     }
 
     private static int qrcBitnum(byte[] bytes, int b, int c) {
@@ -255,13 +262,10 @@ public final class LyricsCrypto {
     }
 
     public static byte[] hexToBytes(String hex) {
-        if (hex == null) {
+        if (!isEvenLengthHex(hex)) {
             return new byte[0];
         }
         int length = hex.length();
-        if ((length & 1) != 0) {
-            return new byte[0];
-        }
         byte[] bytes = new byte[length / 2];
         for (int i = 0; i < bytes.length; i++) {
             int high = Character.digit(hex.charAt(i * 2), 16);
@@ -272,5 +276,9 @@ public final class LyricsCrypto {
             bytes[i] = (byte) ((high << 4) | low);
         }
         return bytes;
+    }
+
+    private static boolean isEvenLengthHex(@Nullable String hex) {
+        return hex != null && (hex.length() & 1) == 0;
     }
 }

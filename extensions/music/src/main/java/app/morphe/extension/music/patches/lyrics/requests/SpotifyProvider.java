@@ -429,19 +429,9 @@ public final class SpotifyProvider implements LyricsProvider {
             JSONObject searchV2 = data.optJSONObject("searchV2");
             if (searchV2 == null) return null;
 
-            JSONArray items = null;
-            JSONObject tracks = searchV2.optJSONObject("tracks");
-            if (tracks != null) {
-                items = tracks.optJSONArray("items");
-            }
+            JSONArray items = itemsOf(searchV2);
             if (items == null || items.length() == 0) {
-                JSONObject search = data.optJSONObject("search");
-                if (search != null) {
-                    JSONObject searchTracks = search.optJSONObject("tracks");
-                    if (searchTracks != null) {
-                        items = searchTracks.optJSONArray("items");
-                    }
-                }
+                items = legacyItemsOf(data);
             }
             if (items == null || items.length() == 0) {
                 return null;
@@ -452,6 +442,22 @@ public final class SpotifyProvider implements LyricsProvider {
             Logger.printDebug(() -> "Could not search Spotify track ID", ex);
             return null;
         }
+    }
+
+    /** The track items of a searchV2 answer, or null when it lists none. */
+    @Nullable
+    private static JSONArray itemsOf(JSONObject searchV2) {
+        JSONObject tracks = searchV2.optJSONObject("tracks");
+        return tracks == null ? null : tracks.optJSONArray("items");
+    }
+
+    /** The track items of the older search answer, used when searchV2 lists none. */
+    @Nullable
+    private static JSONArray legacyItemsOf(JSONObject data) {
+        JSONObject search = data.optJSONObject("search");
+        if (search == null) return null;
+        JSONObject searchTracks = search.optJSONObject("tracks");
+        return searchTracks == null ? null : searchTracks.optJSONArray("items");
     }
 
     @Nullable

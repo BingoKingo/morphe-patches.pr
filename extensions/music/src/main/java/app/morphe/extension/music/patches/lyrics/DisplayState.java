@@ -42,48 +42,65 @@ final class DisplayState {
 
     boolean accept(@Nullable ProviderFetch pf, List<ScoredCandidate> scoreCandidates,
                    boolean stage12) {
-        if (pf == null || (!pf.highMatch() && !pf.blind())) {
+        if (!isCandidate(pf)) {
             return false;
         }
-        Lyrics fetched = pf.lyrics();
-        if (!LyricsMatch.isValidLyrics(fetched, null)) {
-            return false;
-        }
+        final Lyrics fetched = pf.lyrics();
         final int match = pf.matchScore();
         final int rank = LyricsRequests.syncRank(fetched);
         final int composite = LyricsRequests.composite(match, fetched, pf.penalty());
         scoreCandidates.add(new ScoredCandidate(composite, rank, fetched));
 
         if (LyricsRequests.isCustomMatchMode()) {
-            if (composite > bestFallbackRank) {
-                bestFallback = fetched;
-                bestFallbackRank = composite;
-            }
-            if (composite > bestDisplayRank) {
-                bestResult = fetched;
-                bestDisplayRank = composite;
-            }
-            return false;
+            return acceptCustom(pf, fetched, composite);
         }
 
         if (!pf.highMatch()) {
             return false;
         }
-
         if (rank > bestFallbackRank) {
             bestFallback = fetched;
             bestFallbackRank = rank;
         }
-
         if (wordSync) {
-            if (rank == 2) {
-                bestResult = fetched;
-                return !exhaustive;
-            }
+            return acceptWordSync(rank, fetched);
+        }
+        return acceptDisplay(rank, fetched, stage12);
+    }
+
+    /** A fetch worth scoring at all: it matched by itself, or the search was blind. */
+    private static boolean isCandidate(@Nullable ProviderFetch pf) {
+        return pf != null
+                && (pf.highMatch() || pf.blind())
+                && LyricsMatch.isValidLyrics(pf.lyrics(), null);
+    }
+
+    /** Both slots take the highest composite; the run always continues. */
+    private boolean acceptCustom(ProviderFetch pf, Lyrics fetched, int composite) {
+        if (composite > bestFallbackRank) {
+            bestFallback = fetched;
+            bestFallbackRank = composite;
+        }
+        if (composite > bestDisplayRank) {
+            bestResult = fetched;
+            bestDisplayRank = composite;
+        }
+        return false;
+    }
+
+    /** While word timings are on, only a fully word-synced line set may replace the screen. */
+    private boolean acceptWordSync(int rank, Lyrics fetched) {
+        if (rank != 2) {
             return false;
         }
+        bestResult = fetched;
+        return !exhaustive;
+    }
 
-        // Demoting word timing below the weaker kinds let a later result replace it on screen.
+    /**
+     * Demoting word timing below the weaker kinds let a later result replace it on screen.
+     */
+    private boolean acceptDisplay(int rank, Lyrics fetched, boolean stage12) {
         if (rank > bestDisplayRank) {
             bestResult = fetched;
             bestDisplayRank = rank;

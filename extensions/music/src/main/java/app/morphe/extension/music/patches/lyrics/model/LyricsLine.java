@@ -118,17 +118,6 @@ public record LyricsLine(long startTimeMs, long endTimeMs, String text, List<Wor
         return "v1000".equalsIgnoreCase(id) || "v2000".equalsIgnoreCase(id);
     }
 
-    private static String compactText(String value) {
-        final StringBuilder builder = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            final char c = value.charAt(i);
-            if (!Character.isWhitespace(c)) {
-                builder.append(c);
-            }
-        }
-        return builder.toString();
-    }
-
     private static boolean hasMultipleWords(String value) {
         boolean inWord = false;
         int wordCount = 0;
@@ -169,15 +158,11 @@ public record LyricsLine(long startTimeMs, long endTimeMs, String text, List<Wor
         }
         if (words.size() == 1) {
             Word single = words.get(0);
-            if (single.endMs() <= single.startMs()) {
+            // A span over several words is the line's own timing written back out.
+            if (hasMultipleWords(text)) {
                 return false;
             }
-            // A span repeating the whole line is line timing; one over some words still gives
-            // word timing to share across them.
-            if (hasMultipleWords(text)
-                    && compactText(single.text()).equalsIgnoreCase(compactText(text))) {
-                return false;
-            }
+            return single.endMs() > single.startMs();
         }
         return true;
     }

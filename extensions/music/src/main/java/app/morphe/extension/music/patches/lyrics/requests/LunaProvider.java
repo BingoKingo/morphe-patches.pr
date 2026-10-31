@@ -188,29 +188,7 @@ public final class LunaProvider extends ScoredSongProvider {
             return new ArrayList<>();
         }
 
-        List<JSONObject> trackList = new ArrayList<>();
-        for (int g = 0, length = resultGroups.length(); g < length; g++) {
-            JSONObject group = resultGroups.optJSONObject(g);
-            if (group == null) continue;
-            JSONArray data = group.optJSONArray("data");
-            if (data == null) continue;
-            for (int d = 0; d < data.length(); d++) {
-                JSONObject item = data.optJSONObject(d);
-                if (item == null) continue;
-                JSONObject meta = item.optJSONObject("meta");
-                if (meta == null) continue;
-                String itemType = meta.optString("item_type", "");
-                if (!"track".equals(itemType)) continue;
-                JSONObject entity = item.optJSONObject("entity");
-                if (entity == null) continue;
-                JSONObject trackObj = entity.optJSONObject("track");
-                if (trackObj == null) continue;
-                String id = trackObj.optString("id", "");
-                if (!id.isEmpty()) {
-                    trackList.add(trackObj);
-                }
-            }
-        }
+        List<JSONObject> trackList = trackObjects(resultGroups);
 
         trackList.sort((a, b) -> {
             int sa = scoreCandidate(a, track);
@@ -227,6 +205,37 @@ public final class LunaProvider extends ScoredSongProvider {
         }
         return passed.isEmpty() && !trackList.isEmpty()
                 ? List.of(trackList.get(0)) : passed;
+    }
+
+    /** Every track the search groups hold, in the order they were listed. */
+    private static List<JSONObject> trackObjects(JSONArray resultGroups) {
+        List<JSONObject> trackList = new ArrayList<>();
+        for (int g = 0, length = resultGroups.length(); g < length; g++) {
+            JSONObject group = resultGroups.optJSONObject(g);
+            if (group == null) continue;
+            JSONArray data = group.optJSONArray("data");
+            if (data == null) continue;
+            for (int d = 0; d < data.length(); d++) {
+                JSONObject trackObj = trackObjectOf(data.optJSONObject(d));
+                if (trackObj != null) {
+                    trackList.add(trackObj);
+                }
+            }
+        }
+        return trackList;
+    }
+
+    /** The track an entry of a search group holds, or null when it is not a track. */
+    @Nullable
+    private static JSONObject trackObjectOf(@Nullable JSONObject item) {
+        if (item == null) return null;
+        JSONObject meta = item.optJSONObject("meta");
+        if (meta == null || !"track".equals(meta.optString("item_type", ""))) return null;
+        JSONObject entity = item.optJSONObject("entity");
+        if (entity == null) return null;
+        JSONObject trackObj = entity.optJSONObject("track");
+        if (trackObj == null) return null;
+        return trackObj.optString("id", "").isEmpty() ? null : trackObj;
     }
 
     @Nullable

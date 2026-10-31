@@ -32,6 +32,11 @@ public final class LyricsMatch {
         return !filtered.isEmpty();
     }
 
+    /** Anything that can be shown or cached; {@link Lyrics#NOT_FOUND} and null cannot. */
+    public static boolean hasLines(@Nullable Lyrics lyrics) {
+        return lyrics != null && lyrics != Lyrics.NOT_FOUND && !lyrics.isEmpty();
+    }
+
     /**
      * The id the cache stores this under: the name shown to the user, minus any qualifier such
      * as "(via Lyrically)", so the cache keeps one entry per provider.
@@ -41,10 +46,8 @@ public final class LyricsMatch {
             return "";
         }
         final String providerName = lyrics.providerName();
-        for (String id : LyricsProviders.PROVIDER_ORDER) {
-            if (providerName.equals(id)) {
-                return id;
-            }
+        if (LyricsProviders.PROVIDER_ORDER.contains(providerName)) {
+            return providerName;
         }
         for (String id : LyricsProviders.PROVIDER_ORDER) {
             if (providerName.startsWith(id + " ")) {
@@ -75,10 +78,9 @@ public final class LyricsMatch {
      */
     static TrackInfo withEffectiveDuration(TrackInfo track,
                                            @Nullable List<SkipSegments.Seg> segs) {
-        if (!Settings.LYRICS_SB_MATCHING.get()) {
-            return track;
-        }
-        if (segs == null || segs.isEmpty() || track.durationSeconds() <= 0) {
+        if (!Settings.LYRICS_SB_MATCHING.get()
+                || segs == null || segs.isEmpty()
+                || track.durationSeconds() <= 0) {
             return track;
         }
         long contentMs = SkipSegments.effectiveDurationMs(track.durationSeconds() * 1000L, segs);
@@ -100,10 +102,13 @@ public final class LyricsMatch {
             return false;
         }
         String provider = lyrics.providerName();
-        return (provider != null && provider.startsWith(Lyrics.CAPTIONS_PROVIDER))
+        if (provider == null) {
+            return false;
+        }
+        return provider.startsWith(Lyrics.CAPTIONS_PROVIDER)
                 || "Unison".equals(provider)
                 || "SimpMusic".equals(provider)
-                || (provider != null && provider.startsWith("YouTube Music"));
+                || provider.startsWith("YouTube Music");
     }
 
     static boolean isBlindProvider(LyricsProvider provider) {

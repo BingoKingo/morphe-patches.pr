@@ -11,7 +11,10 @@ import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import app.morphe.extension.music.patches.lyrics.requests.AMLLProvider;
 import app.morphe.extension.music.patches.lyrics.requests.AppleMusicProvider;
@@ -46,16 +49,17 @@ public final class LyricsProviders {
             "YTMusic", "LRCLIB", "NetEase", "Luna", "LunaBeat",
             "Captions", "Spotify", "Deezer", "RMM", "Genius");
 
+    /** Providers that can only look up the track being played, never a custom one. */
+    private static final List<String> VIDEO_ID_ONLY_PROVIDERS =
+            List.of("YTMusic", "Captions", "Unison", "SimpMusic");
+
     private LyricsProviders() {
     }
 
     public static List<LyricsProvider> providersInOrder(String order) {
         List<LyricsProvider> providers = new ArrayList<>(PROVIDER_ORDER.size());
         for (String id : enabledProviderIds(order)) {
-            LyricsProvider provider = providerFor(id);
-            if (provider != null) {
-                providers.add(provider);
-            }
+            providers.add(providerFor(id));
         }
         return providers;
     }
@@ -65,47 +69,33 @@ public final class LyricsProviders {
      * track's video id only know that track, and a prefetch of another track has none to ask with.
      */
     public static List<LyricsProvider> searchableProviders(List<LyricsProvider> providers) {
-        List<LyricsProvider> result = new ArrayList<>(providers.size());
-        for (LyricsProvider provider : providers) {
-            switch (provider.name()) {
-                case "YTMusic", "Captions", "Unison", "SimpMusic" -> {
-                }
-                default -> result.add(provider);
-            }
-        }
-        return result;
+        return providers.stream()
+                .filter(provider -> !VIDEO_ID_ONLY_PROVIDERS.contains(provider.name()))
+                .collect(Collectors.toList());
     }
 
     public static boolean isProviderEnabled(String id) {
         return enabledProviderIds(Settings.LYRICS_SOURCE.get()).contains(id);
     }
 
+    /**
+     * The ids the order setting enables, in the order it lists them. A flag after any of them
+     * disables that id; a later duplicate is ignored, so the first mention decides.
+     */
     private static List<String> enabledProviderIds(String order) {
-        List<String> result = new ArrayList<>();
         if (order == null || !order.contains(",")) {
             order = Settings.DEFAULT_LYRICS_ORDER;
         }
+        Set<String> mentioned = new LinkedHashSet<>();
+        List<String> result = new ArrayList<>();
         for (String raw : order.split(",")) {
             String token = raw.trim();
-            if (token.isEmpty()) {
-                continue;
-            }
             boolean enabled = true;
             if (token.startsWith("-")) {
                 enabled = false;
                 token = token.substring(1).trim();
             }
-            if (!PROVIDER_ORDER.contains(token)) {
-                continue;
-            }
-            boolean seen = false;
-            for (String existing : result) {
-                if (existing.equals(token)) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (seen) {
+            if (!PROVIDER_ORDER.contains(token) || !mentioned.add(token)) {
                 continue;
             }
             if (enabled) {
@@ -115,7 +105,6 @@ public final class LyricsProviders {
         return result;
     }
 
-    @Nullable
     private static LyricsProvider providerFor(String id) {
         return switch (id) {
             case "YTMusic" -> new YouTubeMusicProvider();

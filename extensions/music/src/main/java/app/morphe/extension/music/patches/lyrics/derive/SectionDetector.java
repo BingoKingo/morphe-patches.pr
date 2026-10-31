@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
 
+import app.morphe.extension.music.patches.lyrics.LyricsMatch;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
@@ -40,7 +41,7 @@ public final class SectionDetector {
     }
 
     public static boolean needsDetection(@Nullable Lyrics lyrics) {
-        if (lyrics == null || lyrics.isEmpty() || lyrics == Lyrics.NOT_FOUND) {
+        if (!LyricsMatch.hasLines(lyrics)) {
             return false;
         }
         for (LyricsLine line : lyrics.lines()) {
@@ -69,8 +70,7 @@ public final class SectionDetector {
                 }
                 List<String> cached = LyricsCache.getSectionAI(track, source, texts);
                 if (cached != null) {
-                    final List<String> result = cached;
-                    Utils.runOnMainThread(() -> callback.onSections(result));
+                    Utils.runOnMainThread(() -> callback.onSections(cached));
                     return;
                 }
 
@@ -82,8 +82,7 @@ public final class SectionDetector {
                 if (detected != null) {
                     LyricsCache.putSectionAI(track, source, texts, detected);
                 }
-                final List<String> result = detected;
-                Utils.runOnMainThread(() -> callback.onSections(result));
+                Utils.runOnMainThread(() -> callback.onSections(detected));
             } catch (Exception ex) {
                 Logger.printException(() -> "detect failure", ex);
                 Utils.runOnMainThread(() -> callback.onSections(null));
@@ -131,16 +130,23 @@ public final class SectionDetector {
     @Nullable
     private static String getLabel(@NonNull List<String> sections, int i) {
         String label = i < sections.size() ? sections.get(i) : null;
-        if (label != null) {
-            label = label.trim();
-            // mapLines already turns a skipped line into an empty entry; SKIP is accepted here
-            // as well so an answer that reached this method another way cannot be read as a
-            // section literally named "SKIP".
-            if (label.isEmpty() || SKIP.equalsIgnoreCase(label)) {
-                label = null;
-            }
+        if (!isSectionLabel(label)) {
+            return null;
         }
-        return label;
+        return label.trim();
+    }
+
+    /**
+     * Whether an answer entry names a section. mapLines already turns a skipped line into an
+     * empty entry; SKIP is accepted here as well so an answer that reached this method another
+     * way cannot be read as a section literally named "SKIP".
+     */
+    private static boolean isSectionLabel(@Nullable String label) {
+        if (label == null) {
+            return false;
+        }
+        String trimmed = label.trim();
+        return !trimmed.isEmpty() && !SKIP.equalsIgnoreCase(trimmed);
     }
 
     public interface Callback {

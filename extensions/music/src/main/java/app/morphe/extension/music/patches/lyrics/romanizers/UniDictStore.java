@@ -239,14 +239,6 @@ public final class UniDictStore {
             }
             long size = archive.length();
 
-            // The best candidate of the character being read, one state per table.
-            StringBuilder[] pending = new StringBuilder[TABLES.length];
-            char[] pendingChar = new char[TABLES.length];
-            int[] pendingRank = new int[TABLES.length];
-            for (int i = 0; i < TABLES.length; i++) {
-                pendingRank[i] = TABLES[i].sources.length;
-            }
-
             try (ZipInputStream zip = new ZipInputStream(
                     new BufferedInputStream(new FileInputStream(archive), 1 << 16))) {
                 ZipEntry entry;
@@ -255,60 +247,17 @@ public final class UniDictStore {
 
                     BufferedReader reader = new BufferedReader(
                             new InputStreamReader(zip, StandardCharsets.UTF_8), 1 << 16);
+                    PendingReadings pending = new PendingReadings();
                     String line;
                     long done = 0;
                     while ((line = reader.readLine()) != null) {
                         done += line.length();
-
-                        int firstTab = line.indexOf('\t');
-                        int secondTab = firstTab < 0 ? -1 : line.indexOf('\t', firstTab + 1);
-                        if (secondTab < 0) continue;
-
-                        String field = line.substring(firstTab + 1, secondTab);
-                        char c = codePoint(line.substring(0, firstTab));
-                        if (c == 0) continue;
-
-                        int row = row(field);
-                        if (row < 0) continue;
-
-                        ReadingTable table = TABLES[row];
-                        if (table.sources.length == 1) {
-                            String syllable = first(line.substring(secondTab + 1));
-                            if (syllable != null) {
-                                writers[row].append(c).append(' ').append(syllable).append('\n');
-                            }
-                            continue;
-                        }
-
-                        int rank = rank(table, field);
-                        if (rank < 0) continue;
-
-                        StringBuilder held = pending[row];
-                        if (held == null) {
-                            held = new StringBuilder();
-                            pending[row] = held;
-                        }
-                        if (c != pendingChar[row]) {
-                            writers[row].append(held);
-                            held.setLength(0);
-                            pendingChar[row] = c;
-                            pendingRank[row] = table.sources.length;
-                        }
-                        if (rank >= pendingRank[row]) continue;
-
-                        String reading = first(line.substring(secondTab + 1));
-                        if (reading != null) {
-                            held.append(c).append(' ').append(reading).append('\n');
-                            pendingRank[row] = rank;
-                        }
-
+                        pending.add(line, writers);
                         if (size > 0 && done % (1 << 20) < line.length()) {
                             listener.onBuilding((int) Math.min(100, done * 100 / size));
                         }
                     }
-                    for (int i = 0; i < TABLES.length; i++) {
-                        if (pending[i] != null) writers[i].append(pending[i]);
-                    }
+                    pending.flushTo(writers);
                     listener.onBuilding(100);
                 }
             }
@@ -320,6 +269,78 @@ public final class UniDictStore {
 
         for (int i = 0; i < TABLES.length; i++) {
             RomanizationDict.commit(built[i], targets[i]);
+        }
+    }
+
+    /**
+     * The best candidate of the character being read, one state per table.
+     *
+     * <p>A table that reads one field is written straight out. One that reads several holds the
+     * best ranked reading of the character being read until the character changes, since taking
+     * the first line instead would pick kHanyuPinlu, the poorer source that comes first
+     * alphabetically.
+     */
+    private static final class PendingReadings {
+        private final StringBuilder[] held = new StringBuilder[TABLES.length];
+        private final char[] heldChar = new char[TABLES.length];
+        private final int[] heldRank = new int[TABLES.length];
+
+        PendingReadings() {
+            for (int i = 0; i < TABLES.length; i++) {
+                heldRank[i] = TABLES[i].sources.length;
+            }
+        }
+
+        /** Takes one line of the archive, and skips the ones that feed no table. */
+        void add(String line, Writer[] writers) throws IOException {
+            int firstTab = line.indexOf('\t');
+            int secondTab = firstTab < 0 ? -1 : line.indexOf('\t', firstTab + 1);
+            if (secondTab < 0) return;
+
+            String field = line.substring(firstTab + 1, secondTab);
+            char c = codePoint(line.substring(0, firstTab));
+            if (c == 0) return;
+
+            int row = row(field);
+            if (row < 0) return;
+
+            ReadingTable table = TABLES[row];
+            if (table.sources.length == 1) {
+                String syllable = first(line.substring(secondTab + 1));
+                if (syllable != null) {
+                    writers[row].append(c).append(' ').append(syllable).append('\n');
+                }
+                return;
+            }
+
+            int rank = rank(table, field);
+            if (rank < 0) return;
+
+            StringBuilder current = held[row];
+            if (current == null) {
+                current = new StringBuilder();
+                held[row] = current;
+            }
+            if (c != heldChar[row]) {
+                writers[row].append(current);
+                current.setLength(0);
+                heldChar[row] = c;
+                heldRank[row] = table.sources.length;
+            }
+            if (rank >= heldRank[row]) return;
+
+            String reading = first(line.substring(secondTab + 1));
+            if (reading != null) {
+                current.append(c).append(' ').append(reading).append('\n');
+                heldRank[row] = rank;
+            }
+        }
+
+        /** Writes out whatever is still held, at the end of the archive. */
+        void flushTo(Writer[] writers) throws IOException {
+            for (int i = 0; i < TABLES.length; i++) {
+                if (held[i] != null) writers[i].append(held[i]);
+            }
         }
     }
 

@@ -525,7 +525,7 @@ public final class LyricsManager {
 
         String rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE);
         String rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        if (rawTitle == null || rawTitle.trim().isEmpty() || rawArtist == null || rawArtist.trim().isEmpty()) {
+        if (missingTrackName(rawTitle, rawArtist)) {
             // A later event names this video, so there is nothing to look up yet and the
             // lyric on screen belongs to whatever played before.
             dropStaleLyrics();
@@ -545,7 +545,7 @@ public final class LyricsManager {
                 durationSeconds
         );
 
-        if (track.title() == null || track.title().isEmpty() || track.artist() == null || track.artist().isEmpty()) {
+        if (missingTrackName(track.title(), track.artist())) {
             return;
         }
 
@@ -557,26 +557,7 @@ public final class LyricsManager {
         }
         TrackInfo existingTrack = currentTrack;
         if (track.equals(existingTrack)) {
-            if (pendingTrack != null && pendingTrack.track().equals(track)) {
-                cancelPendingTrack();
-            }
-            if (videoId.equals(currentVideoId)) {
-                currentRawTitle = rawTitle;
-                currentRawArtist = rawArtist;
-                currentMediaUri = mediaUri;
-                if (track.durationSeconds() > 0
-                        && track.durationSeconds() != existingTrack.durationSeconds()) {
-                    currentTrack = track;
-                }
-                if (staleLyricsDropped && unconfirmedVideoId == null) {
-                    deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
-                }
-                return;
-            }
-            currentRawTitle = rawTitle;
-            currentRawArtist = rawArtist;
-            currentMediaUri = mediaUri;
-            deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
+            reboundKnownTrack(track, existingTrack, rawTitle, rawArtist, mediaUri, videoId);
             return;
         }
         if (existingTrack == null || durationSeconds > 0 || !videoId.equals(currentVideoId)) {
@@ -585,6 +566,37 @@ public final class LyricsManager {
             return;
         }
         setPendingTrack(track, rawTitle, rawArtist, mediaUri, videoId);
+    }
+
+    /** Whether the metadata still names neither a title nor an artist. */
+    private static boolean missingTrackName(@Nullable String title, @Nullable String artist) {
+        return title == null || title.trim().isEmpty()
+                || artist == null || artist.trim().isEmpty();
+    }
+
+    /**
+     * Takes a metadata event for the track already loaded: either nothing has to move, or the
+     * video underneath it changed, which rebinds the track once the video is confirmed.
+     */
+    private void reboundKnownTrack(TrackInfo track, TrackInfo existingTrack, String rawTitle,
+                                   String rawArtist, Uri mediaUri, String videoId) {
+        if (pendingTrack != null && pendingTrack.track().equals(track)) {
+            cancelPendingTrack();
+        }
+        currentRawTitle = rawTitle;
+        currentRawArtist = rawArtist;
+        currentMediaUri = mediaUri;
+        if (!videoId.equals(currentVideoId)) {
+            deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
+            return;
+        }
+        if (track.durationSeconds() > 0
+                && track.durationSeconds() != existingTrack.durationSeconds()) {
+            currentTrack = track;
+        }
+        if (staleLyricsDropped && unconfirmedVideoId == null) {
+            deferTrackRebinding(videoId, rawTitle, rawArtist, mediaUri);
+        }
     }
 
     /**
@@ -765,14 +777,14 @@ public final class LyricsManager {
         if (!Settings.LYRICS_ENABLED.get()) {
             return;
         }
-        if (title == null || title.trim().isEmpty() || artist == null || artist.trim().isEmpty()) {
+        if (missingTrackName(title, artist)) {
             return;
         }
 
         String[] parsed = MetadataCleaner.parseCleanTitleAndArtist(title, artist);
         String cleanedTitle = parsed[1];
         String cleanedArtist = parsed[0];
-        if (cleanedTitle == null || cleanedTitle.isEmpty() || cleanedArtist == null || cleanedArtist.isEmpty()) {
+        if (missingTrackName(cleanedTitle, cleanedArtist)) {
             return;
         }
 
@@ -780,11 +792,7 @@ public final class LyricsManager {
         if (current != null
                 && Objects.equals(current.title(), cleanedTitle)
                 && Objects.equals(current.artist(), cleanedArtist)) {
-            currentRawTitle = title;
-            currentRawArtist = artist;
-            if (mediaUri != null) {
-                currentMediaUri = mediaUri;
-            }
+            refreshRawTrack(title, artist, mediaUri);
             return;
         }
 
@@ -801,6 +809,15 @@ public final class LyricsManager {
             return;
         }
         setPendingTrack(track, title, artist, mediaUri, VideoInformation.getVideoId());
+    }
+
+    /** Keeps the reported name of the track already loaded, with its media URI when one came. */
+    private void refreshRawTrack(String title, String artist, @Nullable Uri mediaUri) {
+        currentRawTitle = title;
+        currentRawArtist = artist;
+        if (mediaUri != null) {
+            currentMediaUri = mediaUri;
+        }
     }
 
     private void load(TrackInfo track, boolean keepLyrics) {
@@ -1107,7 +1124,7 @@ public final class LyricsManager {
      */
     public void publishPreferred(@Nullable Lyrics injected) {
         Utils.verifyOnMainThread();
-        if (injected == null || injected == Lyrics.NOT_FOUND || injected.isEmpty()) {
+        if (isNothing(injected)) {
             return;
         }
 
@@ -1117,7 +1134,7 @@ public final class LyricsManager {
         } catch (Throwable ignored) {
             return;
         }
-        if (display == null || display == Lyrics.NOT_FOUND || display.isEmpty()) {
+        if (isNothing(display)) {
             return;
         }
 
@@ -1125,18 +1142,7 @@ public final class LyricsManager {
         final int id = requestId.incrementAndGet();
         cancelPendingFetches();
 
-        final List<Lyrics> pushedBack = new ArrayList<>();
-        final Lyrics previous = currentLyrics;
-        if (previous != null && !previous.isEmpty() && previous != Lyrics.NOT_FOUND) {
-            pushedBack.add(previous);
-        }
-        synchronized (candidateQueue) {
-            for (ScoredCandidate candidate : new ArrayList<>(candidateQueue)) {
-                pushedBack.add(candidate.lyrics());
-            }
-            candidateQueue.clear();
-        }
-
+        final List<Lyrics> pushedBack = takeShownAndQueued();
         final String chosen = LyricsMatch.fingerprint(display);
         shownFingerprints.clear();
         shownFingerprints.add(chosen);
@@ -1147,8 +1153,38 @@ public final class LyricsManager {
 
         setState(State.LOADED, display);
 
+        queueReplacedVersions(pushedBack, chosen);
+
+        LyricsPanelInstaller.enableLyricsButton();
+        Utils.runOnMainThreadDelayed(LyricsPanelInstaller::onLyricsPanelDetected, 300);
+        rememberPreference(display);
+    }
+
+    /** Whether these lyrics are worth showing: present, found, and with something in them. */
+    private static boolean isNothing(@Nullable Lyrics lyrics) {
+        return lyrics == null || lyrics == Lyrics.NOT_FOUND || lyrics.isEmpty();
+    }
+
+    /** The lyric on screen and the candidates still queued, which the replacement pushes back. */
+    private List<Lyrics> takeShownAndQueued() {
+        final List<Lyrics> pushedBack = new ArrayList<>();
+        final Lyrics previous = currentLyrics;
+        if (!isNothing(previous)) {
+            pushedBack.add(previous);
+        }
+        synchronized (candidateQueue) {
+            for (ScoredCandidate candidate : new ArrayList<>(candidateQueue)) {
+                pushedBack.add(candidate.lyrics());
+            }
+            candidateQueue.clear();
+        }
+        return pushedBack;
+    }
+
+    /** Queues the versions the replacement pushed back, each once and never the one now shown. */
+    private void queueReplacedVersions(List<Lyrics> pushedBack, String chosen) {
         for (Lyrics candidate : pushedBack) {
-            if (candidate == null || candidate.isEmpty() || candidate == Lyrics.NOT_FOUND) {
+            if (isNothing(candidate)) {
                 continue;
             }
             final String fp = LyricsMatch.fingerprint(candidate);
@@ -1156,24 +1192,23 @@ public final class LyricsManager {
                 continue;
             }
             synchronized (candidateQueue) {
-                boolean alreadyQueued = false;
-                for (ScoredCandidate queued : candidateQueue) {
-                    if (fp.equals(LyricsMatch.fingerprint(queued.lyrics()))) {
-                        alreadyQueued = true;
-                        break;
-                    }
-                }
-                if (!alreadyQueued) {
+                if (!isQueued(fp)) {
                     candidateQueue.add(new ScoredCandidate(
                             LyricsRequests.composite(LyricsRequests.NEUTRAL, candidate, 0),
                             LyricsRequests.syncRank(candidate), candidate));
                 }
             }
         }
+    }
 
-        LyricsPanelInstaller.enableLyricsButton();
-        Utils.runOnMainThreadDelayed(LyricsPanelInstaller::onLyricsPanelDetected, 300);
-        rememberPreference(display);
+    /** Whether a version with this fingerprint is already waiting its turn. */
+    private boolean isQueued(String fingerprint) {
+        for (ScoredCandidate queued : candidateQueue) {
+            if (fingerprint.equals(LyricsMatch.fingerprint(queued.lyrics()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1320,83 +1355,105 @@ public final class LyricsManager {
         final int id = requestId.incrementAndGet();
         cancelPendingFetches();
         preferenceVideoId = VideoInformation.getVideoId();
-        Lyrics current = currentLyrics;
+        final Lyrics current = currentLyrics;
         setState(State.LOADING, current);
         suppressForRequest = -1;
         rememberedQueue = null;
         LyricsRequests.setCustomMatchMode(true);
-        if (defaultTerms) {
-            searchQueryTitle = null;
-            searchQueryArtist = null;
-        } else {
-            searchQueryTitle = queryTitle;
-            searchQueryArtist = queryArtist;
-        }
+        applySearchTerms(queryTitle, queryArtist, defaultTerms);
 
-        // Video id providers only know the playing track, so they are asked only when the
-        // terms are that track's own metadata.
-        final List<LyricsProvider> enabledProviders =
-                LyricsProviders.providersInOrder(Settings.LYRICS_SOURCE.get());
-        final List<LyricsProvider> providers = defaultTerms
-                ? enabledProviders
-                : LyricsProviders.searchableProviders(enabledProviders);
+        final List<LyricsProvider> providers = providersForSearch(defaultTerms);
         if (providers.isEmpty()) {
             publishFromLookup(id, Lyrics.NOT_FOUND);
             return;
         }
 
-        runOnLookupThread(() -> {
-            final String sbVideoId = skipSegmentsVideoId();
-            final List<SkipSegments.Seg> segs = SkipSegments.await(sbVideoId,
-                    track.durationSeconds() * 1000L);
-            if (id == requestId.get()) {
-                displaySegsVideoId = sbVideoId;
-                displaySegs = segs;
-            }
-            final TrackInfo searchTrack = LyricsMatch.withEffectiveDuration(track, segs);
-            final TrackInfo queryTrack = defaultTerms
-                    ? searchTrack
-                    : new TrackInfo(queryTitle, queryArtist, searchTrack.album(),
-                    searchTrack.durationSeconds());
-            synchronized (candidateQueue) {
-                candidateQueue.clear();
-                phase2Done = false;
-            }
-            shownFingerprints.clear();
-            // The lyric on screen stays until the search answers.
-            if (current != null) {
-                shownFingerprints.add(LyricsMatch.fingerprint(current));
-            }
-            String preferredFp = preferredFingerprint;
-            if (preferredFp != null) {
-                shownFingerprints.add(preferredFp);
-            }
+        runOnLookupThread(() -> runCustomSearch(id, track, current, providers,
+                queryTitle, queryArtist, defaultTerms));
+    }
 
-            Tiers tiers = buildTiers(queryTrack, defaultTerms ? currentRawTitle : queryTitle);
-            boolean[] failed = {false};
-            LookupResult fetchResult = fetchFromProviders(id, tiers.original(), tiers.derived(),
-                    failed, providers, !defaultTerms);
-            Lyrics result = fetchResult.best;
-            boolean validResult = LyricsMatch.isValidLyrics(result, track);
+    /** Remembers the searched terms, or clears them when they are the track's own. */
+    private void applySearchTerms(String queryTitle, String queryArtist, boolean defaultTerms) {
+        if (defaultTerms) {
+            searchQueryTitle = null;
+            searchQueryArtist = null;
+            return;
+        }
+        searchQueryTitle = queryTitle;
+        searchQueryArtist = queryArtist;
+    }
 
-            seedCandidateQueue(id, fetchResult.scored, validResult, result);
-            resnapshotPreference(id);
+    /**
+     * The providers to search, in the order the setting gives.
+     *
+     * <p>Video id providers only know the playing track, so they are asked only when the terms
+     * are that track's own metadata.
+     */
+    private static List<LyricsProvider> providersForSearch(boolean defaultTerms) {
+        final List<LyricsProvider> enabledProviders =
+                LyricsProviders.providersInOrder(Settings.LYRICS_SOURCE.get());
+        if (defaultTerms) {
+            return enabledProviders;
+        }
+        return LyricsProviders.searchableProviders(enabledProviders);
+    }
 
-            if (id != requestId.get()) {
-                return;
-            }
-            if (validResult) {
-                if (!LyricsRequests.isCustomMatchMode()) {
-                    LyricsCache.put(track, LyricsMatch.cacheSourceFor(result), result, preferenceVideoId);
-                }
-                publishFromLookup(id, result);
-            } else {
-                publishFromLookup(id, Lyrics.NOT_FOUND);
-            }
+    /** Runs a custom-term search off the main thread and publishes what it found. */
+    private void runCustomSearch(int id, TrackInfo track, @Nullable Lyrics current,
+                                 List<LyricsProvider> providers, String queryTitle,
+                                 String queryArtist, boolean defaultTerms) {
+        final String sbVideoId = skipSegmentsVideoId();
+        final List<SkipSegments.Seg> segs = SkipSegments.await(sbVideoId,
+                track.durationSeconds() * 1000L);
+        if (id == requestId.get()) {
+            displaySegsVideoId = sbVideoId;
+            displaySegs = segs;
+        }
+        final TrackInfo searchTrack = LyricsMatch.withEffectiveDuration(track, segs);
+        final TrackInfo queryTrack = defaultTerms
+                ? searchTrack
+                : new TrackInfo(queryTitle, queryArtist, searchTrack.album(),
+                searchTrack.durationSeconds());
+        resetQueueForSearch(current);
 
-            scheduleQueueFill(id, fetchResult.queueFillPending, tiers.original(),
-                    tiers.derived(), providers);
-        });
+        Tiers tiers = buildTiers(queryTrack, defaultTerms ? currentRawTitle : queryTitle);
+        boolean[] failed = {false};
+        LookupResult fetchResult = fetchFromProviders(id, tiers.original(), tiers.derived(),
+                failed, providers, !defaultTerms);
+        final Lyrics result = fetchResult.best;
+        final boolean validResult = LyricsMatch.isValidLyrics(result, track);
+
+        seedCandidateQueue(id, fetchResult.scored, validResult, result);
+        resnapshotPreference(id);
+
+        if (id != requestId.get()) {
+            return;
+        }
+        if (validResult) {
+            cacheMatch(track, result);
+            publishFromLookup(id, result);
+        } else {
+            publishFromLookup(id, Lyrics.NOT_FOUND);
+        }
+
+        scheduleQueueFill(id, fetchResult.queueFillPending, tiers.original(),
+                tiers.derived(), providers);
+    }
+
+    /** Empties the candidate queue, keeping the lyric on screen until the search answers. */
+    private void resetQueueForSearch(@Nullable Lyrics current) {
+        synchronized (candidateQueue) {
+            candidateQueue.clear();
+            phase2Done = false;
+        }
+        shownFingerprints.clear();
+        if (current != null) {
+            shownFingerprints.add(LyricsMatch.fingerprint(current));
+        }
+        String preferredFp = preferredFingerprint;
+        if (preferredFp != null) {
+            shownFingerprints.add(preferredFp);
+        }
     }
 
     private void runProviderLookup(int id, TrackInfo trackParam) {
@@ -1411,53 +1468,18 @@ public final class LyricsManager {
         final TrackInfo track = LyricsMatch.withEffectiveDuration(trackParam, segs);
         final boolean suppressed = applyRememberedPreference(id, track);
 
-        // Local files take priority: read embedded LYRICS/LYRIC tags before hitting providers.
-        if (Settings.LYRICS_USE_EMBEDDED.get()) {
-            Uri embeddedUri = localUriFor(track);
-            if (embeddedUri != null) {
-                Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
-                if (embedded != null) {
-                    // Nothing reads the cache under this name: embedded lyrics come from the
-                    // file every time, so writing them only fills a slot that is never answered.
-                    publishFromLookup(id, embedded);
-                    if (!suppressed) {
-                        return;
-                    }
-                }
-            }
+        if (tryEmbeddedLyrics(id, track, suppressed)) {
+            return;
         }
 
-        String order = Settings.LYRICS_SOURCE.get();
-        List<LyricsProvider> providers = LyricsProviders.providersInOrder(order);
         final TrackInfo queryTrack = customQueryTrack(track);
-        if (queryTrack != null) {
-            // The queue is being rebuilt from custom terms, which the providers keyed by
-            // video id cannot answer. The cache is keyed by the playing track and holds what
-            // the default terms found, so its misses say nothing about these terms.
-            providers = LyricsProviders.searchableProviders(providers);
-        }
+        final List<LyricsProvider> providers = providersForLookup(queryTrack);
         if (providers.isEmpty()) {
             publishFromLookup(id, Lyrics.NOT_FOUND);
             return;
         }
 
-        int notFoundCached = 0;
-        for (LyricsProvider provider : providers) {
-            Lyrics cached = LyricsCache.get(track, provider.name(), preferenceVideoId);
-            if (cached != null && cached != Lyrics.NOT_FOUND) {
-                publishFromLookup(id, cached);
-                if (!suppressed) {
-                    return;
-                }
-                continue;
-            }
-            boolean providerMissed = cached == Lyrics.NOT_FOUND && queryTrack == null;
-            if (providerMissed) {
-                notFoundCached++;
-            }
-        }
-        if (queryTrack == null && notFoundCached >= providers.size()) {
-            publishFromLookup(id, Lyrics.NOT_FOUND);
+        if (serveFromCache(id, track, providers, queryTrack, suppressed)) {
             return;
         }
 
@@ -1466,25 +1488,21 @@ public final class LyricsManager {
             return;
         }
 
-        boolean[] failed = {false};
-        Lyrics result;
-
         // Custom terms carry none of the playing track's InnerTube metadata, which says
         // nothing about them.
         Tiers tiers = queryTrack != null
                 ? buildTiers(queryTrack, queryTrack.title())
                 : buildTiers(track, currentRawTitle);
 
+        boolean[] failed = {false};
         LookupResult fetchResult = fetchFromProviders(id, tiers.original(), tiers.derived(),
                 failed, providers, false);
         if (id != requestId.get()) return;
-        result = fetchResult.best;
+        final Lyrics result = fetchResult.best;
 
-        boolean validResult = LyricsMatch.isValidLyrics(result, track);
+        final boolean validResult = LyricsMatch.isValidLyrics(result, track);
         if (validResult) {
-            if (!LyricsRequests.isCustomMatchMode()) {
-                LyricsCache.put(track, LyricsMatch.cacheSourceFor(result), result, preferenceVideoId);
-            }
+            cacheMatch(track, result);
             publishFromLookup(id, result);
         }
 
@@ -1498,27 +1516,121 @@ public final class LyricsManager {
             return;
         }
 
-        // A miss on the track's own terms marks the provider as having nothing; a miss on
-        // typed terms says nothing about them and leaves the cache untouched.
-        if (queryTrack == null) {
-            for (LyricsProvider provider : providers) {
-                if (fetchResult.providersWithResults.contains(provider.name())) {
-                    continue;
-                }
-                if (fetchResult.providersFailed.contains(provider.name())) {
-                    continue;
-                }
-                if (!fetchResult.providersAttempted.contains(provider.name())) {
-                    continue;
-                }
-                LyricsCache.put(track, provider.name(), Lyrics.NOT_FOUND, preferenceVideoId);
-            }
-        }
+        markProviderMisses(track, providers, fetchResult, queryTrack);
         if (failed[0]) {
             setErrorStateIfCurrent(id);
         } else {
             publishFromLookup(id, Lyrics.NOT_FOUND);
         }
+    }
+
+    /**
+     * Keeps a match that was fetched, unless the queue is being rebuilt from custom terms, whose
+     * results are not what the playing track would be found by.
+     */
+    private void cacheMatch(TrackInfo track, Lyrics result) {
+        if (LyricsRequests.isCustomMatchMode()) {
+            return;
+        }
+        LyricsCache.put(track, LyricsMatch.cacheSourceFor(result), result, preferenceVideoId);
+    }
+
+    /**
+     * Reads the lyrics embedded in a local file, which take priority over the providers.
+     *
+     * <p>Nothing reads the cache under this name: embedded lyrics come from the file every time,
+     * so writing them only fills a slot that is never answered.
+     *
+     * @return True when the lookup is settled, and nothing else should be asked.
+     */
+    private boolean tryEmbeddedLyrics(int id, TrackInfo track, boolean suppressed) {
+        if (!Settings.LYRICS_USE_EMBEDDED.get()) {
+            return false;
+        }
+        Uri embeddedUri = localUriFor(track);
+        if (embeddedUri == null) {
+            return false;
+        }
+        Lyrics embedded = LocalLyricsFetcher.fetch(embeddedUri);
+        if (embedded == null) {
+            return false;
+        }
+        publishFromLookup(id, embedded);
+        return !suppressed;
+    }
+
+    /**
+     * The providers to ask, in the order the setting gives.
+     *
+     * <p>The queue is being rebuilt from custom terms, which the providers keyed by video id
+     * cannot answer, so only the searchable ones are kept for them.
+     */
+    private static List<LyricsProvider> providersForLookup(@Nullable TrackInfo queryTrack) {
+        String order = Settings.LYRICS_SOURCE.get();
+        List<LyricsProvider> providers = LyricsProviders.providersInOrder(order);
+        if (queryTrack == null) {
+            return providers;
+        }
+        return LyricsProviders.searchableProviders(providers);
+    }
+
+    /**
+     * Publishes whatever the cache already holds, when it settles the lookup.
+     *
+     * <p>The cache is keyed by the playing track and holds what the default terms found, so its
+     * misses say nothing about custom terms.
+     *
+     * @return True when the cache settled the lookup, either with a hit to stop on or with a
+     *         known miss for every provider.
+     */
+    private boolean serveFromCache(int id, TrackInfo track, List<LyricsProvider> providers,
+                                   @Nullable TrackInfo queryTrack, boolean suppressed) {
+        int notFoundCached = 0;
+        for (LyricsProvider provider : providers) {
+            Lyrics cached = LyricsCache.get(track, provider.name(), preferenceVideoId);
+            if (cached != null && cached != Lyrics.NOT_FOUND) {
+                publishFromLookup(id, cached);
+                if (!suppressed) {
+                    return true;
+                }
+                continue;
+            }
+            if (cached == Lyrics.NOT_FOUND && queryTrack == null) {
+                notFoundCached++;
+            }
+        }
+        if (queryTrack != null || notFoundCached < providers.size()) {
+            return false;
+        }
+        publishFromLookup(id, Lyrics.NOT_FOUND);
+        return true;
+    }
+
+    /**
+     * A miss on the track's own terms marks the provider as having nothing; a miss on typed terms
+     * says nothing about them and leaves the cache untouched.
+     */
+    private void markProviderMisses(TrackInfo track, List<LyricsProvider> providers,
+                                    LookupResult fetchResult, @Nullable TrackInfo queryTrack) {
+        if (queryTrack != null) {
+            return;
+        }
+        for (LyricsProvider provider : providers) {
+            if (providerHasNothing(fetchResult, provider.name())) {
+                LyricsCache.put(track, provider.name(), Lyrics.NOT_FOUND, preferenceVideoId);
+            }
+        }
+    }
+
+    /** Whether a provider was asked, did not fail, and came back with nothing. */
+    private static boolean providerHasNothing(LookupResult fetchResult, String providerName) {
+        if (fetchResult.providersWithResults.contains(providerName)) {
+            return false;
+        }
+        if (fetchResult.providersFailed.contains(providerName)) {
+            return false;
+        }
+        return fetchResult.providersAttempted.contains(providerName);
     }
 
     private void fillQueueInBackground(int id, List<VariantQuery> originalTier,
@@ -2073,21 +2185,32 @@ public final class LyricsManager {
         final TrackInfo track = currentTrack;
         List<SkipSegments.Seg> base = SkipSegments.peek(videoId,
                 track == null ? 0 : track.durationSeconds() * 1000L);
-        if (base != null) {
-            displaySegsVideoId = videoId;
-            displaySegs = base;
-        } else {
-            final List<SkipSegments.Seg> latched = displaySegs;
-            base = latched != null && videoId.equals(displaySegsVideoId) ? latched : null;
-            if (base == null) {
-                SkipSegments.prefetch(videoId);
-            }
-        }
+        base = refreshDisplaySegs(videoId, base);
         final SkipSegments.Seg preview = dialogPreviewSeg;
         if (preview == null || !videoId.equals(dialogPreviewVideoId)) {
             return base;
         }
         return SkipSegments.withSegment(base, preview);
+    }
+
+    /**
+     * Keeps the freshest segments the panel reads: a new answer replaces the latched one, and the
+     * latched one serves while no answer exists, asking for one when there is none for this video.
+     */
+    @Nullable
+    private List<SkipSegments.Seg> refreshDisplaySegs(String videoId,
+                                                      @Nullable List<SkipSegments.Seg> base) {
+        if (base != null) {
+            displaySegsVideoId = videoId;
+            displaySegs = base;
+            return base;
+        }
+        final List<SkipSegments.Seg> latched = displaySegs;
+        base = latched != null && videoId.equals(displaySegsVideoId) ? latched : null;
+        if (base == null) {
+            SkipSegments.prefetch(videoId);
+        }
+        return base;
     }
 
     /**
