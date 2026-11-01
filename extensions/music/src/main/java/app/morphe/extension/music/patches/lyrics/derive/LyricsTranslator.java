@@ -20,6 +20,7 @@ import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.LyricsMerge;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsRequests;
+import app.morphe.extension.music.patches.lyrics.romanizers.LyricsLanguageDetector;
 import app.morphe.extension.music.patches.lyrics.storage.LyricsCache;
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.shared.Logger;
@@ -110,6 +111,13 @@ public final class LyricsTranslator {
                 Settings.LYRICS_TRANSLATION_PROVIDERS.get(),
                 AiProviders.TRANSLATION_ORDER);
         if (providers.isEmpty()) {
+            callback.onTranslated(null, false, false, null);
+            return;
+        }
+
+        // Already in the language asked for: nothing is sent, and no failure is reported, because
+        // no provider was asked anything.
+        if (!LyricsLanguageDetector.needsTranslation(lyrics.lines(), language)) {
             callback.onTranslated(null, false, false, null);
             return;
         }

@@ -143,6 +143,8 @@ final class LyricsLineView extends TextView {
     /** Sung ahead of its lead line, so it sits above it and opens upwards. */
     private boolean bgBeforeMain;
     private boolean isRightAligned;
+    /** Apple's centred vocal, whose row ignores the duet alignment. */
+    private boolean isCentered;
     /** How far a background vocal is open. Its measured height follows this. */
     private float secondaryFraction = 1f;
     private boolean secondaryExpanded = true;
@@ -178,8 +180,16 @@ final class LyricsLineView extends TextView {
         isRightAligned = rightAligned;
     }
 
+    void setIsCentered(boolean centered) {
+        isCentered = centered;
+    }
+
     boolean isRightAligned() {
         return isRightAligned;
+    }
+
+    boolean isCentered() {
+        return isCentered;
     }
 
     /** The gap to the lead line, on whichever side of it this background vocal sits. */
@@ -261,7 +271,7 @@ final class LyricsLineView extends TextView {
     private void applySecondaryFrame(float alpha) {
         final int fullHeight = secondaryFullHeight > 0 ? secondaryFullHeight : getHeight();
         final float scale = SECONDARY_CLOSED_SCALE + (1f - SECONDARY_CLOSED_SCALE) * secondaryFraction;
-        setPivotX(isRightAligned ? getWidth() : 0f);
+        setPivotX(isCentered ? getWidth() * 0.5f : isRightAligned ? getWidth() : 0f);
         setPivotY(bgBeforeMain ? fullHeight : 0f);
         setScaleX(scale);
         setScaleY(scale);
@@ -291,7 +301,7 @@ final class LyricsLineView extends TextView {
         super.onSizeChanged(w, h, oldw, oldh);
         if (isSecondary) {
             final int pivotH = secondaryFullHeight > 0 ? secondaryFullHeight : h;
-            setPivotX(isRightAligned ? w : 0f);
+            setPivotX(isCentered ? w * 0.5f : isRightAligned ? w : 0f);
             setPivotY(bgBeforeMain ? pivotH : 0f);
         } else {
             setPivotX(isRightAligned ? w - getPaddingRight() : getPaddingLeft());
@@ -1237,7 +1247,8 @@ final class LyricsLineView extends TextView {
         }
 
         final boolean isRightAligned = (getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.END;
-        Layout.Alignment mainAlign = LyricsSpanBuilder.resolveAlignment(false, isRightAligned);
+        Layout.Alignment mainAlign =
+                LyricsSpanBuilder.resolveAlignment(false, isRightAligned, isCentered);
 
         TextPaint mainPaint = new TextPaint(getPaint());
         mainPaint.setTextSize(fontSizePx);
@@ -1359,7 +1370,7 @@ final class LyricsLineView extends TextView {
                 transPaint.setLetterSpacing(0f);
                 final boolean isTransRtl = LyricsSpanBuilder.isRtlText(transText);
                 Layout.Alignment transAlign =
-                        LyricsSpanBuilder.resolveAlignment(isTransRtl, isRightAligned);
+                        LyricsSpanBuilder.resolveAlignment(isTransRtl, isRightAligned, isCentered);
                 transLayout = StaticLayout.Builder.obtain(
                                 transText, 0, transText.length(), transPaint, widthPx)
                         .setAlignment(transAlign)

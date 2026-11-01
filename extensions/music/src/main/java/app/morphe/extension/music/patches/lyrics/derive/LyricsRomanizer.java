@@ -27,6 +27,7 @@ import app.morphe.extension.music.patches.lyrics.requests.LyricsRequests;
 import app.morphe.extension.music.patches.lyrics.romanizers.HangulRomanizer;
 import app.morphe.extension.music.patches.lyrics.romanizers.KanaRomanizer;
 import app.morphe.extension.music.patches.lyrics.romanizers.LocalRomanizer;
+import app.morphe.extension.music.patches.lyrics.romanizers.LyricsLanguageDetector;
 import app.morphe.extension.music.patches.lyrics.romanizers.RimeDictStore;
 import app.morphe.extension.music.patches.lyrics.romanizers.ScriptDetector;
 import app.morphe.extension.music.patches.lyrics.storage.LyricsCache;
@@ -297,6 +298,14 @@ public final class LyricsRomanizer {
                 Settings.LYRICS_ROMANIZATION_PROVIDERS.get(),
                 AiProviders.ROMANIZATION_ORDER);
         if (providers.isEmpty()) {
+            callback.onRomanized(null, false, false, null, false, null);
+            return;
+        }
+
+        // Nothing to romanize once the lyrics are Latin already, which is also every case where
+        // the request used to come back empty and the button flashed its failure.
+        if (!LyricsLanguageDetector.needsRomanization(
+                lyrics.lines(), LyricsRequests.romanizationLanguage())) {
             callback.onRomanized(null, false, false, null, false, null);
             return;
         }

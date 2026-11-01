@@ -89,9 +89,11 @@ final class LyricsFieldsDialog {
                 true);
         ScrollView scroll = new ScrollView(context);
         scroll.addView(content);
-        pair.second.addView(scroll, pair.second.getChildCount() - 1,
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        // Sizing to content would push the buttons off a short screen.
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        scrollParams.bottomMargin = Dim.dp12;
+        pair.second.addView(scroll, Math.max(0, pair.second.getChildCount() - 1), scrollParams);
         pair.first.show();
     }
 

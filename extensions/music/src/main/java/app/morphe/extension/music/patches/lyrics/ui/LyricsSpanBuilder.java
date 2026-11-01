@@ -1225,6 +1225,7 @@ final class LyricsSpanBuilder {
         Paint.FontMetricsInt baseFm = new Paint.FontMetricsInt();
         basePaint.getFontMetricsInt(baseFm);
         String original = displayLineText(line);
+        final boolean centered = line.isCentered();
 
         final int lineHeight = baseFm.descent - baseFm.ascent;
         final int mainClear = Math.max(0, (int) (lineHeight * MAIN_LINE_SPACING + 0.5f) - lineHeight);
@@ -1243,7 +1244,8 @@ final class LyricsSpanBuilder {
             final int transEnd = content.isEmpty() ? -1 : content.length();
             attachUniformSpacing(text, spacing);
             if (!content.isEmpty()) {
-                text.setSpan(new AlignmentSpan.Standard(resolveAlignment(isRtlText(content), isRightAligned)),
+                text.setSpan(new AlignmentSpan.Standard(
+                        resolveAlignment(isRtlText(content), isRightAligned, centered)),
                         0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             return new BuildResult(text, null, transStart, transEnd, -1, -1);
@@ -1258,7 +1260,8 @@ final class LyricsSpanBuilder {
             if (content.isEmpty()) {
                 return new BuildResult(text, null, -1, -1, -1, -1);
             }
-            text.setSpan(new AlignmentSpan.Standard(resolveAlignment(isRtlText(content), isRightAligned)),
+            text.setSpan(new AlignmentSpan.Standard(
+                    resolveAlignment(isRtlText(content), isRightAligned, centered)),
                     0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             // No bounds reported paints the whole line the lyric colour, and none of the reading's fade.
             List<WordTiming> spans = readsNothing ? timings : roma.spans();
@@ -1283,10 +1286,11 @@ final class LyricsSpanBuilder {
                 applySpans(dual, Collections.emptyList(), 0, smallStart - 1,
                         smallIsRoma ? -1 : smallStart, smallIsRoma ? -1 : smallEnd,
                         smallIsRoma ? smallStart : -1, smallIsRoma ? smallEnd : -1,
-                        isRightAligned);
+                        isRightAligned, centered);
             } else {
                 boolean isRtl = isRtlText(dual);
-                dual.setSpan(new AlignmentSpan.Standard(resolveAlignment(isRtl, isRightAligned)),
+                dual.setSpan(new AlignmentSpan.Standard(
+                        resolveAlignment(isRtl, isRightAligned, centered)),
                         0, dual.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             // A small run carrying the word timings is what is sung, and keeps the reading's
@@ -1354,7 +1358,8 @@ final class LyricsSpanBuilder {
         attachUniformSpacing(text, spacing);
         ForegroundColorSpan unsungSpan = applySpans(text,
                 showSyllableRomanization ? syllableRomanTimings : timings,
-                originalStart, originalEnd, romaStart, romaEnd, transStart, transEnd, isRightAligned);
+                originalStart, originalEnd, romaStart, romaEnd, transStart, transEnd,
+                isRightAligned, centered);
         return new BuildResult(text, unsungSpan, transStart, transEnd, romaStart, romaEnd,
                 reading.spans(), false, showSyllableRomanization, originalStart);
     }
@@ -1634,7 +1639,7 @@ final class LyricsSpanBuilder {
     private static ForegroundColorSpan applySpans(SpannableString text, List<WordTiming> timings,
                                                   int originalStart, int originalEnd,
                                                   int romaStart, int romaEnd, int transStart, int transEnd,
-                                                  boolean isRightAligned) {
+                                                  boolean isRightAligned, boolean centered) {
         ForegroundColorSpan unsungSpan = null;
         if (romaStart >= 0 && romaEnd > romaStart) {
             text.setSpan(new RelativeSizeSpan(TRANSLATION_RELATIVE_SIZE), romaStart, romaEnd,
@@ -1660,20 +1665,22 @@ final class LyricsSpanBuilder {
             int spanEnd = originalEnd < text.length() && text.charAt(originalEnd) == '\n'
                     ? originalEnd + 1 : originalEnd;
             boolean isOrigRtl = isRtlText(text.subSequence(originalStart, originalEnd));
-            text.setSpan(new AlignmentSpan.Standard(resolveAlignment(isOrigRtl, isRightAligned)),
+            text.setSpan(new AlignmentSpan.Standard(
+                            resolveAlignment(isOrigRtl, isRightAligned, centered)),
                     originalStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         if (romaStart >= 0 && romaEnd > romaStart) {
             int spanEnd = romaEnd < text.length() && text.charAt(romaEnd) == '\n'
                     ? romaEnd + 1 : romaEnd;
-            text.setSpan(new AlignmentSpan.Standard(resolveAlignment(false, isRightAligned)),
+            text.setSpan(new AlignmentSpan.Standard(resolveAlignment(false, isRightAligned, centered)),
                     romaStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         if (transStart >= 0 && transEnd > transStart) {
             int spanEnd = transEnd < text.length() && text.charAt(transEnd) == '\n'
                     ? transEnd + 1 : transEnd;
             boolean isTransRtl = isRtlText(text.subSequence(transStart, transEnd));
-            text.setSpan(new AlignmentSpan.Standard(resolveAlignment(isTransRtl, isRightAligned)),
+            text.setSpan(new AlignmentSpan.Standard(
+                            resolveAlignment(isTransRtl, isRightAligned, centered)),
                     transStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
@@ -1687,8 +1694,13 @@ final class LyricsSpanBuilder {
         return ScriptDetector.isLineRtl(text);
     }
 
-    public static Layout.Alignment resolveAlignment(boolean isRtl, boolean isRightAligned) {
-        if (Settings.LYRICS_FORCE_CENTER.get()) {
+    /**
+     * @param forceCenter The line's own agent says it is centred ({@code v1000}/{@code v2000}),
+     *                    so the "Always center lyrics" setting does not decide it.
+     */
+    public static Layout.Alignment resolveAlignment(boolean isRtl, boolean isRightAligned,
+                                                    boolean forceCenter) {
+        if (forceCenter || Settings.LYRICS_FORCE_CENTER.get()) {
             return Layout.Alignment.ALIGN_CENTER;
         }
         if (isRightAligned) {

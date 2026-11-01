@@ -14,11 +14,7 @@ import android.content.Context;
 import android.preference.Preference;
 import android.text.InputType;
 import android.util.AttributeSet;
-import android.view.View;
 import android.widget.EditText;
-import android.widget.TextView;
-
-import app.morphe.extension.shared.theme.ThemeUtils;
 
 import app.morphe.extension.music.settings.Settings;
 import app.morphe.extension.shared.Utils;
@@ -70,20 +66,7 @@ public class LyricsTrackFormatPreference extends Preference {
         });
     }
 
-    @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
-        TextView summary = (TextView) view.findViewById(android.R.id.summary);
-        if (summary != null) {
-            summary.setTextColor(withAlpha(ThemeUtils.getAppForegroundColor(), 0x99));
-        }
-    }
-
     private static void showInvalidToast() {
         Utils.showToastShort(str("morphe_music_lyrics_mini_artist_timing_invalid"));
-    }
-
-    private static int withAlpha(int color, int alpha) {
-        return (alpha << 24) | (color & 0x00FFFFFF);
     }
 }
