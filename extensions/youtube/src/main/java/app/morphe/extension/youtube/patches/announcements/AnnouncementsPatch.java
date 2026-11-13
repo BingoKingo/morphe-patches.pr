@@ -4,6 +4,7 @@ import static app.morphe.extension.shared.StringRef.str;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.graphics.drawable.Drawable;
 import android.text.Html;
 import android.util.Pair;
 import android.view.View;
@@ -17,6 +18,7 @@ import java.net.HttpURLConnection;
 import java.time.LocalDateTime;
 
 import app.morphe.extension.shared.Logger;
+import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.requests.Requester;
 import app.morphe.extension.shared.ui.CustomDialog;
@@ -117,10 +119,10 @@ public final class AnnouncementsPatch {
                     return;
                 }
 
-                int finalId = id;
+                final int finalId = id;
                 final var finalTitle = title;
                 final var finalMessage = Html.fromHtml(message, Html.FROM_HTML_MODE_COMPACT);
-                final Level finalLevel = level;
+                Drawable icon = ResourceUtils.getDrawableOrThrow(level.icon).mutate();
 
                 Utils.runOnMainThread(() -> {
                     // Create the custom dialog and show the announcement.
@@ -144,8 +146,10 @@ public final class AnnouncementsPatch {
                     for (int i = 0, childCould = mainLayout.getChildCount(); i < childCould; i++) {
                         View child = mainLayout.getChildAt(i);
                         if (child instanceof TextView childTextView && finalTitle.equals(childTextView.getText().toString())) {
-                            childTextView.setCompoundDrawablesWithIntrinsicBounds(
-                                    finalLevel.icon, 0, 0, 0);
+                            // The icons are one color, so they take the color of the title.
+                            icon.setTint(childTextView.getCurrentTextColor());
+                            icon.setBounds(0, 0, Dim.dp24, Dim.dp24);
+                            childTextView.setCompoundDrawablesRelative(icon, null, null, null);
                             childTextView.setCompoundDrawablePadding(Dim.dp8);
                         }
                     }
@@ -167,15 +171,17 @@ public final class AnnouncementsPatch {
         });
     }
 
-    // TODO: Use better icons.
     private enum Level {
-        INFO(android.R.drawable.ic_dialog_info),
-        WARNING(android.R.drawable.ic_dialog_alert),
-        SEVERE(android.R.drawable.ic_dialog_alert);
+        INFO("morphe_settings_screen_00_about"),
+        WARNING("morphe_ic_dialog_alert"),
+        SEVERE("morphe_ic_dialog_alert");
 
-        public final int icon;
+        /**
+         * Name of a Morphe drawable that the settings patch adds to the app.
+         */
+        public final String icon;
 
-        Level(int icon) {
+        Level(String icon) {
             this.icon = icon;
         }
 
