@@ -21,6 +21,7 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Shader;
 import android.icu.text.BreakIterator;
+import android.os.SystemClock;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -101,6 +102,13 @@ final class LyricsLineView extends TextView {
     @Nullable
     private Long adjustedEndTimeMs = null;
     private long lastDrawnClockPos = Long.MIN_VALUE;
+    /** Shared animation clock published by the panel on each tick, see {@link #setAnimationTickMs}. */
+    private long animationTickMs = Long.MIN_VALUE;
+
+    /** Passes the panel's single animation clock down so all lines advance their springs in step. */
+    void setAnimationTickMs(long nowUptimeMs) {
+        this.animationTickMs = nowUptimeMs;
+    }
 
     private void releaseSyllableCache() {
         discardCache(syllableCache);
@@ -3233,6 +3241,8 @@ final class LyricsLineView extends TextView {
         long livePos = hasAnimatedWordSweep ? getLiveClockPositionMs() : 0L;
         float speed = LyricsManager.getInstance().getPlaybackSpeed();
         boolean playing = LyricsManager.getInstance().isPlaying();
+        // A freshly built line may be drawn before the next panel tick; fall back to the real clock.
+        long nowUptimeMs = animationTickMs > 0L ? animationTickMs : SystemClock.uptimeMillis();
 
         final boolean effectiveActive = hasAnimatedWordSweep && activeLine;
 
@@ -3247,7 +3257,8 @@ final class LyricsLineView extends TextView {
                 dynamicLineColor,
                 dynamicFocusedAlpha,
                 speed,
-                playing);
+                playing,
+                nowUptimeMs);
         canvas.restore();
 
         final int readingRgb = (activeLine

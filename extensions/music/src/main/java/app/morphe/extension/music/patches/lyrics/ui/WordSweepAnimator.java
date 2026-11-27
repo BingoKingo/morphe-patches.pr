@@ -444,8 +444,6 @@ public final class WordSweepAnimator {
     private float curSimpleState = 0f;
     private float curSimpleVel = 0f;
     private long lastDrawUptimeMs = -1L;
-    private long lastRawUptimeMs = -1L;
-    private long animClockMs = 10_000L;
     private boolean prewarmMasks;
     private boolean stillAnimating = false;
     private boolean transitionAnimating = false;
@@ -997,8 +995,8 @@ public final class WordSweepAnimator {
         this.prewarmMasks = prewarmMasks;
         if (!prewarmMasks && maskCacheStore != null
                 && ((!wasActiveLine && !stillAnimating)
-                || lastRawUptimeMs < 0L
-                || (SystemClock.uptimeMillis() - lastRawUptimeMs) > OFF_WINDOW_EVICT_DELAY_MS)) {
+                || lastDrawUptimeMs < 0L
+                || (SystemClock.uptimeMillis() - lastDrawUptimeMs) > OFF_WINDOW_EVICT_DELAY_MS)) {
             maskCacheStore.evictAndClear();
         }
     }
@@ -1733,9 +1731,15 @@ public final class WordSweepAnimator {
             int lineColor,
             float focusedAlpha,
             float playbackSpeed) {
-        draw(canvas, currentPosition, isActiveLine, allSung, expressiveAccent, lineColor, focusedAlpha, playbackSpeed, true);
+        draw(canvas, currentPosition, isActiveLine, allSung, expressiveAccent, lineColor,
+                focusedAlpha, playbackSpeed, true, SystemClock.uptimeMillis());
     }
 
+    /**
+     * @param nowUptimeMs The shared animation clock supplied by the lyrics panel, so every line
+     *                    advances its springs in step. A line that goes offscreen no longer freezes
+     *                    its own clock: the next draw sees the real elapsed time and settles.
+     */
     public void draw(
             Canvas canvas,
             long currentPosition,
@@ -1745,20 +1749,12 @@ public final class WordSweepAnimator {
             int lineColor,
             float focusedAlpha,
             float playbackSpeed,
-            boolean isPlaying) {
+            boolean isPlaying,
+            long nowUptimeMs) {
         ensureRenderState();
         if (isActiveLine) {
             everActivated = true;
         }
-        long rawUptimeMs = SystemClock.uptimeMillis();
-        if (lastRawUptimeMs >= 0L) {
-            long elapsed = rawUptimeMs - lastRawUptimeMs;
-            if (elapsed > 0L && elapsed < 250L) {
-                animClockMs += elapsed;
-            }
-        }
-        lastRawUptimeMs = rawUptimeMs;
-        long nowUptimeMs = animClockMs;
         float safeSpeed = Math.max(0.1f, playbackSpeed);
 
         final boolean smoothSweep = Settings.isWordAnimSmooth();
@@ -2434,7 +2430,6 @@ public final class WordSweepAnimator {
         transitionAnimating = false;
         everActivated = false;
         lastDrawUptimeMs = -1L;
-        lastRawUptimeMs = -1L;
         if (!renderStateBuilt) {
             return;
         }

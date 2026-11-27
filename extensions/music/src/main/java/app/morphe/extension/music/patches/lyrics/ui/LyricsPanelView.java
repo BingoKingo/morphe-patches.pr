@@ -481,6 +481,10 @@ public final class LyricsPanelView extends FrameLayout
         @Override
         public void run() {
             try {
+                // One animation clock for every line, so a line that is offscreen still advances
+                // its springs. Previously each animator accumulated its own clock and skipped
+                // gaps >= 250 ms, which froze animations on lines that were not being drawn.
+                applyAnimationTick(SystemClock.uptimeMillis());
                 updateHighlight();
                 // The position the highlight just used, which holds a tapped line's time
                 // until the seek lands.
@@ -6070,6 +6074,15 @@ public final class LyricsPanelView extends FrameLayout
             }
         }
         lastOverlayIndex = index;
+    }
+
+    /** Publishes one animation clock to every lyric line for this tick. */
+    private void applyAnimationTick(long nowUptimeMs) {
+        for (TextView tv : lineViews) {
+            if (tv instanceof LyricsLineView lineView) {
+                lineView.setAnimationTickMs(nowUptimeMs);
+            }
+        }
     }
 
     private void updateWordSync(long positionMs) {
