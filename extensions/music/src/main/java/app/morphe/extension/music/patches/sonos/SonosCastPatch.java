@@ -74,9 +74,19 @@ public final class SonosCastPatch {
 
     /**
      * Injection point. Replaces the AudioTrack write of the ExoPlayer audio sink.
+     *
+     * <p>Two independent consumers share this single hook: Sonos casting (only while a speaker
+     * is connected) and lyrics fingerprint capture (only while a snapshot is active). Neither
+     * requires the other. When the Sonos Cast patch is not applied this hook is absent and the
+     * fingerprint feature degrades gracefully via its hook-probe timeout.
      */
     public static int writeAudio(AudioTrack track, ByteBuffer buffer, int sizeInBytes, int writeMode) {
-        if (!SonosCastManager.isConnected()) {
+        // Also tells the fingerprint capture that this hook exists, even while the player is
+        // buffering and has not produced any PCM yet.
+        app.morphe.extension.music.patches.lyrics.fingerprint.FingerprintCapture.markHookSeen();
+        final boolean casting = SonosCastManager.isConnected();
+        final boolean capturing = app.morphe.extension.music.patches.lyrics.fingerprint.FingerprintCapture.isCapturing();
+        if (!casting && !capturing) {
             return track.write(buffer, sizeInBytes, writeMode);
         }
 
@@ -84,10 +94,19 @@ public final class SonosCastPatch {
         final int written = track.write(buffer, sizeInBytes, writeMode);
         if (written > 0) {
             try {
-                ByteBuffer audio = buffer.duplicate();
-                audio.position(position);
-                audio.limit(position + written);
-                SonosCastManager.onAudioWritten(track, audio);
+                // Both consumers need the just-written bytes, so duplicate before either reads.
+                final ByteBuffer castAudio = casting ? buffer.duplicate() : null;
+                final ByteBuffer captureAudio = capturing ? buffer.duplicate() : null;
+                if (castAudio != null) {
+                    castAudio.position(position);
+                    castAudio.limit(position + written);
+                    SonosCastManager.onAudioWritten(track, castAudio);
+                }
+                if (captureAudio != null) {
+                    captureAudio.position(position);
+                    captureAudio.limit(position + written);
+                    app.morphe.extension.music.patches.lyrics.fingerprint.FingerprintCapture.onPcm(track, captureAudio);
+                }
             } catch (Exception ex) {
                 Logger.printException(() -> "writeAudio failure", ex);
             }

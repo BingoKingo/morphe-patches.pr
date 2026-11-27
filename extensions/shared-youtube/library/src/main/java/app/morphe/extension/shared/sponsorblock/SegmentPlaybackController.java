@@ -763,6 +763,12 @@ public class SegmentPlaybackController {
     }
 
     private static void skipSegment(SponsorSegment segmentToSkip, boolean userManuallySkipped) {
+        // While the lyrics fingerprint snapshot is recording, the video's intro must play in full
+        // so PCM captures the real lead-in. Suppress automatic skips for that short window only.
+        // A shared flag avoids changing SB_ENABLED (which other threads read asynchronously).
+        if (app.morphe.extension.shared.FingerprintCaptureState.isActive()) {
+            return;
+        }
         try {
             ui().hideSkipHighlightButton();
             ui().hideSkipSegmentButton();

@@ -1155,7 +1155,7 @@ public final class LyricsPanelView extends FrameLayout
             if (context == null) {
                 return;
             }
-            SponsorBlockMusicSubmitDialog.show(context, videoId, startMs, stopMs,
+            SponsorBlockMusicSubmitDialog.showRecorded(context, videoId, startMs, stopMs,
                     offsetRulerView::setOffsetMs, this::scheduleHideOffsetRuler);
             return;
         }
@@ -1418,6 +1418,12 @@ public final class LyricsPanelView extends FrameLayout
         } else {
             scheduleHideOffsetRuler();
         }
+    }
+
+    @Override
+    public void onSnapshotAligned() {
+        Settings.LYRICS_SB_HISTORY_SEEN.save(true);
+        openSponsorBlockPresets();
     }
 
     private static boolean sameLinesExceptSongPart(@NonNull Lyrics a, @NonNull Lyrics b) {
@@ -4747,6 +4753,40 @@ public final class LyricsPanelView extends FrameLayout
         if (BaseSettings.DEBUG_TOAST_ON_ERROR.get()) {
             Utils.showToastShort(message);
         }
+    }
+
+    @Override
+    public void openSponsorBlockPresets() {
+        Context context = getContext();
+        if (context == null) {
+            return;
+        }
+        LyricsManager manager = LyricsManager.getInstance();
+        String videoId = manager.skipSegmentsVideoId();
+        if (videoId == null) {
+            toastError(str("morphe_music_lyrics_sb_no_video"));
+            return;
+        }
+        SponsorBlockMusicSubmitDialog.showPresets(context, videoId, offsetRulerView::setOffsetMs,
+                this::scheduleHideOffsetRuler);
+    }
+
+    @Override
+    public boolean hasUnseenHistory() {
+        LyricsManager manager = LyricsManager.getInstance();
+        String videoId = manager.skipSegmentsVideoId();
+        if (videoId == null) {
+            return false;
+        }
+        // Cheap peek first; a background fetch makes the dot appear on the next open when the
+        // segments were not downloaded yet.
+        java.util.List<SkipSegments.Seg> segs = SkipSegments.peek(videoId,
+                VideoInformation.getVideoLength());
+        if (segs != null && !segs.isEmpty()) {
+            return true;
+        }
+        SkipSegments.prefetch(videoId);
+        return false;
     }
 
     private void updateRefreshLabel() {

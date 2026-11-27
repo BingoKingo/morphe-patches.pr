@@ -254,6 +254,97 @@ public class SBRequester {
         return false;
     }
 
+    /**
+     * A segment to submit in a batch. Mirrors one element of the SponsorBlock JSON Body API.
+     */
+    public record BatchSegment(long startMs, long endMs, SegmentCategory category,
+                               SegmentSubmitAction action) {
+    }
+
+    /**
+     * Submits several segments for one video in a single request using the JSON Body form of
+     * {@code POST /api/skipSegments}. Used by the lyrics fingerprint preset flow, where the user
+     * has reviewed every segment before confirming.
+     *
+     * <p>The userAgent intentionally stays the standard client string (no "AUTO"): segments are
+     * human-reviewed before this call, so it is not an automated submission.
+     *
+     * @return true if the server accepted the batch (or an identical batch already existed).
+     */
+    public static boolean submitSegmentsBatch(String videoId, List<BatchSegment> segments,
+                                              long videoLength) {
+        Utils.verifyOffMainThread();
+        if (segments == null || segments.isEmpty()) {
+            return false;
+        }
+
+        try {
+            final String privateUserID = SponsorBlockHelpers.getOrGenerateSBPrivateUserID();
+            final String userAgent = "Morphe/" + Utils.getAppVersionName();
+
+            final JSONObject body = new JSONObject();
+            body.put("videoID", videoId);
+            body.put("userID", privateUserID);
+            body.put("userAgent", userAgent);
+            body.put("videoDuration", videoLength / 1000f);
+
+            final JSONArray segmentArray = new JSONArray();
+            for (BatchSegment segment : segments) {
+                final JSONObject item = new JSONObject();
+                final JSONArray span = new JSONArray();
+                // The JSON body API expects numbers, not formatted strings.
+                span.put(segment.startMs() / 1000f);
+                span.put(segment.endMs() / 1000f);
+                item.put("segment", span);
+                item.put("category", segment.category().keyValue);
+                item.put("actionType", segment.action().type);
+                segmentArray.put(item);
+            }
+            body.put("segments", segmentArray);
+
+            // JSON Body form of the endpoint (no query params). Requester's route helper locks
+            // the connection to a zero-length body, so open the endpoint path directly.
+            final String url = settings().apiUrl().get() + "/api/skipSegments";
+            final HttpURLConnection connection = Requester.openConnection(url);
+            connection.setConnectTimeout(TIMEOUT_TCP_DEFAULT_MILLISECONDS);
+            connection.setReadTimeout(TIMEOUT_HTTP_DEFAULT_MILLISECONDS);
+            try {
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                final byte[] payload = body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(payload.length);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("User-Agent", userAgent);
+                try (java.io.OutputStream out = connection.getOutputStream()) {
+                    out.write(payload);
+                }
+
+                final int responseCode = connection.getResponseCode();
+                if (responseCode == HTTP_STATUS_CODE_SUCCESS) {
+                    Utils.showToastLong(str("morphe_sb_submit_succeeded"));
+                    return true;
+                }
+                if (responseCode == HTTP_STATUS_CODE_CONFLICT) {
+                    // The identical segment is already on the server: treat it as stored, but
+                    // do not show the generic "unknown error" toast for a successful no-op.
+                    Utils.showToastLong(str("morphe_sb_submit_failed_duplicate"));
+                    return true;
+                }
+                Logger.printDebug(() -> "Batch submit failed: " + responseCode);
+                Utils.showToastLong(str("morphe_sb_submit_failed_unknown_error", responseCode,
+                        connection.getResponseMessage()));
+                return false;
+            } finally {
+                connection.disconnect();
+            }
+        } catch (Exception ex) {
+            Logger.printException(() -> "failed to submit segment batch", ex);
+            return false;
+        } finally {
+            lastFetchedStats = null;
+        }
+    }
+
     public static void sendSegmentSkippedViewedRequest(SponsorSegment segment) {
         Utils.verifyOffMainThread();
         try {

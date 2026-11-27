@@ -25,6 +25,9 @@ import androidx.annotation.Nullable;
 import java.util.List;
 
 import app.morphe.extension.music.patches.lyrics.LyricsManager;
+import app.morphe.extension.music.patches.lyrics.SponsorBlockPresets;
+import app.morphe.extension.music.patches.lyrics.fingerprint.FingerprintAligner;
+import app.morphe.extension.music.patches.lyrics.fingerprint.FingerprintCapture;
 import app.morphe.extension.music.patches.lyrics.derive.QuickLRCClient;
 import app.morphe.extension.music.patches.lyrics.derive.SectionDetector;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
@@ -80,6 +83,21 @@ final class LyricsSearchDialog {
         void toastError(String message);
 
         void onConfirmSearch(String title, String artist, boolean defaultTerms);
+
+        /** Opens the SponsorBlock sheet landing on the preset tab (fingerprint snapshot flow). */
+        void openSponsorBlockPresets();
+
+        /** Whether the current video has SponsorBlock history the user has not seen yet. */
+        boolean hasUnseenHistory();
+    }
+
+    /** Morphe teal dot, matching NewSettingsIndicator.DOT_COLOR. */
+    private static android.graphics.drawable.Drawable createTealDot() {
+        android.graphics.drawable.GradientDrawable dot = new android.graphics.drawable.GradientDrawable();
+        dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        dot.setColor(0xFF00AFAE);
+        dot.setSize(Dim.dp(8), Dim.dp(8));
+        return dot;
     }
 
     private LyricsSearchDialog() {
@@ -235,12 +253,101 @@ final class LyricsSearchDialog {
             });
         }
 
+        // Fingerprint "snapshot" links an audio-only version to a music video. Gated on the same
+        // SB switch as the rest of the lyrics/SB integration. The AudioTrack hook lives in the
+        // Sonos patch; if it is absent, FingerprintCapture reports it via its hook-probe timeout.
+        if (Settings.LYRICS_SB_MATCHING.get() && !VideoInformation.getVideoId().isEmpty()) {
+            TextView snapshotButton = new TextView(context);
+            callbacks.styleButton(snapshotButton);
+            LinearLayout.LayoutParams snapshotParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            snapshotParams.topMargin = Dim.dp16;
+            content.addView(snapshotButton, snapshotParams);
+
+            Runnable refreshSnapshotButton = () -> {
+                final String currentVideo = VideoInformation.getVideoId();
+                if (FingerprintCapture.isCapturing()) {
+                    snapshotButton.setText(str("morphe_music_lyrics_snapshot_capturing",
+                            FingerprintCapture.progressSeconds(),
+                            FingerprintCapture.CAPTURE_DURATION_MS / 1000));
+                } else if (FingerprintCapture.isBaseReady()) {
+                    snapshotButton.setText(str("morphe_music_lyrics_snapshot_ready"));
+                } else if (SponsorBlockPresets.hasFor(currentVideo)) {
+                    snapshotButton.setText(str("morphe_music_lyrics_snapshot_open_presets"));
+                } else {
+                    snapshotButton.setText(str("morphe_music_lyrics_snapshot_button"));
+                }
+                // New-history dot: teal (same as NewSettingsIndicator), cleared once seen.
+                // Pending history is reported by the panel through the callbacks interface.
+                if (!Settings.LYRICS_SB_HISTORY_SEEN.get() && callbacks.hasUnseenHistory()) {
+                    snapshotButton.setCompoundDrawablesWithIntrinsicBounds(null, null,
+                            createTealDot(), null);
+                } else {
+                    snapshotButton.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+                }
+            };
+            refreshSnapshotButton.run();
+
+            snapshotButton.setOnClickListener(view -> {
+                final String currentVideo = VideoInformation.getVideoId();
+                if (FingerprintCapture.isCapturing()) {
+                    // Finish the first pass here; the second pass will match this length.
+                    FingerprintCapture.stop();
+                    refreshSnapshotButton.run();
+                    return;
+                }
+                if (FingerprintCapture.isBaseReady()) {
+                    // The second pass normally starts by itself when the video id changes.
+                    // Tapping is the manual fallback for players that reuse the same id.
+                    if (currentVideo.isEmpty()
+                            || currentVideo.equals(FingerprintCapture.baseVideoId())) {
+                        Utils.showToastShort(str("morphe_music_lyrics_snapshot_same_video"));
+                        return;
+                    }
+                    FingerprintCapture.startAlign(currentVideo);
+                    refreshSnapshotButton.run();
+                    return;
+                }
+                if (SponsorBlockPresets.hasFor(currentVideo)) {
+                    // Alignment already filled the presets: review and submit them.
+                    Settings.LYRICS_SB_HISTORY_SEEN.save(true);
+                    callbacks.openSponsorBlockPresets();
+                    if (dialogRef[0] != null) {
+                        dialogRef[0].dismissImmediately();
+                    }
+                    return;
+                }
+                // Seek to the very start so both captures share the same content position.
+                VideoInformation.seekTo(0);
+                FingerprintCapture.setCallback(new FingerprintCapture.Callback() {
+                    @Override public void onCaptureProgress(int seconds) {
+                        refreshSnapshotButton.run();
+                    }
+                    @Override public void onBaseCaptured() {
+                        refreshSnapshotButton.run();
+                    }
+                    @Override public void onAligned(FingerprintAligner.Result result,
+                                                    String baseId, String targetId) {
+                        refreshSnapshotButton.run();
+                    }
+                    @Override public void onFailed() {
+                        refreshSnapshotButton.run();
+                    }
+                });
+                FingerprintCapture.startBase(currentVideo);
+                refreshSnapshotButton.run();
+            });
+        }
+
         LinearLayout sheet = SheetBottomDialog.createMainLayout(
                 context, LyricsSheetChrome.BACKGROUND_COLOR);
         SlideDialog dialog = SheetBottomDialog.createSlideDialog(context, sheet, SLIDE_ANIMATION_MILLIS);
         dialogRef[0] = dialog;
         dialog.setOnDismissListener(d -> {
             dialogRef[0] = null;
+            // Progress refreshes target this dialog's button; the capture itself keeps running.
+            FingerprintCapture.clearCallback();
             callbacks.onSearchDialogDismiss();
         });
 

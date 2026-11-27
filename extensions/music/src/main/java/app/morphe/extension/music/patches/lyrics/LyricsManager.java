@@ -421,6 +421,17 @@ public final class LyricsManager {
         }
     }
 
+    /** Main thread. Notifies observers that a snapshot preset is ready to review. */
+    public void notifySnapshotAligned() {
+        for (Listener listener : new ArrayList<>(listeners)) {
+            try {
+                listener.onSnapshotAligned();
+            } catch (Exception ex) {
+                Logger.printException(() -> "Snapshot listener failure", ex);
+            }
+        }
+    }
+
     /** Called from the panel when the track is about to change or to go away, not per drag frame. */
     public void persistTemporaryOffsetMs() {
         final TrackInfo track = currentTrack;
@@ -2593,6 +2604,10 @@ public final class LyricsManager {
 
         /** Called when the temporary offset changes outside the panel's own drag. */
         default void onTemporaryOffsetChanged(int offsetMs) {
+        }
+
+        /** Called after a fingerprint snapshot produced a preset, so the sheet can be opened. */
+        default void onSnapshotAligned() {
         }
     }
 

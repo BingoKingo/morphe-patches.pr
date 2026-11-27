@@ -1026,6 +1026,30 @@ Lyrics come from third-party services that are not affiliated with, sponsored, o
     <string name="morphe_music_lyrics_ai_section_cancelled">Detection cancelled</string>
     <string name="morphe_music_lyrics_ai_section_no_text">No lyrics to detect sections for</string>
 
+    <!-- lyrics fingerprint snapshot / SponsorBlock preset flow -->
+    <string name="morphe_music_lyrics_snapshot_button">Snapshot offset</string>
+    <string name="morphe_music_lyrics_snapshot_capturing">Capturing %1$ds / %2$ds (tap to finish)</string>
+    <string name="morphe_music_lyrics_snapshot_ready">Snapshot ready - switch to the video version</string>
+    <string name="morphe_music_lyrics_snapshot_same_video">Switch to the other version, then capture again</string>
+    <string name="morphe_music_lyrics_snapshot_open_presets">Open SponsorBlock presets</string>
+    <string name="morphe_music_lyrics_snapshot_unavailable">Snapshot needs the Sonos Cast patch enabled</string>
+    <string name="morphe_music_lyrics_snapshot_no_audio">No audio arrived - please retry when playback starts</string>
+    <string name="morphe_music_lyrics_snapshot_too_short">Need at least 10s - please capture longer</string>
+    <string name="morphe_music_lyrics_snapshot_align_failed">Could not align the two versions</string>
+    <string name="morphe_music_lyrics_snapshot_aligned">Aligned: video starts %1$s later</string>
+    <string name="morphe_music_lyrics_sb_tab_new">New</string>
+    <string name="morphe_music_lyrics_sb_tab_presets">Presets</string>
+    <string name="morphe_music_lyrics_sb_tab_history">History</string>
+    <string name="morphe_music_lyrics_sb_add_to_presets">Save to presets</string>
+    <string name="morphe_music_lyrics_sb_saved_to_presets">Added to presets</string>
+    <string name="morphe_music_lyrics_sb_submit_all">Submit %1$d segments</string>
+    <string name="morphe_music_lyrics_sb_no_presets">No presets yet - add a segment in New</string>
+    <string name="morphe_music_lyrics_sb_presets_hint">Tap a row to edit it, long-press to remove it</string>
+    <string name="morphe_music_lyrics_sb_history_hint">Tap a row to load it into New</string>
+    <string name="morphe_music_lyrics_sb_history_loading">Loading server segments…</string>
+    <string name="morphe_music_lyrics_sb_history_empty">The server has no segments for this video</string>
+    <string name="morphe_music_lyrics_sb_history_unavailable">Could not load server segments</string>
+
     <!-- misc.spoof.appversion.spoofAppVersionPatch -->
     <string name="morphe_music_spoof_app_version_target_entry_8_23_51">8.23.51 - Disable bold icons</string>
     <string name="morphe_music_spoof_app_version_target_entry_9_13_51">9.13.51 - Restore Player Up next, Lyrics, and Related tabs</string>
