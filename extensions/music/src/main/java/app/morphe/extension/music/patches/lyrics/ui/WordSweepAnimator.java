@@ -1370,9 +1370,8 @@ public final class WordSweepAnimator {
             if (backwardSeek || currentPosition < lineStartMs) {
                 lastActiveGX = 0f;
             }
-            if (!backwardSeek && lastActivePosMs != Long.MIN_VALUE && currentPosition < lastActivePosMs) {
-                currentPosition = lastActivePosMs;
-            }
+            // Keep the real sample: clamping small backward moves forward here made the wipe
+            // ratchet ahead on jittery PlaybackState samples and on sub-threshold seeks.
             lastActivePosMs = currentPosition;
             if (activeSylIdx == -1) {
                 if (backwardSeek || currentPosition < lineStartMs) {
