@@ -186,6 +186,16 @@ final class LyricsLineView extends TextView {
 
     /** Clears frozen karaoke clip arrays / animator sweep state so a finished line cannot keep painting its last word. */
     public void clearWordPaintState() {
+        clearWordPaintState(false);
+    }
+
+    /**
+     * @param hard Also resets emphasis lift, elevation and release state. Needed when the line is
+     *             leaving the active role: a soft clear leaves the last sung word raised for the
+     *             whole release animation. Content rebuilds of a still-active line use the soft
+     *             path so they do not replay the entrance animation.
+     */
+    public void clearWordPaintState(boolean hard) {
         if (lineKaraokeStartX != null) {
             Arrays.fill(lineKaraokeStartX, Float.NaN);
             Arrays.fill(lineKaraokeEndX, Float.NaN);
@@ -194,7 +204,11 @@ final class LyricsLineView extends TextView {
             Arrays.fill(lineMaxSungX, Float.NaN);
         }
         if (syllableCache != null && syllableCache.animator != null) {
-            syllableCache.animator.clearSeekProgress();
+            if (hard) {
+                syllableCache.animator.reset();
+            } else {
+                syllableCache.animator.clearSeekProgress();
+            }
         }
         lastDrawnClockPos = Long.MIN_VALUE;
     }
@@ -1192,7 +1206,9 @@ final class LyricsLineView extends TextView {
                 syllableCache.animator.reset();
             }
         } else {
-            clearWordPaintState();
+            // The line is no longer sung: drop the emphasis/elevation state too, otherwise the
+            // word that was being sung stays raised until its release animation finishes.
+            clearWordPaintState(true);
         }
         postInvalidateOnAnimation();
     }
