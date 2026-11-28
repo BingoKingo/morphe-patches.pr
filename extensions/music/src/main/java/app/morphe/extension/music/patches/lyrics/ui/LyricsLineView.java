@@ -830,7 +830,6 @@ final class LyricsLineView extends TextView {
         }
 
         final boolean becameActive = !this.activeLine && isActive;
-        final boolean becameInactive = this.activeLine && !isActive;
         this.activeLine = isActive;
         if (becameActive) {
             this.allSung = false;
@@ -838,11 +837,11 @@ final class LyricsLineView extends TextView {
             if (syllableCache != null && syllableCache.animator != null) {
                 syllableCache.animator.reset();
             }
-        } else if (becameInactive) {
-            // Natural playback reaches this path directly and never calls setActiveLine,
-            // so the animator must be hard-cleared here too, or the last sung word stays raised.
-            clearWordPaintState(true);
         }
+        // Leaving the active role must not hard-clear the animator here. With overlapping
+        // lyrics the previous line is still finishing its last word when the next one starts;
+        // a reset would cut that tail off in a single frame. Let the shared clock run the
+        // release out instead. Jumps still hard-clear through setActiveLine(false).
         if (instant || !lineLookInitialized) {
             lineLookInitialized = true;
             cancelLineLookAnimator();
