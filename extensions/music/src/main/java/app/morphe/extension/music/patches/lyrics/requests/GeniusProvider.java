@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import app.morphe.extension.music.patches.lyrics.LyricsAvailability;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.LyricsMerge;
@@ -308,7 +309,7 @@ public final class GeniusProvider implements LyricsProvider {
     private static Map<String, List<LyricsLine>> translations(JSONObject record,
                                                               List<LyricsLine> lines, String text,
                                                               int[] slots) {
-        String target = LyricsRequests.primarySubtag(LyricsRequests.translationLanguage());
+        String target = LyricsRequests.primarySubtag(LyricsAvailability.translationLanguage());
         if (target.isEmpty()) {
             return null;
         }

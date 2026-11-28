@@ -164,16 +164,26 @@ public final class LyricsPanelInstaller {
                 LockScreenLyrics.onSettingsChanged();
                 return;
             }
-            final LyricsPanelView panelView = panelReference.get();
-            if (panelView == null) {
-                return;
-            }
             final boolean translateButtonOff =
                     Settings.LYRICS_SHOW_TRANSLATE_BUTTON.key.equals(key)
                             && !Settings.LYRICS_SHOW_TRANSLATE_BUTTON.get();
             final boolean romanizeButtonOff =
                     Settings.LYRICS_SHOW_ROMANIZE_BUTTON.key.equals(key)
                             && !Settings.LYRICS_SHOW_ROMANIZE_BUTTON.get();
+            final LyricsPanelView panelView = panelReference.get();
+            if (panelView == null) {
+                // A panel opened later starts from the saved flags, so clear them here too:
+                // otherwise hiding a button before any lyrics are shown keeps its modes alive.
+                if (translateButtonOff) {
+                    Settings.LYRICS_TRANSLATE_ONLY.save(false);
+                    Settings.LYRICS_TRANSLATE.save(false);
+                }
+                if (romanizeButtonOff) {
+                    Settings.LYRICS_ROMANIZE_ONLY.save(false);
+                    Settings.LYRICS_ROMANIZE.save(false);
+                }
+                return;
+            }
             if (translateButtonOff || romanizeButtonOff) {
                 panelView.releaseOnlyModesForHiddenButtons(translateButtonOff, romanizeButtonOff);
             }

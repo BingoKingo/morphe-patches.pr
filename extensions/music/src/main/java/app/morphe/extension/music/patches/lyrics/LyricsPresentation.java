@@ -73,7 +73,7 @@ public final class LyricsPresentation {
         if (!Settings.LYRICS_HAN_FORM.get()) {
             return LyricsTextFormatter.HAN_NONE;
         }
-        final String script = LyricsRequests.resolvedScript(LyricsRequests.translationLanguage());
+        final String script = LyricsRequests.resolvedScript(LyricsAvailability.translationLanguage());
         if ("Hant".equalsIgnoreCase(script)) {
             return LyricsTextFormatter.HAN_TRADITIONAL;
         }

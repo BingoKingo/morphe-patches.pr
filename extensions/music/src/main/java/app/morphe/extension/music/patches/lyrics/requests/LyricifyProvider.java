@@ -27,6 +27,7 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import app.morphe.extension.music.patches.lyrics.LyricsAvailability;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
@@ -209,7 +210,7 @@ public final class LyricifyProvider implements LyricsProvider {
         }
 
         final Map<String, List<LyricsLine>> translations;
-        if ("zh".equals(LyricsRequests.primarySubtag(LyricsRequests.translationLanguage()))
+        if ("zh".equals(LyricsRequests.primarySubtag(LyricsAvailability.translationLanguage()))
                 && trans != null && !trans.isEmpty()) {
             final List<String> translatedTexts = LyricifyParser.parseTranslation(trans, offset);
             if (!translatedTexts.isEmpty()) {

@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import app.morphe.extension.music.patches.lyrics.LyricsAvailability;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
@@ -653,7 +654,7 @@ public final class CaptionsFetcher {
     private static CaptionTrack selectTranslationTrack(List<CaptionTrack> tracks,
                                                        String primaryLang,
                                                        @Nullable String sourceLangCode) {
-        String sysLang = LyricsRequests.primarySubtag(LyricsRequests.translationLanguage());
+        String sysLang = LyricsRequests.primarySubtag(LyricsAvailability.translationLanguage());
         if (sysLang.isEmpty()) {
             return null;
         }
@@ -1156,7 +1157,7 @@ public final class CaptionsFetcher {
             Lyrics result = outcome.lyrics;
             if (outcome.translationLyrics != null && !outcome.translationLyrics.isEmpty()) {
                 Map<String, List<LyricsLine>> translations = new HashMap<>();
-                translations.put(LyricsRequests.translationLanguage(),
+                translations.put(LyricsAvailability.translationLanguage(),
                         outcome.translationLyrics.lines());
                 result = new Lyrics(result.lines(), result.providerName(), result.synced(),
                         result.romanization(), translations,

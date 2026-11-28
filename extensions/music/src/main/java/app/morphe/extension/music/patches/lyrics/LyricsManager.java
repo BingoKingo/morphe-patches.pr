@@ -2477,6 +2477,10 @@ public final class LyricsManager {
                     if (currentLyrics != target || currentTrack != track) {
                         return;
                     }
+                    // The setting can be turned off while the request is in flight.
+                    if (!LyricsAvailability.aiSections()) {
+                        return;
+                    }
                     if (sections == null) {
                         Logger.printDebug(() -> "AI section detection returned no sections for "
                                 + track.title() + " - " + track.artist());
@@ -2514,6 +2518,10 @@ public final class LyricsManager {
                         notifySectionDetectionStateChanged();
                         return;
                     }
+                    if (!LyricsAvailability.aiSections()) {
+                        notifySectionDetectionStateChanged();
+                        return;
+                    }
                     if (sections != null) {
                         pendingSections = sections;
                         pendingSectionsFor = target;
@@ -2534,6 +2542,9 @@ public final class LyricsManager {
     }
 
     public void applyPendingSections() {
+        if (!LyricsAvailability.aiSections()) {
+            return;
+        }
         List<String> sections = pendingSections;
         Lyrics target = pendingSectionsFor;
         TrackInfo track = pendingSectionsTrack;

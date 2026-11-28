@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import app.morphe.extension.music.patches.lyrics.LyricsAvailability;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
@@ -169,7 +170,7 @@ public final class AppleMusicProvider implements LyricsProvider {
 
     @Nullable
     private static String lyricsLanguageParam() {
-        final String target = LyricsRequests.translationLanguage();
+        final String target = LyricsAvailability.translationLanguage();
         final String matched = matchSupportedLanguage(Locale.forLanguageTag(target.replace('_', '-')));
         return matched != null ? matched : matchSupportedLanguage(Requester.getAppLocale());
     }

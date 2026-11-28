@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import app.morphe.extension.music.patches.lyrics.LyricsAvailability;
 import app.morphe.extension.music.patches.lyrics.model.Lyrics;
 import app.morphe.extension.music.patches.lyrics.model.LyricsLine;
 import app.morphe.extension.music.patches.lyrics.model.LyricsMerge;
@@ -106,7 +107,7 @@ public final class LyricsTranslator {
             lines.add(line.text());
         }
 
-        String language = LyricsRequests.translationLanguage();
+        String language = LyricsAvailability.translationLanguage();
         List<String> providers = ProcessingProviders.enabledProviders(
                 Settings.LYRICS_TRANSLATION_PROVIDERS.get(),
                 ProcessingProviders.TRANSLATION_ORDER);
