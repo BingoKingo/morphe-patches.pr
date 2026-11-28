@@ -830,6 +830,7 @@ final class LyricsLineView extends TextView {
         }
 
         final boolean becameActive = !this.activeLine && isActive;
+        final boolean becameInactive = this.activeLine && !isActive;
         this.activeLine = isActive;
         if (becameActive) {
             this.allSung = false;
@@ -837,6 +838,10 @@ final class LyricsLineView extends TextView {
             if (syllableCache != null && syllableCache.animator != null) {
                 syllableCache.animator.reset();
             }
+        } else if (becameInactive) {
+            // Natural playback reaches this path directly and never calls setActiveLine,
+            // so the animator must be hard-cleared here too, or the last sung word stays raised.
+            clearWordPaintState(true);
         }
         if (instant || !lineLookInitialized) {
             lineLookInitialized = true;
