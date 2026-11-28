@@ -86,8 +86,16 @@ final class LyricsActiveLines {
             return Collections.emptySet();
         }
         final long scanTime = currentTimeMs + LyricsRetiming.HIGHLIGHT_LOOK_AHEAD_MS;
-        List<Integer> scanned = LyricsRetiming.findActiveRetimedLineIndices(
-                retimed, ctx.retimedAdjustedEndMax(), scanTime, 0L);
+        // Look-ahead only brings the next line in early. Ending a line must use the real time,
+        // otherwise a line whose end is later than the next line's start is dropped ~190 ms
+        // before it has finished singing, cutting its last word short.
+        List<Integer> scanned = new ArrayList<>(LyricsRetiming.findActiveRetimedLineIndices(
+                retimed, ctx.retimedAdjustedEndMax(), currentTimeMs, 0L));
+        final int nextStarted = LyricsRetiming.findLastStartedLineIndex(retimed, scanTime);
+        if (nextStarted >= 0 && !scanned.contains(nextStarted)) {
+            scanned.add(nextStarted);
+            Collections.sort(scanned);
+        }
         Set<Integer> set = new TreeSet<>(scanned);
         for (int i : scanned) {
             final int lead = leadLineIndex(i, ctx);
