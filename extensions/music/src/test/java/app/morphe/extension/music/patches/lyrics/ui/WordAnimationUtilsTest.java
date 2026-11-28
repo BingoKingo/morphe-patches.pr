@@ -20,8 +20,20 @@ import app.morphe.extension.music.patches.lyrics.ui.WordAnimationUtils.Reconstru
 import app.morphe.extension.music.patches.lyrics.ui.WordAnimationUtils.VisualCluster;
 import app.morphe.extension.music.patches.lyrics.ui.WordAnimationUtils.WipeResult;
 import app.morphe.extension.music.patches.lyrics.ui.WordAnimationUtils.WordTimestamp;
+import app.morphe.extension.music.settings.Settings.WordHighlightMode;
 
 public class WordAnimationUtilsTest {
+
+    @Test
+    public void testHighlightFractionAcrossAllFourModes() {
+        long start = 1000L, end = 2000L;
+        Assert.assertEquals(0f, WordAnimationUtils.highlightFraction(start, end, 990L, WordHighlightMode.SMOOTH), 0f);
+        Assert.assertEquals(0.5f, WordAnimationUtils.highlightFraction(start, end, 1500L, WordHighlightMode.SMOOTH), 0f);
+        Assert.assertEquals(0.5f, WordAnimationUtils.highlightFraction(start, end, 1500L, WordHighlightMode.SHARP), 0f);
+        Assert.assertEquals(1f, WordAnimationUtils.highlightFraction(start, end, 1500L, WordHighlightMode.CHARACTER), 0f);
+        Assert.assertEquals(1f, WordAnimationUtils.highlightFraction(start, end, 1500L, WordHighlightMode.KARAOKE), 0f);
+        Assert.assertEquals(1f, WordAnimationUtils.highlightFraction(start, end, 2000L, WordHighlightMode.SHARP), 0f);
+    }
 
     @Test
     public void testBidiStrippingAndScriptDetection() {
