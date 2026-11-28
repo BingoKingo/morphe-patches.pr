@@ -250,6 +250,17 @@ public class Settings extends SharedYouTubeSettings {
     public static boolean isWordAnimKaraoke() {
         return WORD_ANIM_KARAOKE.equals(wordAnimationMode());
     }
+
+    /** All four styles, so every render path can apply the same discrete timing. */
+    public enum WordHighlightMode { SMOOTH, SHARP, CHARACTER, KARAOKE }
+
+    public static WordHighlightMode wordHighlightMode() {
+        final String mode = wordAnimationMode();
+        if (WORD_ANIM_SMOOTH.equals(mode)) return WordHighlightMode.SMOOTH;
+        if (WORD_ANIM_CHARACTER.equals(mode)) return WordHighlightMode.CHARACTER;
+        if (WORD_ANIM_KARAOKE.equals(mode)) return WordHighlightMode.KARAOKE;
+        return WordHighlightMode.SHARP;
+    }
     /** Uses spring physics and staggered FLIP cascading for scrolling lyric lines. */
     public static final BooleanSetting LYRICS_SPRING_SCROLL = new BooleanSetting("morphe_music_lyrics_spring_scroll", TRUE, false, parent(LYRICS_ENABLED));
     /** Slower scrolling animation and keeps inactive lines full size. */
