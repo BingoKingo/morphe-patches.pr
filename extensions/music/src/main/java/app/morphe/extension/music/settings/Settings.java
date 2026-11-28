@@ -311,6 +311,8 @@ public class Settings extends SharedYouTubeSettings {
     public static final BooleanSetting LYRICS_SHARE_GUESS_MODE = new BooleanSetting("morphe_music_lyrics_share_guess_mode", FALSE, false, parent(LYRICS_ENABLED));
     /** User-editable stopword list for the local word-cloud share card (comma/space separated). */
     public static final StringSetting LYRICS_WORD_CLOUD_STOPWORDS = new StringSetting("morphe_music_lyrics_word_cloud_stopwords", app.morphe.extension.music.patches.lyrics.derive.WordCloudStopwords.DEFAULT, false, parent(LYRICS_ENABLED));
+    /** User-defined proper nouns excluded from the word cloud; comma/space separated. */
+    public static final StringSetting LYRICS_WORD_CLOUD_PROPER_NOUNS = new StringSetting("morphe_music_lyrics_word_cloud_proper_nouns", "", false, parent(LYRICS_ENABLED));
     /** Remembered state for showing the English time-of-day element on share cards. */
     public static final BooleanSetting LYRICS_SHARE_SHOW_TIME_OF_DAY = new BooleanSetting("morphe_music_lyrics_share_show_time_of_day", FALSE, false, parent(LYRICS_ENABLED));
     /** Use a clock label such as "3 a.m." instead of the 12 literary time-of-day words. */

@@ -574,6 +574,16 @@ public final class LyricsOrderedListPreference extends Preference {
         cldr.setChecked(chosen[LyricsLocalRomanizationDownloads.CLDR]);
         styleCheckBox(cldr, fg);
 
+        final CheckBox stopwordsIso = new CheckBox(context);
+        stopwordsIso.setText(str("morphe_music_lyrics_local_romanization_dict_stopwords_iso"));
+        stopwordsIso.setChecked(chosen[LyricsLocalRomanizationDownloads.STOPWORDS_ISO]);
+        styleCheckBox(stopwordsIso, fg);
+
+        final CheckBox properNouns = new CheckBox(context);
+        properNouns.setText(str("morphe_music_lyrics_local_romanization_dict_proper_nouns"));
+        properNouns.setChecked(chosen[LyricsLocalRomanizationDownloads.PROPER_NOUNS]);
+        styleCheckBox(properNouns, fg);
+
         final LinearLayout content = new LinearLayout(context);
         content.setOrientation(LinearLayout.VERTICAL);
         content.addView(hint);
@@ -582,6 +592,8 @@ public final class LyricsOrderedListPreference extends Preference {
         content.addView(zhParent);
         content.addView(zhOptionsBox);
         content.addView(cldr);
+        content.addView(stopwordsIso);
+        content.addView(properNouns);
 
         // Attached here rather than on the dialog so a close in any way detaches it. A watched
         // sink also survives a rebuild: only detach takes it away.
@@ -632,7 +644,8 @@ public final class LyricsOrderedListPreference extends Preference {
             final boolean zhOn = zhParent.isChecked();
             LyricsLocalRomanizationDownloads.saveChoice(
                     saveKuromoji, saveSudachi, zhOn && unidict.isChecked(),
-                    zhOn && chinese.isChecked(), cldr.isChecked(), zhOn && jieba.isChecked());
+                    zhOn && chinese.isChecked(), cldr.isChecked(), zhOn && jieba.isChecked(),
+                    stopwordsIso.isChecked(), properNouns.isChecked());
             accepted[0] = true;
             if (switchV == null) {
                 // Opened from the name, so only a row that is already on fetches what is missing.

@@ -6742,7 +6742,8 @@ public final class LyricsPanelView extends FrameLayout
                     Utils.isNotEmpty(bgBefore) ? bgBefore.toString() : null,
                     Utils.isNotEmpty(bgAfter) ? bgAfter.toString() : null,
                     isRight,
-                    isRtl));
+                    isRtl,
+                    line.isCentered()));
         }
         if (entries.isEmpty()) {
             return;

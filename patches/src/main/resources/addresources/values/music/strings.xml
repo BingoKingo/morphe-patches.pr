@@ -807,12 +807,12 @@ Required cookies: SID, HSID, SSID, SAPISID, __Secure-3PAPISID, __Secure-1PAPISID
     <string name="morphe_music_lyrics_word_cloud_stopwords_title">Word Cloud Stopwords</string>
     <string name="morphe_music_lyrics_word_cloud_stopwords_summary">Words ignored by the local word cloud. Tap to edit</string>
     <string name="morphe_music_lyrics_word_cloud_stopwords_label">Ignored words (comma, space or line separated)</string>
+    <string name="morphe_music_lyrics_word_cloud_proper_nouns_title">Word Cloud Proper Nouns</string>
+    <string name="morphe_music_lyrics_word_cloud_proper_nouns_summary">Names left out of the local word cloud. Tap to edit</string>
+    <string name="morphe_music_lyrics_word_cloud_proper_nouns_label">Proper nouns (comma, space or line separated)</string>
      <string name="morphe_music_lyrics_cover_style_params_title">Cover Style Parameters</string>
      <string name="morphe_music_lyrics_cover_style_params_summary">All cover presets' parameters in one JSON. Tap to edit</string>
      <string name="morphe_music_lyrics_cover_style_params_label">Parameters JSON</string>
-     <string name="morphe_music_lyrics_tuning_params_title">Lyric Visual Tuning (JSON)</string>
-     <string name="morphe_music_lyrics_tuning_params_summary">JSON tuning for spring, glow, gradient stops and scale of lyric visuals. Tap to edit</string>
-     <string name="morphe_music_lyrics_tuning_params_label">Lyric visual tuning JSON</string>
     <string name="morphe_music_lyrics_share_story_loading">Building story…</string>
     <string name="morphe_music_lyrics_share_story_failed">Could not build the story</string>
     <string name="morphe_music_lyrics_story_source_lyrics">Lyrics imagery</string>
@@ -832,6 +832,8 @@ Required cookies: SID, HSID, SSID, SAPISID, __Secure-3PAPISID, __Secure-1PAPISID
     <string name="morphe_music_lyrics_local_romanization_dict_chinese">Chinese words (pinyin-pro, ~17 MB)</string>
     <string name="morphe_music_lyrics_local_romanization_dict_jieba">Chinese word segmentation (jieba, ~5 MB)</string>
     <string name="morphe_music_lyrics_local_romanization_dict_cldr">Greek, Slavic Cyrillic (incl. Russian, Ukrainian, Bulgarian, Serbian, Belarusian, Macedonian), Georgian, Armenian, Hebrew, Arabic, Amharic and Syriac transliteration (CLDR, ~0.5 MB)</string>
+    <string name="morphe_music_lyrics_local_romanization_dict_stopwords_iso">Stopwords ISO: function words for 58 languages, used by the word cloud (~0.2 MB)</string>
+    <string name="morphe_music_lyrics_local_romanization_dict_proper_nouns">Proper nouns: person, place and organization names in 400+ languages, used by the word cloud (~68 MB)</string>
     <string name="morphe_music_lyrics_local_romanization_dict_downloading" translatable="false">%1$s: %2$s%%</string>
     <string name="morphe_music_lyrics_local_romanization_dict_building">Reading %1$s: %2$s%%</string>
     <string name="morphe_music_lyrics_show_refresh_button_title">Show Refresh button</string>

@@ -7,6 +7,7 @@
 
 package app.morphe.extension.music.patches.lyrics.romanizers;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.Arrays;
@@ -40,6 +41,11 @@ public final class PinyinRomanizer {
     /** Word groups for plain Chinese; kana keeps its own boundaries. */
     @Nullable
     public static int[] wordGroups(String line) {
+        return wordGroups(line, JiebaSegmenter::forWordTable);
+    }
+
+    @Nullable
+    static int[] wordGroups(String line, JiebaSegmenter.Normalizer normalize) {
         if (line.isEmpty()) {
             return null;
         }
@@ -56,10 +62,20 @@ public final class PinyinRomanizer {
         if (!hasHan) {
             return null;
         }
+        final String lookup = normalize.normalize(line);
         // Dictionary boundaries beat the reading table's longest match.
-        final int[] jieba = JiebaSegmenter.wordGroups(line);
+        final int[] jieba = JiebaSegmenter.wordGroups(line, normalize);
         if (jieba != null) {
-            return jieba;
+            boolean groupedHan = false;
+            for (int i = 0; i < jieba.length; i++) {
+                if (jieba[i] >= 0 && ScriptDetector.isHan(line.charAt(i))) {
+                    groupedHan = true;
+                    break;
+                }
+            }
+            if (groupedHan) {
+                return jieba;
+            }
         }
 
         int[] groups = new int[line.length()];
@@ -74,7 +90,7 @@ public final class PinyinRomanizer {
                     i++;
                     continue;
                 }
-                final int length = longestWord(line, i, table);
+                final int length = longestWord(line, lookup, i, table);
                 if (length == 0) {
                     if (table != null) {
                         // Unknown stretch: one group, not per-character.
@@ -102,10 +118,11 @@ public final class PinyinRomanizer {
     }
 
     /** {@return the longest word of at least two characters starting here, or 0 when none} */
-    private static int longestWord(String line, int index, @Nullable WordReadingTable table) {
+    private static int longestWord(String line, String lookup, int index,
+                                   @Nullable WordReadingTable table) {
         final int longest = Math.min(WordReadingTable.MAX_WORD_LENGTH, line.length() - index);
         for (int length = longest; length >= 2; length--) {
-            final String word = line.substring(index, index + length);
+            final String word = lookup.substring(index, index + length);
             if ((table != null && table.reading(word) != null) || WORDS.containsKey(word)) {
                 return length;
             }
@@ -115,8 +132,14 @@ public final class PinyinRomanizer {
 
     /** Pinyin for a Chinese line, with a space between readings. */
     public static String romanize(String line) {
+        return romanize(line, JiebaSegmenter::forWordTable);
+    }
+
+    @NonNull
+    static String romanize(String line, JiebaSegmenter.Normalizer normalize) {
+        final String lookup = normalize.normalize(line);
         try (WordReadingTable table = PinyinDictionaryStore.word()) {
-            return HanRomanizer.romanize(line, new HanRomanizer.Readings() {
+            return HanRomanizer.romanize(line, lookup, new HanRomanizer.Readings() {
                 @Nullable
                 @Override
                 public String word(String word) {

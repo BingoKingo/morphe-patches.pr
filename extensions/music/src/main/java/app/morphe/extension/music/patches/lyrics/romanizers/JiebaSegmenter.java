@@ -7,14 +7,22 @@
 
 package app.morphe.extension.music.patches.lyrics.romanizers;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.Arrays;
 
+import app.morphe.extension.music.patches.lyrics.utils.CharactersConverter;
 import app.morphe.extension.shared.Logger;
 
 /** Most probable path through the jieba dict; unknown stretches stay single. */
 public final class JiebaSegmenter {
+
+    /** Injectable so the mapping can be tested without Android ICU. */
+    public interface Normalizer {
+        @NonNull
+        String normalize(@NonNull String value);
+    }
 
     /** Log of the sum of all frequencies in the pinned jieba dictionary. */
     private static final double LOG_TOTAL_FREQUENCY = Math.log(60_101_967);
@@ -30,11 +38,56 @@ public final class JiebaSegmenter {
         }
     }
 
+    /** Normalizes Chinese text for the simplified jieba word table, preserving indexes. */
+    @NonNull
+    public static String forWordTable(@NonNull String text) {
+        return forWordTable(text, CharactersConverter::toSimplified);
+    }
+
+    /**
+     * Converts each character on its own and keeps the original when the conversion changes the
+     * character count, so word boundaries still map to the original text.
+     */
+    @NonNull
+    public static String forWordTable(@NonNull String text, @NonNull Normalizer normalizer) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (width == 1) {
+                String converted = normalizer.normalize(new String(Character.toChars(codePoint)));
+                if (converted != null && converted.length() == 1) {
+                    out.append(converted.charAt(0));
+                    i += width;
+                    continue;
+                }
+            }
+            out.appendCodePoint(codePoint);
+            i += width;
+        }
+        return out.toString();
+    }
+
     @Nullable
     static int[] wordGroups(String line, WordReadingTable table) {
+        return wordGroups(line, table, JiebaSegmenter::forWordTable);
+    }
+
+    @Nullable
+    static int[] wordGroups(String line, Normalizer normalize) {
+        try (WordReadingTable table = JiebaSegmentStore.words()) {
+            return table == null ? null : wordGroups(line, table, normalize);
+        }
+    }
+
+    /** Same segmentation with a custom lookup normalizer, kept for tests without Android ICU. */
+    @Nullable
+    static int[] wordGroups(String line, WordReadingTable table,
+                            Normalizer normalize) {
         if (line == null || line.isEmpty() || table == null) {
             return null;
         }
+        String lookup = normalize.normalize(line);
         final int n = line.length();
         final double[] best = new double[n + 1];
         final int[] next = new int[n + 1];
@@ -45,7 +98,7 @@ public final class JiebaSegmenter {
             int end = i + 1;
             final int max = Math.min(n, i + WordReadingTable.MAX_WORD_LENGTH);
             for (int j = i + 1; j <= max; j++) {
-                final String frequency = table.reading(line.substring(i, j));
+                final String frequency = table.reading(lookup.substring(i, j));
                 if (frequency == null) continue;
                 final double weight = frequency(frequency);
                 if (weight <= 0.0) continue;

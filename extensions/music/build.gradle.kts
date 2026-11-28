@@ -3,6 +3,7 @@
 import com.android.build.api.dsl.ApplicationExtension
 
 dependencies {
+    implementation("io.github.fastfilter.fastfilter_java:fastfilter:1.0.5")
     implementation(libs.annotation)
     testImplementation(libs.junit)
     testImplementation(libs.json)

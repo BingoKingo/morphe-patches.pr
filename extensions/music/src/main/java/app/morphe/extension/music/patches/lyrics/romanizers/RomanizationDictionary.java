@@ -66,6 +66,9 @@ public final class RomanizationDictionary {
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
             connection.setRequestProperty("User-Agent", "MorpheMusic");
+            // Android adds gzip by default: the header then reports the compressed length while
+            // the stream yields decompressed bytes, which breaks the length check below.
+            connection.setRequestProperty("Accept-Encoding", "identity");
 
             int status = connection.getResponseCode();
             if (status != HttpURLConnection.HTTP_OK) {
@@ -73,6 +76,9 @@ public final class RomanizationDictionary {
             }
 
             long expected = connection.getContentLength();
+            String encoding = connection.getContentEncoding();
+            boolean compressed = encoding != null
+                    && encoding.toLowerCase(java.util.Locale.ROOT).contains("gzip");
             if (expected > maxBytes) {
                 throw new IOException("download of " + reportedName + " is larger than "
                         + maxBytes + " bytes");
@@ -106,7 +112,7 @@ public final class RomanizationDictionary {
                 out.flush();
             }
 
-            if (expected > 0 && written != expected) {
+            if (expected > 0 && !compressed && written != expected) {
                 throw new IOException("download of " + reportedName + " was cut short");
             }
             if (target.exists() && !target.delete()) {

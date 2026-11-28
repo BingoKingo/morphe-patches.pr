@@ -8,6 +8,7 @@
 package app.morphe.extension.music.patches.lyrics.romanizers;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
@@ -57,6 +58,28 @@ public class JiebaSegmenterTest {
                 new int[]{328841, 14000, 17860, 6583, 34488});
         assertArrayEquals(new int[]{0, 1, 2, 2},
                 JiebaSegmenter.wordGroups("我爱北京", table));
+    }
+
+    @Test
+    public void forWordTablePreservesLengthAndMapsOnlySingleCharacters() {
+        String result = JiebaSegmenter.forWordTable("我愛你😀", value -> {
+            if ("愛".equals(value)) return "爱";
+            if ("你".equals(value)) return "你们";
+            return value;
+        });
+        assertEquals(5, result.length());
+        assertEquals("我爱", result.substring(0, 2));
+        assertEquals('你', result.charAt(2));
+        assertEquals("😀", result.substring(3));
+    }
+
+    @Test
+    public void traditionalCharactersUseSimplifiedWordTable() throws Exception {
+        WordReadingTable table = table(
+                new String[]{"我", "爱", "北", "京", "北京"},
+                new int[]{328841, 14000, 17860, 6583, 34488});
+        assertArrayEquals(new int[]{0, 1, 2, 2}, JiebaSegmenter.wordGroups("我愛北京", table,
+                value -> "愛".equals(value) ? "爱" : value));
     }
 
     @Test

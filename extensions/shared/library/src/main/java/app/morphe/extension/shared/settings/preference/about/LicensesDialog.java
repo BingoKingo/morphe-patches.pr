@@ -27,6 +27,7 @@ class LicensesDialog extends AboutWebViewDialog {
             new License("AndroidX Core", LicenseContent.APACHE_2),
             new License("AndroidX JavaScriptEngine", LicenseContent.APACHE_2),
             new License("CLDR", List.of(LicenseContent.CLDR_NOTICE, LicenseContent.UNICODE_3)),
+            new License("fastfilter_java", LicenseContent.APACHE_2),
             new License("Google Material Design icons", LicenseContent.APACHE_2),
             new License("Gson", LicenseContent.APACHE_2),
             new License("Guava", LicenseContent.APACHE_2),
@@ -35,6 +36,9 @@ class LicensesDialog extends AboutWebViewDialog {
                     List.of(LicenseContent.KUROMOJI_NOTICE, LicenseContent.APACHE_2)),
             new License("Morphe", List.of(LicenseContent.MORPHE_NOTICE, LicenseContent.GPL_3)),
             new License("pinyin-pro-data", LicenseContent.PINYIN_PRO_DATA),
+            new License("Stopwords ISO", LicenseContent.STOPWORDS_ISO),
+            new License("ParaNames and Wikidata Gazetteer", List.of(
+                    LicenseContent.PARANAMES, LicenseContent.WIKIDATA_GAZETTEER)),
             new License("Protocol Buffers", LicenseContent.PROTOCOL_BUFFERS),
             new License("QuackJS", LicenseContent.GPL_3),
             new License("rime-cantonese", LicenseContent.RIME_CANTONESE),
@@ -1063,6 +1067,79 @@ class LicensesDialog extends AboutWebViewDialog {
                 
                 What the lyrics patch stores is the reading of each word, taken from
                 data/complete.json, with the erhua suffix folded into the syllable before it.
+                """);
+
+        static final LicenseContent STOPWORDS_ISO = new LicenseContent("MIT License", """
+                Stopwords ISO
+                https://github.com/stopwords-iso/stopwords-iso
+
+                MIT License
+
+                Copyright (c) 2020 Gene Diaz
+
+                Permission is hereby granted, free of charge, to any person obtaining a copy
+                of this software and associated documentation files (the "Software"), to deal
+                in the Software without restriction, including without limitation the rights
+                to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+                copies of the Software, and to permit persons to whom the Software is
+                furnished to do so, subject to the following conditions:
+
+                The above copyright notice and this permission notice shall be included in all
+                copies or substantial portions of the Software.
+
+                THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+                IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+                FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+                AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+                LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+                OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+                SOFTWARE.
+
+                What the lyrics patch stores is the stopwords of each language in
+                stopwords-iso.json, lower-cased for matching.
+                """);
+
+        static final LicenseContent PARANAMES = new LicenseContent("MIT License", """
+                ParaNames
+                https://github.com/bltlab/paranames
+
+                MIT License
+
+                Copyright (c) 2022 Jonne Salva and Constantine Lignos
+
+                Permission is hereby granted, free of charge, to any person obtaining a copy
+                of this software and associated documentation files (the "Software"), to deal
+                in the Software without restriction, including without limitation the rights
+                to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+                copies of the Software, and to permit persons to whom the Software is
+                furnished to do so, subject to the following conditions:
+
+                The above copyright notice and this permission notice shall be included in all
+                copies or substantial portions of the Software.
+
+                THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+                IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+                FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+                AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+                LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+                OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+                SOFTWARE.
+
+                ParaNames is derived from Wikidata (CC0). What the lyrics patch downloads is
+                a 16-bit binary fuse filter of all person, place and organization names,
+                mapped read-only so queries need no in-memory copy.
+                """);
+
+        static final LicenseContent WIKIDATA_GAZETTEER = new LicenseContent("CC0 1.0", """
+                Wikidata Gazetteer
+                https://github.com/Wikidata-Gazetteer/wikidata-gazetteer
+
+                This code and gazetteer data is provided under a Public Domain License:
+                https://creativecommons.org/publicdomain/zero/1.0/
+
+                What the lyrics patch stores is the primary names, their English aliases and
+                the alternative names in the TSV, lower-cased, split into tokens and phrases,
+                and capped in size.
                 """);
 
         static final LicenseContent RIME_CANTONESE = new LicenseContent("Creative Commons Attribution 4.0", """

@@ -14,6 +14,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import android.text.Layout;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -318,6 +320,17 @@ public class LyricsFontAndShareTest {
         assertFalse(singleAlign[0]);
         assertFalse(singleAlign[1]);
 
+        LyricsShareCardRenderer.ShareLineEntry normalEntry =
+                new LyricsShareCardRenderer.ShareLineEntry("x", null, null, null, null, false, false);
+        LyricsShareCardRenderer.ShareLineEntry centeredEntry =
+                new LyricsShareCardRenderer.ShareLineEntry("x", null, null, null, null, false, false, true);
+        assertEquals(Layout.Alignment.ALIGN_NORMAL,
+                LyricsShareCardRenderer.entryAlignment(normalEntry, false, false));
+        assertEquals(Layout.Alignment.ALIGN_CENTER,
+                LyricsShareCardRenderer.entryAlignment(centeredEntry, false, false));
+        assertEquals(Layout.Alignment.ALIGN_CENTER,
+                LyricsShareCardRenderer.entryAlignment(centeredEntry, true, true));
+
         // Branding off trims card height cleanly while still giving lyrics more headroom
         LyricsShareCardRenderer.CardLayout withBrand = LyricsShareCardRenderer.computeLayout(2, 1, true);
         LyricsShareCardRenderer.CardLayout noBrand = LyricsShareCardRenderer.computeLayout(2, 1, false);
@@ -418,9 +431,9 @@ public class LyricsFontAndShareTest {
 
         LyricsShareCardRenderer.CardLayout withKeywords =
                 LyricsShareCardRenderer.computeLayout(2, 1, true, false, false, true);
-        assertEquals(withKeywords.cardHeight(), brandOnly.cardHeight() + 44f, 0.01f);
-        assertEquals(withKeywords.footerTop(), brandOnly.footerTop() + 44f, 0.01f);
-        assertEquals(withKeywords.lyricsHeight(), brandOnly.lyricsHeight(), 0.01f);
+        assertEquals(withKeywords.cardHeight(), brandOnly.cardHeight() + 20f, 0.01f);
+        assertEquals(withKeywords.footerTop(), brandOnly.footerTop() + 20f, 0.01f);
+        assertEquals(withKeywords.lyricsHeight(), brandOnly.lyricsHeight() - 24f, 0.01f);
 
         String neutral = "Guess the song!";
         assertEquals(neutral, LyricsShareDialog.buildShareCaption(
@@ -458,7 +471,7 @@ public class LyricsFontAndShareTest {
 
         LyricsShareCardRenderer.CardLayout twoKeywordLines =
                 LyricsShareCardRenderer.computeLayout(2, 1, true, false, false, false, 2, false);
-        assertEquals(brandOnly.cardHeight() + 64f, twoKeywordLines.cardHeight(), 0.01f);
+        assertEquals(brandOnly.cardHeight() + 40f, twoKeywordLines.cardHeight(), 0.01f);
 
         LyricsShareCardRenderer.CardLayout oneSourceLine =
                 LyricsShareCardRenderer.computeLayout(2, 1, true, false, false, false, 0, false, 1);

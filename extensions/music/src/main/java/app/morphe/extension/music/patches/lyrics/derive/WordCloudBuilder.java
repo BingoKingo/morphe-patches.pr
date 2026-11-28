@@ -7,6 +7,7 @@
 
 package app.morphe.extension.music.patches.lyrics.derive;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -21,6 +22,8 @@ import java.util.regex.Pattern;
 import app.morphe.extension.music.patches.lyrics.romanizers.CjkWordGroups;
 import app.morphe.extension.music.patches.lyrics.romanizers.JapaneseDictionaryStore;
 import app.morphe.extension.music.patches.lyrics.romanizers.KuromojiDictStore;
+import app.morphe.extension.music.patches.lyrics.romanizers.ScriptDetector;
+import app.morphe.extension.music.patches.lyrics.derive.ProperNounFilter;
 import app.morphe.extension.shared.Logger;
 
 /** Local, offline word-cloud builder. */
@@ -51,9 +54,14 @@ public final class WordCloudBuilder {
         }
     }
 
-    /** Prefers the local CJK dictionary, then ICU/JDK word breaks for scripts without one. */
+    /** Prefers the local CJK dictionary, then locale-aware ICU/JDK word breaks. */
     @Nullable
     public static List<String> tokenize(String line) {
+        return tokenize(line, Locale.ROOT);
+    }
+
+    @Nullable
+    public static List<String> tokenize(String line, Locale locale) {
         if (line == null || line.trim().isEmpty()) {
             return null;
         }
@@ -63,43 +71,139 @@ public final class WordCloudBuilder {
             int start = 0;
             for (int i = 1; i <= groups.length; i++) {
                 if (i == groups.length || groups[i] != groups[start]) {
-                    out.add(line.substring(start, i));
+                    String group = line.substring(start, i);
+                    if (group.indexOf(' ') >= 0) {
+                        for (String part : group.split("\\s+")) {
+                            if (!part.isEmpty()) out.add(part);
+                        }
+                    } else {
+                        out.add(group);
+                    }
                     start = i;
                 }
             }
         } else {
-            // ICU-style word breaks (JDK BreakIterator mirrors ICU for Latin scripts).
-            java.text.BreakIterator breaks = java.text.BreakIterator.getWordInstance(Locale.ROOT);
+            java.text.BreakIterator breaks = java.text.BreakIterator.getWordInstance(
+                    locale == null ? Locale.ROOT : locale);
             breaks.setText(line);
+            List<String> pieces = new ArrayList<>();
             int start = breaks.first();
             for (int end = breaks.next(); end != java.text.BreakIterator.DONE;
                  start = end, end = breaks.next()) {
-                if (end > start) {
-                    out.add(line.substring(start, end));
+                if (end <= start) {
+                    continue;
                 }
+                String piece = line.substring(start, end);
+                if (piece.codePoints().allMatch(Character::isWhitespace)) {
+                    continue;
+                }
+                int previous = pieces.size() - 1;
+                if (isApostrophe(piece) && previous >= 0 && end < line.length()) {
+                    pieces.set(previous, pieces.get(previous) + piece + line.substring(end, end + 1));
+                    end++;
+                } else if (piece.length() > 1 && isApostrophe(piece.substring(0, 1))
+                        && previous >= 0) {
+                    pieces.set(previous, pieces.get(previous) + piece);
+                } else {
+                    pieces.add(piece);
+                }
+            }
+            // ICU owns word boundaries. Only when it returns one unbroken run of an unspaced
+            // script do we fall back to character unigrams; otherwise its words are kept intact.
+            if (pieces.size() == 1
+                    && line.codePoints().noneMatch(Character::isWhitespace)
+                    && pieces.get(0).codePoints().anyMatch(ScriptDetector::isUnspacedCodePoint)) {
+                splitUnspaced(pieces.get(0), out);
+            } else {
+                out.addAll(pieces);
             }
         }
         return out.isEmpty() ? null : out;
     }
 
+    /** Last resort for an unspaced run that ICU could not break at all. */
+    private static void splitUnspaced(String piece, List<String> out) {
+        StringBuilder run = new StringBuilder();
+        for (int i = 0; i < piece.length(); ) {
+            int cp = piece.codePointAt(i);
+            int width = Character.charCount(cp);
+            if (ScriptDetector.isUnspacedCodePoint(cp)) {
+                if (run.length() > 0) {
+                    out.add(run.toString());
+                    run.setLength(0);
+                }
+                out.add(new String(Character.toChars(cp)));
+            } else if (Character.isLetterOrDigit(cp)) {
+                run.appendCodePoint(cp);
+            } else if (run.length() > 0) {
+                out.add(run.toString());
+                run.setLength(0);
+            }
+            i += width;
+        }
+        if (run.length() > 0) {
+            out.add(run.toString());
+        }
+    }
+
+    private static boolean isApostrophe(String piece) {
+        return "'".equals(piece) || "\u2019".equals(piece);
+    }
+
     public static List<WeightedWord> build(List<String> lines, int maxWords,
-                                           Collection<String> stopwords,
-                                           @Nullable Collection<String> banned) {
+                                            Collection<String> stopwords,
+                                            @Nullable Collection<String> banned) {
+        return build(lines, maxWords, stopwords, banned, (ProperNounFilter) null, null);
+    }
+
+    public static List<WeightedWord> build(List<String> lines, int maxWords,
+                                            Collection<String> stopwords,
+                                            @Nullable Collection<String> banned,
+                                            @Nullable Collection<String> properNouns,
+                                            @Nullable String language) {
+        ProperNounFilter filter = properNouns == null
+                ? null : new ProperNounFilter(properNouns, null);
+        return build(lines, maxWords, stopwords, banned, filter, language);
+    }
+
+    public static List<WeightedWord> build(List<String> lines, int maxWords,
+                                            Collection<String> stopwords,
+                                            @Nullable Collection<String> banned,
+                                            @Nullable ProperNounFilter filter,
+                                            @Nullable String language) {
         if (lines == null || lines.isEmpty() || maxWords <= 0) {
             return List.of();
         }
+        Locale locale = language == null || language.trim().isEmpty()
+                ? Locale.ROOT : Locale.forLanguageTag(language);
         Map<String, Integer> counts = new HashMap<>();
         for (String line : lines) {
-            List<String> tokens = tokenize(line);
+            List<String> tokens = tokenize(line, locale);
             if (tokens == null) continue;
-            for (String token : tokens) {
-                String cleaned = PUNCTUATION.matcher(token).replaceAll("")
-                        .toLowerCase(Locale.ROOT).trim();
-                if (cleaned.length() < 2 || WordCloudStopwords.isStopword(cleaned, stopwords)) {
+            String lower = line.toLowerCase(Locale.ROOT);
+            List<int[]> phraseRanges = phraseRanges(lower, filter);
+            int cursor = 0;
+            for (String raw : tokens) {
+                String cleaned = clean(raw);
+                int at = lower.indexOf(cleaned, cursor);
+                if (at < 0) at = cursor;
+                int tokenEnd = at + cleaned.length();
+                cursor = Math.max(cursor, tokenEnd);
+                if (cleaned.isEmpty() || tooShort(cleaned)
+                        || WordCloudStopwords.isStopword(cleaned, stopwords)) {
                     continue;
                 }
                 if (banned != null && banned.contains(cleaned)) {
                     continue;
+                }
+                if (filter != null) {
+                    if (filter.containsToken(cleaned) && excludedProper(cleaned, startsWithUpper(raw))) {
+                        continue;
+                    }
+                    if (insidePhrase(phraseRanges, at, tokenEnd)
+                            && phraseCapitalized(line, at, tokenEnd)) {
+                        continue;
+                    }
                 }
                 counts.merge(cleaned, 1, Integer::sum);
             }
@@ -118,6 +222,75 @@ public final class WordCloudBuilder {
             out.add(new WeightedWord(ranked.get(i).getKey(), weight));
         }
         return out;
+    }
+
+    @NonNull
+    private static List<int[]> phraseRanges(String lowerLine, @Nullable ProperNounFilter filter) {
+        if (filter == null) {
+            return List.of();
+        }
+        java.util.regex.Matcher words = Pattern.compile("[\\p{L}\\p{N}]+").matcher(lowerLine);
+        List<Integer> starts = new ArrayList<>();
+        List<Integer> ends = new ArrayList<>();
+        while (words.find()) {
+            starts.add(words.start());
+            ends.add(words.end());
+        }
+        List<int[]> ranges = new ArrayList<>();
+        for (int i = 0; i < starts.size(); i++) {
+            for (int len = 2; len <= 3 && i + len <= starts.size(); len++) {
+                StringBuilder phrase = new StringBuilder();
+                for (int j = i; j < i + len; j++) {
+                    if (j > i) phrase.append(' ');
+                    phrase.append(lowerLine, starts.get(j), ends.get(j));
+                }
+                if (filter.mightBePhrase(phrase.toString())) {
+                    ranges.add(new int[]{starts.get(i), ends.get(i + len - 1)});
+                }
+            }
+        }
+        return ranges;
+    }
+
+    private static boolean insidePhrase(List<int[]> ranges, int start, int end) {
+        for (int[] range : ranges) {
+            if (start < range[1] && end > range[0]) return true;
+        }
+        return false;
+    }
+
+    private static boolean phraseCapitalized(String original, int start, int end) {
+        boolean hasCase = false;
+        for (int i = start; i < end && i < original.length(); i++) {
+            char c = original.charAt(i);
+            if (Character.isUpperCase(c)) return true;
+            if (Character.isLowerCase(c)) hasCase = true;
+        }
+        return !hasCase && end - start >= 2;
+    }
+
+    @NonNull
+    private static String clean(String token) {
+        return PUNCTUATION.matcher(token).replaceAll("").toLowerCase(Locale.ROOT).trim();
+    }
+
+    private static boolean tooShort(String cleaned) {
+        if (cleaned.length() >= 2) return false;
+        return cleaned.codePoints().noneMatch(cp ->
+                ScriptDetector.isCjkCodePoint(cp) || ScriptDetector.isUnspacedCodePoint(cp));
+    }
+
+    private static boolean startsWithUpper(String token) {
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (Character.isLetter(c)) return Character.isUpperCase(c);
+        }
+        return false;
+    }
+
+    private static boolean excludedProper(String cleaned, boolean capitalized) {
+        boolean hasCase = !cleaned.equals(cleaned.toUpperCase(Locale.ROOT));
+        return hasCase ? capitalized : cleaned.length() >= 2;
     }
 
     /** Converts legacy dot-joined keyword caches back into weighted lines. */

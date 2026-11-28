@@ -25,6 +25,7 @@ import app.morphe.extension.shared.Utils;
 public final class LyricsDirectories {
 
     public static final String ROMAN_DICT = "romandict";
+    public static final String WORD_DICT = "worddict";
     public static final String OFFLINE = "offline";
     public static final String FONT = "font";
 

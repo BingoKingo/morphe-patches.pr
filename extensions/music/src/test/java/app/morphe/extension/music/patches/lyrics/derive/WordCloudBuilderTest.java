@@ -83,6 +83,83 @@ public class WordCloudBuilderTest {
     }
 
     @Test
+    public void properNounsOnlyDropCapitalizedCaseScriptNames() {
+        List<WeightedWord> words = WordCloudBuilder.build(
+                List.of("Love hope love HOPE"), 5, WordCloudStopwords.parse(""),
+                null, Set.of("hope"), "en");
+        WeightedWord love = words.stream().filter(w -> w.word().equals("love"))
+                .findFirst().orElseThrow();
+        WeightedWord hope = words.stream().filter(w -> w.word().equals("hope"))
+                .findFirst().orElseThrow();
+        assertEquals(5, love.weight());
+        assertEquals(1, hope.weight());
+    }
+
+    @Test
+    public void properNounPhrasesDropTheirTokens() {
+        ProperNounFilter filter = new ProperNounFilter(
+                Set.of("hong", "kong"), List.of("hong kong"));
+        List<WeightedWord> words = WordCloudBuilder.build(
+                List.of("Hong Kong dreams"), 5, Set.of(), null, filter, "en");
+        assertTrue(words.stream().noneMatch(w ->
+                w.word().equals("hong") || w.word().equals("kong")));
+        assertTrue(words.stream().anyMatch(w -> w.word().equals("dreams")));
+    }
+
+    @Test
+    public void lowercasePhraseIsNotTreatedAsProperNoun() {
+        ProperNounFilter filter = new ProperNounFilter(Set.of(), List.of("hong kong"));
+        List<WeightedWord> words = WordCloudBuilder.build(
+                List.of("hong kong is far"), 5, Set.of(), null, filter, "en");
+        assertTrue(words.stream().anyMatch(w -> w.word().equals("hong")));
+        assertTrue(words.stream().anyMatch(w -> w.word().equals("kong")));
+    }
+
+    @Test
+    public void contractionsStayOneToken() {
+        List<String> tokens = WordCloudBuilder.tokenize("don't stop", java.util.Locale.ENGLISH);
+        assertNotNull(tokens);
+        assertTrue(tokens.contains("don't"));
+        assertTrue(tokens.contains("stop"));
+    }
+
+    @Test
+    public void singleCjkCharacterIsKept() {
+        List<WeightedWord> words = WordCloudBuilder.build(
+                List.of("爱 爱 爱"), 5, WordCloudStopwords.parse(""), null,
+                Set.of(), "zh");
+        assertTrue(words.stream().anyMatch(w -> w.word().equals("爱")));
+    }
+
+    @Test
+    public void icuWordBoundariesAreKeptForUnspacedScripts() {
+        List<String> tokens = WordCloudBuilder.tokenize("กกก ขขข", java.util.Locale.ROOT);
+        assertNotNull(tokens);
+        assertTrue(tokens.contains("กกก"));
+        assertTrue(tokens.contains("ขขข"));
+        assertTrue(tokens.stream().noneMatch(t -> t.length() == 1));
+    }
+
+    @Test
+    public void singleUnspacedRunFallsBackToCharacters() {
+        List<String> tokens = WordCloudBuilder.tokenize("กกกกก", java.util.Locale.ROOT);
+        assertNotNull(tokens);
+        assertTrue(tokens.size() >= 2);
+        assertTrue(tokens.stream().allMatch(t -> t.length() == 1));
+    }
+
+    @Test
+    public void languageIsInferredFromScript() {
+        assertEquals("ja", WordCloudLanguage.detect(List.of("こんにちは世界")));
+        assertEquals("zh", WordCloudLanguage.detect(List.of("你好世界")));
+        assertEquals("ko", WordCloudLanguage.detect(List.of("안녕하세요 세계")));
+        assertEquals("th", WordCloudLanguage.detect(List.of("ฉันรักเธอ")));
+        assertEquals("lo", WordCloudLanguage.detect(List.of("ຂ້ອຍຮັກເຈົ້າ")));
+        assertEquals("km", WordCloudLanguage.detect(List.of("ខ្ញុំស្រឡាញ់អ្នក")));
+        assertEquals("my", WordCloudLanguage.detect(List.of("ကျွန်တော်ချစ်တယ်")));
+    }
+
+    @Test
     public void layoutStaysInBoundsAndShrinksLongWords() {
         List<WeightedWord> words = List.of(
                 new WeightedWord("supercalifragilistic", 5),

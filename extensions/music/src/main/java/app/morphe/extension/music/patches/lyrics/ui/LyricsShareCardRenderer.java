@@ -174,10 +174,19 @@ final class LyricsShareCardRenderer {
             @Nullable String bgBeforeText,
             @Nullable String bgAfterText,
             boolean isRightAligned,
-            boolean isRtl
+            boolean isRtl,
+            boolean isCentered
     ) {
+        ShareLineEntry(String originalText, @Nullable String romanizationText,
+                       @Nullable String translationText, @Nullable String bgBeforeText,
+                       @Nullable String bgAfterText, boolean isRightAligned, boolean isRtl) {
+            this(originalText, romanizationText, translationText, bgBeforeText, bgAfterText,
+                    isRightAligned, isRtl, false);
+        }
+
         static ShareLineEntry plain(String text) {
-            return new ShareLineEntry(text, null, null, null, null, false, ScriptDetector.isLineRtl(text));
+            return new ShareLineEntry(text, null, null, null, null, false,
+                    ScriptDetector.isLineRtl(text), false);
         }
 
         boolean hasBgVocals() {
@@ -351,7 +360,7 @@ final class LyricsShareCardRenderer {
         float bandGap = (keywordLines > 0 || safeSourceLines > 0) ? BAND_FOOTER_GAP : 0f;
         float brandSave = (hasFooter || keywordLines > 0 || safeSourceLines > 0 || showWordCloud)
                 ? 0f : 22f;
-        float cardH = 310f + baseExtra + layerExtra + keywordExtra + sourceExtra + bandGap
+        float cardH = 310f + baseExtra + layerExtra + keywordExtra + sourceExtra
                 + dateExtra - brandSave;
         float padding = 24f;
         float artworkSize = 48f;
@@ -994,17 +1003,8 @@ final class LyricsShareCardRenderer {
                 sb.append(' ');
             }
 
-            Layout.Alignment align;
-            if (options.forceCenter()) {
-                align = Layout.Alignment.ALIGN_CENTER;
-            } else {
-                boolean right = i < entryRightAligned.length && entryRightAligned[i];
-                if (right) {
-                    align = e.isRtl() ? Layout.Alignment.ALIGN_NORMAL : Layout.Alignment.ALIGN_OPPOSITE;
-                } else {
-                    align = e.isRtl() ? Layout.Alignment.ALIGN_OPPOSITE : Layout.Alignment.ALIGN_NORMAL;
-                }
-            }
+            Layout.Alignment align = entryAlignment(e, options.forceCenter(),
+                    i < entryRightAligned.length && entryRightAligned[i]);
 
             StaticLayout sl = StaticLayout.Builder.obtain(sb, 0, sb.length(), paint, widthPx)
                     .setAlignment(align)
@@ -1014,6 +1014,18 @@ final class LyricsShareCardRenderer {
             layouts.add(sl);
         }
         return layouts;
+    }
+
+    /** Centers v1000/v2000 agent lines even when the panel's global alignment is not centered. */
+    static Layout.Alignment entryAlignment(ShareLineEntry entry, boolean forceCenter,
+                                           boolean rightAligned) {
+        if (forceCenter || entry.isCentered()) {
+            return Layout.Alignment.ALIGN_CENTER;
+        }
+        if (rightAligned) {
+            return entry.isRtl() ? Layout.Alignment.ALIGN_NORMAL : Layout.Alignment.ALIGN_OPPOSITE;
+        }
+        return entry.isRtl() ? Layout.Alignment.ALIGN_OPPOSITE : Layout.Alignment.ALIGN_NORMAL;
     }
 
     private static void appendStyledSubLine(

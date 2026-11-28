@@ -18,6 +18,8 @@ import app.morphe.extension.music.patches.lyrics.romanizers.JapaneseDictionarySt
 import app.morphe.extension.music.patches.lyrics.romanizers.JiebaSegmentStore;
 import app.morphe.extension.music.patches.lyrics.romanizers.KuromojiDictStore;
 import app.morphe.extension.music.patches.lyrics.romanizers.PinyinDictionaryStore;
+import app.morphe.extension.music.patches.lyrics.romanizers.ProperNounStore;
+import app.morphe.extension.music.patches.lyrics.romanizers.StopwordsIsoStore;
 import app.morphe.extension.music.patches.lyrics.romanizers.RomanizationDictionary;
 import app.morphe.extension.music.patches.lyrics.romanizers.UniDictionaryStore;
 import app.morphe.extension.music.settings.Settings;
@@ -39,13 +41,15 @@ public final class LyricsLocalRomanizationDownloads {
     public static final int CLDR = 3;
     public static final int KUROMOJI = 4;
     public static final int JIEBA = 5;
+    public static final int STOPWORDS_ISO = 6;
+    public static final int PROPER_NOUNS = 7;
     /** Receives progress text while a dialog is open; a closed dialog sees no further updates. */
     public interface ProgressSink {
         void onHint(CharSequence hint);
     }
 
     private static final Progress[] progress = {new Progress(), new Progress(), new Progress(),
-            new Progress(), new Progress(), new Progress()};
+            new Progress(), new Progress(), new Progress(), new Progress(), new Progress()};
 
     private static boolean started;
     private static boolean failed;
@@ -76,7 +80,7 @@ public final class LyricsLocalRomanizationDownloads {
     public static boolean[] chosen() {
         final String stored = Settings.LYRICS_LOCAL_DICTIONARIES.get();
         if (!stored.isBlank()) {
-            final boolean[] picked = new boolean[6];
+            final boolean[] picked = new boolean[8];
             for (String token : stored.split(",")) {
                 switch (token.trim().toLowerCase(Locale.ROOT)) {
                     case "kuromoji" -> picked[KUROMOJI] = true;
@@ -85,6 +89,8 @@ public final class LyricsLocalRomanizationDownloads {
                     case "pinyin" -> picked[PINYIN] = true;
                     case "cldr" -> picked[CLDR] = true;
                     case "jieba" -> picked[JIEBA] = true;
+                    case "stopwords_iso" -> picked[STOPWORDS_ISO] = true;
+                    case "proper_nouns" -> picked[PROPER_NOUNS] = true;
                     // A dev build stored the languages this provider split covers. The Cantonese
                     // word table became the Rime Wordlist provider, which fetches the character
                     // tables it needs itself, so "yue" is no longer a choice here either.
@@ -99,7 +105,7 @@ public final class LyricsLocalRomanizationDownloads {
             }
             return picked;
         }
-        return new boolean[6];
+        return new boolean[8];
     }
 
     /** A copy that never chose gets an empty checklist rather than one inferred for it. */
@@ -110,7 +116,8 @@ public final class LyricsLocalRomanizationDownloads {
 
     /** Stores the choice, deletes what was turned off, and keeps word tables with their readers. */
     static void saveChoice(boolean kuromoji, boolean sudachi, boolean unidict,
-                           boolean pinyin, boolean cldr, boolean jieba) {
+                           boolean pinyin, boolean cldr, boolean jieba,
+                           boolean stopwordsIso, boolean properNouns) {
         if (jieba) {
             pinyin = true;
         }
@@ -135,6 +142,12 @@ public final class LyricsLocalRomanizationDownloads {
         }
         if (!jieba && before[JIEBA]) {
             JiebaSegmentStore.delete();
+        }
+        if (!stopwordsIso && before[STOPWORDS_ISO]) {
+            StopwordsIsoStore.delete();
+        }
+        if (!properNouns && before[PROPER_NOUNS]) {
+            ProperNounStore.delete();
         }
         if (kuromoji && !sudachi) {
             Settings.LYRICS_JAPANESE_DICT_ENGINE.save("kuromoji");
@@ -165,6 +178,14 @@ public final class LyricsLocalRomanizationDownloads {
             if (Utils.isNotEmpty(value)) value.append(',');
             value.append("jieba");
         }
+        if (stopwordsIso) {
+            if (Utils.isNotEmpty(value)) value.append(',');
+            value.append("stopwords_iso");
+        }
+        if (properNouns) {
+            if (Utils.isNotEmpty(value)) value.append(',');
+            value.append("proper_nouns");
+        }
         // Kept distinct from blank, which is a copy that never chose.
         Settings.LYRICS_LOCAL_DICTIONARIES.save(Utils.isEmpty(value) ? NONE : value.toString());
     }
@@ -178,9 +199,11 @@ public final class LyricsLocalRomanizationDownloads {
         final boolean needsPinyin = picked[PINYIN];
         final boolean needsCldr = picked[CLDR];
         final boolean needsJieba = picked[JIEBA];
+        final boolean needsStopwordsIso = picked[STOPWORDS_ISO];
+        final boolean needsProperNouns = picked[PROPER_NOUNS];
 
         if (!needsKuromoji && !needsSudachi && !needsUniDict && !needsPinyin && !needsCldr
-                && !needsJieba) {
+                && !needsJieba && !needsStopwordsIso && !needsProperNouns) {
             return;
         }
         if (!started) {
@@ -189,10 +212,13 @@ public final class LyricsLocalRomanizationDownloads {
                     && (!needsUniDict || UniDictionaryStore.isReady())
                     && (!needsPinyin || PinyinDictionaryStore.isComplete())
                     && (!needsCldr || CldrTransformsStore.isReady())
-                    && (!needsJieba || JiebaSegmentStore.isReady())) {
+                    && (!needsJieba || JiebaSegmentStore.isReady())
+                    && (!needsStopwordsIso || StopwordsIsoStore.isReady())
+                    && (!needsProperNouns || ProperNounStore.isReady())) {
                 return;
             }
-            start(needsKuromoji, needsSudachi, needsUniDict, needsPinyin, needsCldr, needsJieba);
+            start(needsKuromoji, needsSudachi, needsUniDict, needsPinyin, needsCldr, needsJieba,
+                    needsStopwordsIso, needsProperNouns);
             return;
         }
         // Reattach in case runtime setup replaced the settings listeners.
@@ -214,6 +240,8 @@ public final class LyricsLocalRomanizationDownloads {
         if (needsCldr) {
             CldrTransformsStore.ensure(listener(CLDR));
         }
+        if (needsStopwordsIso) StopwordsIsoStore.ensure(listener(STOPWORDS_ISO));
+        if (needsProperNouns) ProperNounStore.ensure(listener(PROPER_NOUNS));
     }
 
     /**
@@ -231,6 +259,8 @@ public final class LyricsLocalRomanizationDownloads {
         progress[CLDR] = new Progress();
         progress[KUROMOJI] = new Progress();
         progress[JIEBA] = new Progress();
+        progress[STOPWORDS_ISO] = new Progress();
+        progress[PROPER_NOUNS] = new Progress();
     }
 
     /** Whether every provider the choice needs is ready. */
@@ -251,7 +281,9 @@ public final class LyricsLocalRomanizationDownloads {
         if (picked[JIEBA] && !JiebaSegmentStore.isReady()) {
             return false;
         }
-        return !picked[CLDR] || CldrTransformsStore.isReady();
+        if (picked[STOPWORDS_ISO] && !StopwordsIsoStore.isReady()) return false;
+        return (!picked[CLDR] || CldrTransformsStore.isReady())
+                && (!picked[PROPER_NOUNS] || ProperNounStore.isReady());
     }
 
     /** Whether a fetch the user asked for is running and not finished yet. */
@@ -293,7 +325,8 @@ public final class LyricsLocalRomanizationDownloads {
     }
 
     private static void start(boolean kuromoji, boolean sudachi, boolean unidict,
-                              boolean pinyin, boolean cldr, boolean jieba) {
+                              boolean pinyin, boolean cldr, boolean jieba,
+                              boolean stopwordsIso, boolean properNouns) {
         started = true;
         if (!startAnnounced) {
             startAnnounced = true;
@@ -329,6 +362,16 @@ public final class LyricsLocalRomanizationDownloads {
             JiebaSegmentStore.ensure(listener(JIEBA));
         } else {
             progress[JIEBA].done = true;
+        }
+        if (stopwordsIso) {
+            StopwordsIsoStore.ensure(listener(STOPWORDS_ISO));
+        } else {
+            progress[STOPWORDS_ISO].done = true;
+        }
+        if (properNouns) {
+            ProperNounStore.ensure(listener(PROPER_NOUNS));
+        } else {
+            progress[PROPER_NOUNS].done = true;
         }
     }
 
@@ -388,13 +431,13 @@ public final class LyricsLocalRomanizationDownloads {
                     str("morphe_music_lyrics_local_romanization_dict_failed")));
             return;
         }
-        if (!progress[KUROMOJI].done || !progress[SUDACHI].done || !progress[UNIDICT].done
-                || !progress[PINYIN].done || !progress[CLDR].done) {
-            return;
+        for (Progress slot : progress) {
+            if (!slot.done) return;
         }
         announced = true;
-        final int total = progress[KUROMOJI].entries + progress[SUDACHI].entries
-                + progress[UNIDICT].entries + progress[PINYIN].entries + progress[CLDR].entries;
+        int count = 0;
+        for (Progress slot : progress) count += slot.entries;
+        final int total = count;
         Utils.runOnMainThread(() -> Utils.showToastShort(
                 str("morphe_music_lyrics_local_romanization_dict_ready", total)));
     }

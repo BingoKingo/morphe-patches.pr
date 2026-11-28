@@ -346,6 +346,14 @@ val lyricsPatch = patch(
                         dependency = "morphe_music_lyrics_enabled"
                     ),
                     NonInteractivePreference(
+                        key = "morphe_music_lyrics_word_cloud_proper_nouns",
+                        titleKey = "morphe_music_lyrics_word_cloud_proper_nouns_title",
+                        summaryKey = "morphe_music_lyrics_word_cloud_proper_nouns_summary",
+                        tag = "app.morphe.extension.music.settings.preference.LyricsWordCloudProperNounsPreference",
+                        selectable = true,
+                        dependency = "morphe_music_lyrics_enabled"
+                    ),
+                    NonInteractivePreference(
                         key = "morphe_music_lyrics_cover_style_params",
                         titleKey = "morphe_music_lyrics_cover_style_params_title",
                         summaryKey = "morphe_music_lyrics_cover_style_params_summary",
@@ -353,14 +361,6 @@ val lyricsPatch = patch(
                         selectable = true,
                         dependency = "morphe_music_lyrics_enabled"
                     ),
-                    NonInteractivePreference(
-                        key = "morphe_music_lyrics_tuning_params",
-                        titleKey = "morphe_music_lyrics_tuning_params_title",
-                        summaryKey = "morphe_music_lyrics_tuning_params_summary",
-                        tag = "app.morphe.extension.music.settings.preference.LyricsTuningParamsPreference",
-                        selectable = true,
-                        dependency = "morphe_music_lyrics_enabled"
-                    )
                 )
             ),
             screenInfoPreferenceCategory(

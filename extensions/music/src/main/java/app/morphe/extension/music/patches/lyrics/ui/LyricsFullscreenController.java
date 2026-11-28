@@ -163,7 +163,6 @@ final class LyricsFullscreenController {
         artworkView = new ImageView(context);
         artworkView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         artworkView.setOutlineProvider(artOutline);
-        artworkView.setClipToOutline(true);
         artworkView.setVisibility(View.GONE);
 
         titleView = createMarqueeText(context, 18f, Typeface.BOLD, 0xFFFFFFFF);
@@ -678,7 +677,7 @@ final class LyricsFullscreenController {
                 coverStack.setGravity(Gravity.CENTER_HORIZONTAL);
                 FrameLayout coverFrame = new FrameLayout(panel.getContext());
                 coverFrame.setOutlineProvider(artOutline);
-                coverFrame.setClipToOutline(false);
+                coverFrame.setClipToOutline(true);
                 coverFrame.setElevation(Dim.dp(6));
                 coverFrame.addView(artworkView, new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -857,11 +856,13 @@ final class LyricsFullscreenController {
         drawable.setBackground(LyricsPaletteCache.albumPalette().backgroundColor());
         drawable.setArtwork(shownArtwork != null && !shownArtwork.isRecycled() ? shownArtwork : null);
         coverStyleDrawable = drawable;
-        boolean clipToOutline = !config.style().equals("polaroid");
-        artworkView.setClipToOutline(clipToOutline);
         artworkView.setImageDrawable(drawable);
         stopCoverStyleAnimator();
-        if (drawable.spins() && animatedArtworkView == null) {
+        boolean plainStyle = CoverStyleConfig.DEFAULT_STYLE.equals(Settings.LYRICS_COVER_STYLE.get());
+        if (plainStyle != (animatedArtworkView != null)) {
+            bindArtworkOverlay();
+        }
+        if (drawable.spins()) {
             startCoverStyleAnimator(drawable.spinDurationMs());
         }
         applyCoverInfoStyle(config);
@@ -883,6 +884,7 @@ final class LyricsFullscreenController {
             coverFrame.setElevation(Dim.dp(config.shadowDp()));
             coverFrame.invalidateOutline();
         }
+        artworkView.invalidateOutline();
         if (animatedArtworkView != null) {
             animatedArtworkView.invalidateOutline();
         }
@@ -958,18 +960,20 @@ final class LyricsFullscreenController {
         if (artworkView.getParent() == null) {
             return;
         }
+        // Animated artwork is only shown with the plain style; every preset draws its own frame
+        // from a static bitmap so the video surface cannot cover it.
+        if (!CoverStyleConfig.DEFAULT_STYLE.equals(Settings.LYRICS_COVER_STYLE.get())) {
+            startCoverAnimator();
+            return;
+        }
         animatedArtworkView = AppleMusicArtworkPatch.attachAnimatedArtwork(artworkView);
         if (animatedArtworkView != null) {
             animatedArtworkView.setOutlineProvider(artOutline);
             animatedArtworkView.setClipToOutline(true);
             animatedArtworkView.setOnTouchListener(coverTouchListener);
-            stopCoverStyleAnimator();
             updateArtworkSize();
         } else {
             startCoverAnimator();
-            if (coverStyleDrawable != null && coverStyleDrawable.spins()) {
-                startCoverStyleAnimator(coverStyleDrawable.spinDurationMs());
-            }
         }
     }
 

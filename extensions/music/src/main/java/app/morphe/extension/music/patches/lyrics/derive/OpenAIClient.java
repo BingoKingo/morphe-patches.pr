@@ -116,18 +116,18 @@ public final class OpenAIClient {
             You are a senior music editor and critic. Using the [METADATA], [EXTERNAL REFERENCES]
             (possibly empty) and [FULL LYRICS] below, write a concise single-song story card for a
              listener. Write everything in {language}. All three long fields ("lyric_story",
-             "background" and "key_metaphor") must be complete passages of at most 120 words.
+             "background" and "key_metaphor") must be complete passages of at most 80 words.
 
 
             STRICT RULES:
             1. Separate facts from interpretation. Only put creation background, real events or
                sampling sources into "background" when [EXTERNAL REFERENCES] explicitly state them.
                If references are empty or say nothing usable, "background" MUST be null. Never
-               invent the artist's motives or gossip. Keep it one complete passage of at most 120
+               invent the artist's motives or gossip. Keep it one complete passage of at most 80
                words; never cut it short or append an ellipsis.
             2. "lyric_story": using the lyrics together with the references, write ONE complete,
                self-contained narrative of what the song tells and what it feels like, in at most
-               120 words. Never cut a sentence short or append an ellipsis.
+               80 words. Never cut a sentence short or append an ellipsis.
             3. "key_metaphor": point out one or two core metaphors, double meanings or cultural
                references in one complete passage of at most 120 words, or null when there is none.
                Never cut it short or append an ellipsis.

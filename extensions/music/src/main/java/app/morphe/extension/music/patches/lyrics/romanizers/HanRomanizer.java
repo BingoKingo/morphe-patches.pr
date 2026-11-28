@@ -21,10 +21,15 @@ final class HanRomanizer {
 
     /** The readings with a space between them. */
     static String romanize(String line, Readings readings) {
+        return romanize(line, line, readings);
+    }
+
+    /** {@code lookup} is the same length as {@code line}, used as the word-table key. */
+    static String romanize(String line, String lookup, Readings readings) {
         StringBuilder out = new StringBuilder(line.length() * 3);
         int i = 0;
         while (i < line.length()) {
-            int length = appendLongestWord(line, i, readings, out);
+            int length = appendLongestWord(lookup, i, readings, out);
             if (length > 0) {
                 i += length;
                 continue;

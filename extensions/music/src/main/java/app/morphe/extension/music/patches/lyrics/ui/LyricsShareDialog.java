@@ -64,7 +64,10 @@ import app.morphe.extension.music.patches.lyrics.derive.OpenAIClient;
 import app.morphe.extension.music.patches.lyrics.derive.StoryAiResult;
 import app.morphe.extension.music.patches.lyrics.derive.WeightedWord;
 import app.morphe.extension.music.patches.lyrics.derive.WordCloudBuilder;
+import app.morphe.extension.music.patches.lyrics.derive.ProperNounFilter;
+import app.morphe.extension.music.patches.lyrics.derive.WordCloudLanguage;
 import app.morphe.extension.music.patches.lyrics.derive.WordCloudStopwords;
+import app.morphe.extension.music.patches.lyrics.romanizers.StopwordsIsoStore;
 import app.morphe.extension.music.patches.lyrics.model.TrackInfo;
 import app.morphe.extension.music.patches.lyrics.requests.LyricsRequests;
 import app.morphe.extension.music.patches.lyrics.requests.StoryFactFetcher;
@@ -916,8 +919,17 @@ final class LyricsShareDialog {
             Utils.runOnBackgroundThread(() -> {
                 List<WeightedWord> weightedResult = null;
                 try {
+                    String cloudLanguage = WordCloudLanguage.detect(allLyricLines);
                     java.util.Set<String> stopwords = WordCloudStopwords.parse(
                             Settings.LYRICS_WORD_CLOUD_STOPWORDS.get());
+                    if (StopwordsIsoStore.isReady()) {
+                        stopwords = new java.util.HashSet<>(stopwords);
+                        stopwords.addAll(StopwordsIsoStore.forLanguage(cloudLanguage));
+                    }
+                    java.util.Set<String> customProperNouns = WordCloudStopwords.parse(
+                            Settings.LYRICS_WORD_CLOUD_PROPER_NOUNS.get());
+                    ProperNounFilter properNouns =
+                            ProperNounFilter.from(cloudLanguage, customProperNouns);
                     java.util.Collection<String> banned = null;
                     if (guessMode[0]) {
                         String title = track != null ? track.title() : (rawTitle != null ? rawTitle : "");
@@ -928,7 +940,7 @@ final class LyricsShareDialog {
                         banned = set;
                     }
                     weightedResult = WordCloudBuilder.build(
-                            allLyricLines, 18, stopwords, banned);
+                            allLyricLines, 18, stopwords, banned, properNouns, cloudLanguage);
                 } catch (Throwable ex) {
                     Logger.printException(() -> "Failed to build share-card word cloud", ex);
                 }
