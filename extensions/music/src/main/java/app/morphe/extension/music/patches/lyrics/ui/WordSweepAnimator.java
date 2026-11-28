@@ -1345,9 +1345,8 @@ public final class WordSweepAnimator {
         AlignedSyllable activeS = alignedSyllables.get(activeSylIdx);
         long ssMs = (long) (activeS.syllable().startTime() * 1000.0);
         long seMs = (long) (activeS.syllable().endTime() * 1000.0);
-        long dur = Math.max(1L, seMs - ssMs);
-        long elapsed = Math.max(0L, Math.min(dur, currentPosition - ssMs));
-        return (float) elapsed / (float) dur;
+        return WordAnimationUtils.highlightFraction(ssMs, seMs, currentPosition,
+                Settings.wordHighlightMode());
     }
 
     private float updateGlobalX(
@@ -1392,8 +1391,8 @@ public final class WordSweepAnimator {
                             : sgEnd;
                     gx = Math.max(gx, completedX);
                 } else if (currentPosition > ssMs) {
-                    long dur = Math.max(1L, seMs - ssMs);
-                    float progress = Math.max(0f, Math.min(1f, (float) (currentPosition - ssMs) / (float) dur));
+                    float progress = WordAnimationUtils.highlightFraction(
+                            ssMs, seMs, currentPosition, Settings.wordHighlightMode());
                     gx = Math.max(gx, sgStart + (sgEnd - sgStart) * progress);
                 } else {
                     gx = Math.max(gx, sgStart);

@@ -47,6 +47,22 @@ public final class WordAnimationUtils {
     private WordAnimationUtils() {
     }
 
+    /** The fraction of a word that is lit at time {@code nowMs}, under the current highlight style. */
+    public static float highlightFraction(long startMs, long endMs, long nowMs,
+                                          Settings.WordHighlightMode mode) {
+        if (nowMs <= startMs) return 0f;
+        if (nowMs >= endMs) return 1f;
+        long dur = Math.max(1L, endMs - startMs);
+        return switch (mode) {
+            // Smooth and sharp sweep continuously; the difference is the gradient band, handled
+            // by the caller (isWordAnimSmooth).
+            case SMOOTH, SHARP -> (float) (nowMs - startMs) / dur;
+            // Character and karaoke light the whole word as soon as it starts, so every word
+            // steps on together with its neighbours instead of sweeping inside the word.
+            case CHARACTER, KARAOKE -> 1f;
+        };
+    }
+
     public static final int WIPE_PAST = 0;
     public static final int WIPE_UNLIT = 1;
     public static final int WIPE_BAND = 2;
@@ -2573,8 +2589,7 @@ public final class WordAnimationUtils {
                 if (endX > gx) gx = endX;
                 if (i == m - 1) brushProgress = 1f;
             } else if (currentPosMs >= ss) {
-                long dur = Math.max(1L, se - ss);
-                float prog = Math.max(0f, Math.min(1f, (float) (currentPosMs - ss) / (float) dur));
+                float prog = highlightFraction(ss, se, currentPosMs, Settings.wordHighlightMode());
                 float pos = segStartX[i] + (segEndX[i] - segStartX[i]) * prog;
                 if (pos > gx) gx = pos;
                 if (i == m - 1) brushProgress = Math.max(brushProgress, prog);

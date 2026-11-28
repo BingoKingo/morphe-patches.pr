@@ -2227,15 +2227,11 @@ final class LyricsLineView extends TextView {
                 if (!secondaryLine[lineNum]) {
                     wordOnMainRun = true;
                 }
-                float progress;
-                if (allSung || currentPos >= timing.endMs()) {
-                    progress = 1f;
-                } else if (currentPos <= timing.startMs()) {
-                    progress = 0f;
-                } else {
-                    progress = (float) (currentPos - timing.startMs())
-                            / (float) (timing.endMs() - timing.startMs());
-                }
+                float progress = allSung
+                        ? 1f
+                        : WordAnimationUtils.highlightFraction(
+                                timing.startMs(), timing.endMs(), currentPos,
+                                Settings.wordHighlightMode());
                 // A word still to come counts as unsung, so this has to sit ahead of the continue
                 // below or the line looks finished from its first word.
                 allWordsDone = allWordsDone && progress >= 1f;
@@ -3388,14 +3384,8 @@ final class LyricsLineView extends TextView {
             if (ls < 0 || ls >= rLen || ls >= le) {
                 continue;
             }
-            float prog;
-            if (currentPos >= wt.endMs()) {
-                prog = 1f;
-            } else if (currentPos <= wt.startMs()) {
-                prog = 0f;
-            } else {
-                prog = (float) (currentPos - wt.startMs()) / (float) Math.max(1L, wt.endMs() - wt.startMs());
-            }
+            float prog = WordAnimationUtils.highlightFraction(
+                    wt.startMs(), wt.endMs(), currentPos, Settings.wordHighlightMode());
             if (prog <= 0f) {
                 continue;
             }
